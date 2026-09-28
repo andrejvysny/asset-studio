@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Drive a Line A job through the ComfyUI API (v1 API): enhance -> generate+QA -> select -> 3D.
+"""Drive Line A jobs through the ComfyUI API (the v1 API). Each human decision is a separate command:
 
-Selection stays manual: without --select the script stops after QA and prints the command to continue.
-  ./scripts/run_job.py new "wooden medieval barrel" --asset-type small_prop --triangles 500
-  ./scripts/run_job.py select <job_id> 2
+  python3 scripts/run_job.py new "wooden medieval barrel" --asset-type small_prop --triangles 500
+      -> job created + prompt enhanced; stops at prompt_enhanced (no images)
+  python3 scripts/run_job.py confirm <job_id> [--edited-file desc.txt] [--speed lightning_8step]
+      -> same job: effective prompt = description + model-sheet template; 4 candidates + QA
+  python3 scripts/run_job.py approve <job_id> <index>
+      -> binds approval to the reviewed candidate set + image sha256, then runs cut-out + TRELLIS
+  python3 scripts/run_job.py reexport <job_id> <from_attempt> [--remesh] [--drop-floaters]
 """
 from __future__ import annotations
 
@@ -27,7 +31,7 @@ class Comfy:
         self.url = url.rstrip("/")
         self.client_id = uuid.uuid4().hex
 
-    def _req(self, method: str, path: str, body: Any = None) -> Any:
+    def req(self, method: str, path: str, body: Any = None) -> Any:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(self.url + path, data=data, method=method, headers={"Content-Type": "application/json"})
         try:
@@ -37,22 +41,21 @@ class Comfy:
             sys.exit(f"HTTP {e.code} {path}: {e.read().decode()[:3000]}")
 
     def run(self, workflow: dict, timeout_s: float = 3600) -> dict:
-        pid = self._req("POST", "/prompt", {"prompt": workflow, "client_id": self.client_id})["prompt_id"]
+        pid = self.req("POST", "/prompt", {"prompt": workflow, "client_id": self.client_id})["prompt_id"]
         t0 = time.monotonic()
         while time.monotonic() - t0 < timeout_s:
-            hist = self._req("GET", f"/history/{pid}").get(pid)
+            hist = self.req("GET", f"/history/{pid}").get(pid)
             status = (hist or {}).get("status", {})
             if status.get("status_str") == "error":
                 msgs = [m for m in status.get("messages", []) if m[0] == "execution_error"]
-                detail = msgs[0][1] if msgs else status
-                sys.exit(f"workflow failed: {json.dumps(detail, indent=2)[:4000]}")
+                sys.exit(f"workflow failed: {json.dumps(msgs[0][1] if msgs else status, indent=2)[:4000]}")
             if status.get("completed"):
                 return hist["outputs"]
             time.sleep(2)
         sys.exit(f"timeout waiting for {pid}")
 
     def job(self, job_id: str) -> dict:
-        return self._req("GET", f"/line_a/jobs/{job_id}")
+        return self.req("GET", f"/line_a/jobs/{job_id}")
 
 
 def load_wf(name: str, **by_title: dict[str, Any]) -> dict:
@@ -63,36 +66,64 @@ def load_wf(name: str, **by_title: dict[str, Any]) -> dict:
     return wf
 
 
+def node_output(outputs: dict, wf: dict, title: str, key: str = "text") -> list:
+    node_id = next(k for k, v in wf.items() if v["_meta"]["title"] == title)
+    return outputs.get(node_id, {}).get(key, [])
+
+
 def cmd_new(c: Comfy, a: argparse.Namespace) -> None:
-    final = Path(a.final_prompt_file).read_text() if a.final_prompt_file else ""
-    wf = load_wf("line_a_new_asset",
-                 create_job={"prompt": a.prompt, "asset_type": a.asset_type, "target_triangles": a.triangles,
-                             "candidate_count": a.count, "seed_family": a.seed, "lora_name": a.lora or "none",
-                             "lora_strength": a.lora_strength},
-                 confirm_prompt={"final_prompt": final},
-                 generate={"speed_preset": a.speed})
-    t0 = time.monotonic()
+    wf = load_wf("line_a_enhance", create_job={
+        "prompt": a.prompt, "asset_type": a.asset_type, "target_triangles": a.triangles, "candidate_count": a.count,
+        "seed_family": a.seed, "lora_name": a.lora or "none", "lora_strength": a.lora_strength})
     out = c.run(wf)
-    # gallery node (12) outputs images under line_a/<job_id>/
-    job_id = out["12"]["images"][0]["subfolder"].split("/", 1)[1]
-    job = c.job(job_id)
-    print(f"job: {job_id} ({time.monotonic() - t0:.0f}s)")
-    for name, info in (job["qa"] or {}).get("candidates", {}).items():
-        print(f"  {name}: {info['status']}  {'; '.join(info['reasons'][:2])}")
-    if a.select is None:
-        print(f"Review in ComfyUI ('Line A - 2 Review & Approve') or:\n  ./scripts/run_job.py select {job_id} <index>")
-        return
-    cmd_select(c, argparse.Namespace(job_id=job_id, index=a.select, seed=42, pipeline_type=a.pipeline_type))
+    job_id = node_output(out, wf, "create_job")[0]
+    print(f"job: {job_id}\nenhanced description:\n  {node_output(out, wf, 'enhance')[0]}\n")
+    print(f"edit it into a file if you like, then:\n  python3 scripts/run_job.py confirm {job_id} [--edited-file f.txt]")
 
 
-def cmd_select(c: Comfy, a: argparse.Namespace) -> None:
+def cmd_confirm(c: Comfy, a: argparse.Namespace) -> None:
+    edited = Path(a.edited_file).read_text() if a.edited_file else ""
     t0 = time.monotonic()
-    c.run(load_wf("line_a_review_approve", gallery={"job_id": a.job_id},
-                  approve={"approve_candidate": f"{a.index:02d}"},
-                  trellis={"model_seed": a.seed, "pipeline_type": a.pipeline_type}))
+    c.run(load_wf("line_a_generate", confirm_prompt={"job_id": a.job_id, "edited_description": edited},
+                  generate={"speed_preset": a.speed}))
     job = c.job(a.job_id)
-    print(f"3D ({time.monotonic() - t0:.0f}s) state: {job['state']}")
-    print(f"mesh: {json.dumps(job['manifest'].get('mesh'), indent=2)}")
+    print(f"candidates + QA ({time.monotonic() - t0:.0f}s), set {job['candidate_set']['set_id']}:")
+    for name, qa in job["qa"].items():
+        cov = qa["coverage"]
+        print(f"  {name}: {qa['status']} ({cov['ran']}/{cov['total']})  {'; '.join(qa['reasons'][:2])}")
+    print(f"review the images in output/{a.job_id}/candidates, then:\n  python3 scripts/run_job.py approve {a.job_id} <index>")
+
+
+def cmd_approve(c: Comfy, a: argparse.Namespace) -> None:
+    job = c.job(a.job_id)
+    cset = job["candidate_set"]
+    name = f"{a.index:02d}"
+    res = c.req("POST", f"/line_a/jobs/{a.job_id}/approve",
+                {"set_id": cset["set_id"], "index": a.index, "image_sha256": cset["images"][name], "override": a.override})
+    attempt = res["attempt"]
+    print(f"approved {name} -> {attempt['id']} ({'new' if res['created'] else 'existing'} attempt)")
+    t0 = time.monotonic()
+    c.run(load_wf("line_a_3d", cutout={"job_id": a.job_id, "attempt_id": attempt["id"]},
+                  trellis={"model_seed": a.seed, "pipeline_type": a.pipeline_type}))
+    _print_attempt(c, a.job_id, attempt["id"], time.monotonic() - t0)
+
+
+def cmd_reexport(c: Comfy, a: argparse.Namespace) -> None:
+    wf = load_wf("line_a_reexport", reexport={"job_id": a.job_id, "from_attempt": a.from_attempt,
+                                              "remesh": a.remesh, "drop_floaters": a.drop_floaters})
+    t0 = time.monotonic()
+    c.run(wf)
+    _print_attempt(c, a.job_id, c.job(a.job_id)["current_attempt"], time.monotonic() - t0)
+
+
+def _print_attempt(c: Comfy, job_id: str, attempt_id: str, secs: float) -> None:
+    job = c.job(job_id)
+    att = next(x for x in job["attempts"] if x["id"] == attempt_id)
+    print(f"{attempt_id}: {att['state']} ({secs:.0f}s) validated={att.get('validated')}")
+    if att.get("mesh"):
+        print(f"  triangles {att['mesh']['triangles']}  {att.get('triangles')}")
+    if att.get("error"):
+        print(f"  error: {att['error'][:500]}")
 
 
 def main() -> None:
@@ -107,18 +138,23 @@ def main() -> None:
     n.add_argument("--seed", type=int, default=0)
     n.add_argument("--lora", default=None)
     n.add_argument("--lora-strength", type=float, default=0.8)
-    n.add_argument("--speed", default="quality", choices=["quality", "lightning_8step", "lightning_4step"])
-    n.add_argument("--final-prompt-file", help="edited prompt; default = enhanced as-is")
-    n.add_argument("--select", type=int, help="candidate index to continue with (skips manual pause)")
-    n.add_argument("--pipeline-type", default="1024_cascade")
-    s = sub.add_parser("select")
-    s.add_argument("job_id")
-    s.add_argument("index", type=int)
-    s.add_argument("--seed", type=int, default=42)
-    s.add_argument("--pipeline-type", default="1024_cascade")
+    c = sub.add_parser("confirm")
+    c.add_argument("job_id")
+    c.add_argument("--edited-file", help="edited description; default = enhanced as-is")
+    c.add_argument("--speed", default="quality", choices=["quality", "lightning_8step", "lightning_4step"])
+    p = sub.add_parser("approve")
+    p.add_argument("job_id")
+    p.add_argument("index", type=int)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--pipeline-type", default="1024_cascade")
+    p.add_argument("--override", action="store_true", help="approve even if QA marked it not recommended/unverified")
+    r = sub.add_parser("reexport")
+    r.add_argument("job_id")
+    r.add_argument("from_attempt")
+    r.add_argument("--remesh", action="store_true")
+    r.add_argument("--drop-floaters", action="store_true")
     a = ap.parse_args()
-    c = Comfy(a.url)
-    cmd_new(c, a) if a.cmd == "new" else cmd_select(c, a)
+    {"new": cmd_new, "confirm": cmd_confirm, "approve": cmd_approve, "reexport": cmd_reexport}[a.cmd](Comfy(a.url), a)
 
 
 if __name__ == "__main__":

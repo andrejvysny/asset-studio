@@ -1,16 +1,17 @@
-"""Job lifecycle nodes: create, enhance, confirm prompt, select candidate."""
+"""Job lifecycle nodes: create, enhance (stops at prompt_enhanced), confirm edited prompt."""
 from __future__ import annotations
 
-import shutil
+import hashlib
 from contextlib import contextmanager
-from datetime import datetime, timezone
 from typing import Any, Iterator
 
 import folder_paths
 
 from . import clients
-from .job_io import Job, JobError, can_transition, now_iso
+from .jobcore.job_io import Job, can_transition, random_seed_family
+from .jobcore.prompting import compose_effective, split_template
 from .settings import OUTPUT_ROOT, app_config, model_pins, read_prompt_file
+from .ui_files import temp_markdown
 
 ASSET_TYPES = ["none", "small_prop", "medium_prop", "large_prop", "rock", "tree_trunk", "plant", "weapon"]
 CATEGORY = "line_a"
@@ -72,17 +73,16 @@ class LineACreateJob(_SideEffectNode):
             seed_family: int, lora_name: str, lora_strength: float, notes: str) -> dict:
         if not prompt.strip():
             raise ValueError("prompt is empty")
-        if seed_family == 0:
-            seed_family = int(datetime.now(timezone.utc).timestamp()) % (2**31 - 1000)
-        lora_name = "" if lora_name == "none" else lora_name
+        lora = None if lora_name == "none" else lora_name
         request = {
             "prompt": prompt.strip(),
             "asset_type": None if asset_type == "none" else asset_type,
             "target_triangles": target_triangles or None,
             "candidate_count": candidate_count,
-            "lora_name": lora_name or None,
-            "lora_strength": lora_strength if lora_name else None,
-            "seed_family": seed_family,
+            "lora_name": lora,
+            "lora_strength": lora_strength if lora else None,
+            "seed_family": seed_family or random_seed_family(),
+            "seed_family_random": seed_family == 0,
             "notes": notes or None,
         }
         job = Job.create(OUTPUT_ROOT, request)
@@ -91,8 +91,9 @@ class LineACreateJob(_SideEffectNode):
 
 
 class LineAEnhancePrompt(_SideEffectNode):
+    """Runs the enhancer and stops the job at prompt_enhanced; nothing is generated here."""
     RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("job_id", "enhanced_prompt")
+    RETURN_NAMES = ("job_id", "description")
     FUNCTION = "run"
     OUTPUT_NODE = True
 
@@ -103,20 +104,30 @@ class LineAEnhancePrompt(_SideEffectNode):
     def run(self, job_id: str) -> dict:
         job = load_job(job_id)
         req = job.read_json("request.json")
-        with stage(job, "failed_prompt"):
+        template = read_prompt_file("model_sheet_template.txt")
+        with job.operation("enhance", "created"), stage(job, "failed_prompt"):
             clients.free_gpu1_for_prompt_service()
             res = clients.enhance(req["prompt"], req.get("asset_type"), req.get("target_triangles"))
+            description = split_template(res["enhanced_prompt"], template)
             job.write_text("enhanced-prompt.original.txt", res["enhanced_prompt"])
-            job.write_json("enhancement.json", res)
+            job.write_json("enhancement.json", {**res, "description": description})
             job.update_manifest(prompts={"original": req["prompt"], "enhanced_original": res["enhanced_prompt"],
-                                         "enhancer": res["meta"]["model"],
-                                         "template_sha256": res["meta"]["template_sha256"]})
+                                         "description_original": description, "enhancer": res["meta"]["model"],
+                                         "template_sha256": _sha(template)})
             job.set_state("prompt_enhanced")
-        return {"ui": {"text": [res["enhanced_prompt"]]}, "result": (job.id, res["enhanced_prompt"])}
+        card = temp_markdown(job, "enhanced.md", "\n".join([
+            f"# {req['prompt']}", f"**Job id (paste into 'Confirm & Generate'):** `{job.id}`", "",
+            "**Enhanced description** (edit a copy of this; the model-sheet template is appended automatically):",
+            "", description, "", f"_Template:_ {template}"]))
+        return {"ui": {"text": [description], "reports": [card]}, "result": (job.id, description)}
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 class LineAConfirmPrompt(_SideEffectNode):
-    """User edit point: empty final_prompt means 'use the enhanced prompt as-is'."""
+    """Human prompt gate. edited_description empty = keep enhancer's description. Template always appended."""
     RETURN_TYPES = ("STRING", "STRING", "STRING")
     RETURN_NAMES = ("job_id", "positive", "negative")
     FUNCTION = "run"
@@ -126,67 +137,23 @@ class LineAConfirmPrompt(_SideEffectNode):
         return {
             "required": {
                 "job_id": ("STRING", {"default": ""}),
-                "final_prompt": ("STRING", {"multiline": True, "default": ""}),
+                "edited_description": ("STRING", {"multiline": True, "default": ""}),
             }
         }
 
-    def run(self, job_id: str, final_prompt: str) -> tuple[str, str, str]:
+    def run(self, job_id: str, edited_description: str) -> tuple[str, str, str]:
         job = load_job(job_id)
-        if job.state != "prompt_enhanced":
-            raise JobError(f"job {job.id} is in state {job.state}, expected prompt_enhanced")
-        original = job.path("enhanced-prompt.original.txt").read_text()
-        final = final_prompt.strip() or original
+        template = read_prompt_file("model_sheet_template.txt")
         negative = read_prompt_file("negative_constraints.txt")
-        job.write_text("enhanced-prompt.final.txt", final)
-        job.update_manifest(prompts={"final": final, "edited_by_user": final != original, "negative": negative})
-        job.set_state("prompt_confirmed")
-        return (job.id, final, negative)
-
-
-class LineASelectCandidate(_SideEffectNode):
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("job_id",)
-    FUNCTION = "run"
-
-    @classmethod
-    def INPUT_TYPES(cls) -> dict:
-        return {"required": {"job_id": ("STRING", {"default": ""}), "index": ("INT", {"default": 0, "min": 0, "max": 7})}}
-
-    def run(self, job_id: str, index: int) -> tuple[str]:
-        select_candidate(load_job(job_id), index)
-        return (job_id.strip(),)
-
-
-def select_candidate(job: Job, index: int) -> dict:
-    """Shared by node and HTTP route. Re-selection archives previous 3D outputs, never deletes."""
-    name = f"{index:02d}"
-    src = job.path(f"candidates/{name}.png")
-    if not src.is_file():
-        raise JobError(f"candidate {name} does not exist")
-    if not can_transition(job.state, "candidate_selected"):
-        raise JobError(f"cannot select in state {job.state}")
-    if job.path("selected").exists():
-        archive = job.path(f"attempts/{datetime.now(timezone.utc):%Y%m%d-%H%M%S}")
-        for d in ("selected", "cutout", "model"):
-            if job.path(d).exists():
-                archive.mkdir(parents=True, exist_ok=True)
-                shutil.move(job.path(d), archive / d)
-        job.log(f"archived previous selection to {archive.name}")
-    qa_path = job.path(f"qa/{name}.json")
-    qa = job.read_json(f"qa/{name}.json") if qa_path.is_file() else None
-    job.path("selected").mkdir()
-    shutil.copy2(src, job.path("selected/selected.png"))
-    job.write_text("selected/selected_candidate.txt", f"{name}\n")
-    if qa is not None:
-        job.write_json("selected/selected_qa.json", qa)
-    selection = {
-        "index": index,
-        "candidate": f"{name}.png",
-        "selected_at": now_iso(),
-        "final_prompt": job.path("enhanced-prompt.final.txt").read_text(),
-        "qa_status": qa["status"] if qa else None,
-        "qa_reasons": qa["reasons"] if qa else None,
-    }
-    job.update_manifest(selection=selection)
-    job.set_state("candidate_selected")
-    return selection
+        with job.locked():
+            job.require_state("prompt_enhanced")
+            original = job.read_json("enhancement.json")["description"]
+            edited = edited_description.strip() or original
+            effective = compose_effective(edited, template)
+            job.write_text("enhanced-prompt.edited.txt", edited)
+            job.write_text("enhanced-prompt.final.txt", effective)
+            job.update_manifest(prompts={"user_edited": edited, "edited_by_user": edited != original,
+                                         "effective": effective, "negative": negative,
+                                         "template_sha256": _sha(template)})
+            job.set_state("prompt_confirmed")
+        return (job.id, effective, negative)

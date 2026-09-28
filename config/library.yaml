@@ -1,0 +1,28 @@
+# Asset library conventions (from the Asset Studio design). Slot id = <prefix><role>_<slug(family)>_<letter>
+biomes:
+  forest:    {name: Temperate forest,  prefix: forest_, catalog_estimate: 580, order: 1}
+  farmland:  {name: Farmland valleys,  prefix: farm_,   catalog_estimate: 830, order: 3}
+  mountains: {name: Snowy mountains,   prefix: mount_,  catalog_estimate: 595, order: 3}
+  elven:     {name: Elven forest,      prefix: elf_,    catalog_estimate: 413, order: 5}
+  desert:    {name: Desert & canyon,   prefix: desert_, catalog_estimate: 664, order: 4}
+  marsh:     {name: Misty marsh,       prefix: marsh_,  catalog_estimate: 575, order: 4}
+  volcanic:  {name: Volcanic ashlands, prefix: volc_,   catalog_estimate: 640, order: 5}
+
+# Index = catalog layer index (0..6)
+layers:
+  - {name: Terrain,      role: terrain}
+  - {name: Architecture, role: arch}
+  - {name: Economy,      role: econ}
+  - {name: Nature,       role: nature}
+  - {name: Props,        role: prop}
+  - {name: Landmarks,    role: landmark}
+  - {name: Atmosphere,   role: anchor}
+
+roles:
+  terrain:  {budget: "2 m / 4 m tiles",               texturing: "B · trim / tiling",   route: "Build / script"}
+  arch:     {budget: "kit piece, grid-snapped",       texturing: "B · trim / tiling",   route: "Build / script"}
+  econ:     {budget: "hero building 3k–10k",          texturing: "B · trim / tiling",   route: "AI-first"}
+  nature:   {budget: "rock 150–1.2k · tree 300–4k",   texturing: "B · trim / tiling",   route: "AI-first", lods: "2–3"}
+  prop:     {budget: "small 100–600 · medium 500–2.5k", texturing: "C · palette atlas", route: "AI-first"}
+  landmark: {budget: "hero 3k–10k",                   texturing: "A · hand-painted",    route: "AI-first"}
+  anchor:   {budget: "small prop 100–600",            texturing: "C · palette atlas",   route: "AI-first"}

@@ -55,6 +55,20 @@ services:
       - ./output:/output
       - ./services/trellis_worker:/app:ro
 
+  library:
+    <<: *common
+    build: {context: ., dockerfile: services/library/Dockerfile}
+    image: localhost/line-a-library:dev
+    ports: ["127.0.0.1:${STUDIO_PORT:-8190}:8190"]
+    networks: [internal, public]
+    volumes:
+      - ./output:/srv/output:ro          # jobs are mutated only via ComfyUI
+      - ./models:/srv/models:ro
+      - ./config:/srv/config:ro
+      - ./library:/srv/library           # assignments.json
+      - ./services/library/app:/app/app:ro                      # code mounted: edit without rebuild
+      - ./comfyui/custom_nodes/line_a/jobcore:/app/jobcore:ro
+
 networks:
   internal: {internal: true}    # workers have no egress
   public: {}

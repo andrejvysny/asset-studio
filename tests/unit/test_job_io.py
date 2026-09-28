@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import job_io
 import pytest
-from job_io import Job, JobError
+from jobcore import job_io
+from jobcore.job_io import Job, JobError
 
 
 def make(tmp_path: Path) -> Job:

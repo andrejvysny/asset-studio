@@ -1,0 +1,17 @@
+# Runtime licence inventory: code/weights actually executed by the pipeline.
+# status: cleared | not_cleared | review (not yet audited). Commercial use requires every entry cleared.
+components:
+  - {name: ComfyUI v0.37.4,              scope: runtime, licence: GPL-3.0,                          status: review,      note: "Internal service use; review before distributing modified builds"}
+  - {name: Qwen-Image-2512 (fp8),        scope: weights, licence: Apache-2.0,                       status: cleared,     note: ""}
+  - {name: Qwen3-VL-8B-Instruct,         scope: weights, licence: Apache-2.0,                       status: cleared,     note: ""}
+  - {name: Qwen-Image-2512-Lightning,    scope: weights, licence: "see lightx2v model card",        status: review,      note: "Optional speed preset"}
+  - {name: BiRefNet (ZhengPeng7),        scope: weights, licence: MIT,                              status: cleared,     note: ""}
+  - {name: TRELLIS.2 code + weights,     scope: runtime, licence: MIT,                              status: cleared,     note: ""}
+  - {name: DINOv3 ViT-L/16,              scope: weights, licence: DINOv3 License,                   status: review,      note: "Gated; read terms before commercial use"}
+  - {name: nvdiffrast v0.4.0,            scope: runtime, licence: NVIDIA Source Code License (NC),  status: not_cleared, note: "Used by o_voxel.to_glb texture baking: non-commercial only"}
+  - {name: nvdiffrec renderutils fork,   scope: runtime, licence: "NVIDIA Source Code License",     status: review,      note: "Check reachability and terms"}
+  - {name: CuMesh,                       scope: runtime, licence: unknown,                          status: review,      note: "Remesh / decimation / UV unwrap in to_glb"}
+  - {name: FlexGEMM,                     scope: runtime, licence: unknown,                          status: review,      note: ""}
+  - {name: o-voxel,                      scope: runtime, licence: "MIT (TRELLIS.2 repo)",           status: review,      note: "Verify sub-dependencies"}
+  - {name: flash-attn 2.7.3,             scope: runtime, licence: BSD-3-Clause,                     status: cleared,     note: ""}
+  - {name: "@google/model-viewer",       scope: ui,      licence: Apache-2.0,                       status: cleared,     note: "Asset Studio 3D preview"}

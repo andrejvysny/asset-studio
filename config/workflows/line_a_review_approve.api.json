@@ -14,11 +14,9 @@
       "title": "approve"
     },
     "inputs": {
+      "job_id": "",
       "approve_candidate": "review only (no 3D)",
-      "job_id": [
-        "1",
-        0
-      ]
+      "override_qa": false
     }
   },
   "3": {
@@ -30,6 +28,10 @@
       "job_id": [
         "2",
         0
+      ],
+      "attempt_id": [
+        "2",
+        1
       ]
     }
   },
@@ -42,9 +44,15 @@
       "model_seed": 42,
       "pipeline_type": "1024_cascade",
       "texture_size": 2048,
+      "remesh": false,
+      "drop_floaters": false,
       "job_id": [
         "3",
         0
+      ],
+      "attempt_id": [
+        "3",
+        1
       ]
     }
   }

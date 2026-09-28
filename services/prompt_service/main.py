@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 import yaml
 from fastapi import FastAPI, HTTPException
-from lazy_model import LazyModel
+from lazy_model import LazyModel, gpu_info
 from pydantic import BaseModel, Field, ValidationError
 
 MODEL_DIR = Path(os.environ.get("QWEN3_VL_DIR", "/models/checkpoints/qwen3-vl-8b-instruct"))
@@ -180,6 +180,7 @@ def health() -> dict:
         "model_present": (MODEL_DIR / "config.json").is_file(),
         "loaded": vlm.loaded,
         "cuda": torch.cuda.is_available(),
+        "gpu": gpu_info(),
     }
 
 

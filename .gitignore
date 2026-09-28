@@ -17,3 +17,6 @@ comfyui/user/default/*
 !comfyui/user/default/workflows/
 comfyui/user/default/workflows/*
 !comfyui/user/default/workflows/Line A - *.app.json
+library/*
+!library/.gitkeep
+tests/e2e/artifacts/

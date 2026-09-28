@@ -1,17 +1,17 @@
 """App Mode review/approval: QA-annotated gallery + explicit approve step that gates the 3D stages."""
 from __future__ import annotations
 
-import shutil
 import textwrap
 from pathlib import Path
 
-import folder_paths
 from comfy_execution.graph_utils import ExecutionBlocker
 from PIL import Image, ImageDraw, ImageFont
 
-from .job_io import SELECTABLE, Job, JobError
-from .nodes_job import _SideEffectNode, load_job, select_candidate
+from .jobcore.approval import approve, read_candidate_set
+from .jobcore.job_io import SELECTABLE, Job, JobError
+from .nodes_job import _SideEffectNode, load_job
 from .settings import OUTPUT_ROOT
+from .ui_files import temp_target
 
 REVIEW_ONLY = "review only (no 3D)"
 CANDIDATE_CHOICES = [REVIEW_ONLY] + [f"{i:02d}" for i in range(8)]
@@ -37,21 +37,6 @@ def resolve_job(job_id: str) -> Job:
     raise JobError("no job with candidates found; run 'Line A - New Asset' first")
 
 
-def temp_target(job: Job, name: str) -> tuple[Path, dict]:
-    """Path in ComfyUI temp + its /view item. Job dirs are outside ComfyUI's output dir, so /view
-    cannot serve them directly; previews are copies, the job dir stays the source of truth."""
-    sub = f"line_a/{job.id}"
-    dst = Path(folder_paths.get_temp_directory()) / sub / name
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    return dst, {"filename": name, "subfolder": sub, "type": "temp"}
-
-
-def temp_copy(src: Path, job: Job, name: str) -> dict:
-    dst, item = temp_target(job, name)
-    shutil.copyfile(src, dst)
-    return item
-
-
 def _font(size: int) -> ImageFont.ImageFont:
     try:
         return ImageFont.load_default(size=size)
@@ -63,8 +48,12 @@ def render_tile(image_path: Path, label: str, qa: dict | None, selected: bool) -
     img = Image.open(image_path).convert("RGB").resize((TILE, TILE))
     status = (qa or {}).get("status")
     color = GREEN if status == "recommended" else ORANGE if status == "not_recommended" else GRAY
-    badge = {"recommended": "RECOMMENDED", "not_recommended": "NOT RECOMMENDED"}.get(status or "", "NO QA")
-    reasons = (qa or {}).get("reasons", [])[:4]
+    badge = {"recommended": "RECOMMENDED", "not_recommended": "NOT RECOMMENDED",
+             "unverified": "UNVERIFIED"}.get(status or "", "NO QA")
+    cov = (qa or {}).get("coverage")
+    if cov:
+        badge += f"  {cov['ran']}/{cov['total']}"
+    reasons = ((qa or {}).get("reasons", []) + (qa or {}).get("warnings", []))[:4]
     footer_h = 30 + 26 * sum(len(textwrap.wrap(r, 52)) for r in reasons) if reasons else 0
     canvas = Image.new("RGB", (TILE, TILE + 56 + footer_h), (250, 250, 250))
     canvas.paste(img, (0, 56))
@@ -93,14 +82,18 @@ def overview(tiles: list[Image.Image], cols: int = 2) -> Image.Image:
 def summary_markdown(job: Job, qa_by_name: dict[str, dict], selected: str | None) -> str:
     req = job.read_json("request.json")
     final = job.path("enhanced-prompt.final.txt")
+    label = {"recommended": "✅ recommended", "not_recommended": "⚠️ not recommended", "unverified": "❔ unverified"}
     rows = [
-        f"| #{n.removesuffix('.png')} | {'✅ recommended' if q.get('recommended') else '⚠️ not recommended'} | "
-        f"{'; '.join(q.get('reasons', [])[:3]) or '—'} |"
+        f"| #{n.removesuffix('.png')} | {label.get(q.get('status'), 'no QA')} "
+        f"({(q.get('coverage') or {}).get('ran', 0)}/{(q.get('coverage') or {}).get('total', 0)}) | "
+        f"{'; '.join((q.get('reasons', []) + q.get('warnings', []))[:3]) or '—'} |"
         for n, q in qa_by_name.items()
     ]
+    set_id = job.read_json("candidates/set.json")["set_id"] if job.path("candidates/set.json").is_file() else "—"
     return "\n".join([
         f"# {req['prompt']}",
-        f"**Job:** `{job.id}`  \n**State:** `{job.state}`  \n**Selected:** {selected or '—'}",
+        f"**Job id (copy into Approve):** `{job.id}`  \n**Candidate set:** `{set_id}`  \n"
+        f"**State:** `{job.state}`  \n**Current attempt uses:** {selected or '—'}",
         "", "| Candidate | QA | Reasons |", "|---|---|---|", *rows, "",
         "QA is advisory only; any candidate can be approved.", "",
         "**Final prompt:**", "", final.read_text() if final.is_file() else "—",
@@ -119,8 +112,8 @@ class LineAReviewGallery(_SideEffectNode):
 
     def run(self, job_id: str) -> dict:
         job = resolve_job(job_id)
-        sel_file = job.path("selected/selected_candidate.txt")
-        selected = sel_file.read_text().strip() if sel_file.is_file() else None
+        current = job.read_json("job_state.json").get("current_attempt")
+        selected = f"{job.read_attempt(current)['index']:02d}" if current else None
         images, qa_by_name, tiles = [], {}, []
         for path in sorted(job.path("candidates").glob("*.png")):
             stem = path.stem
@@ -142,22 +135,30 @@ class LineAReviewGallery(_SideEffectNode):
 
 
 class LineAApprove(_SideEffectNode):
-    """Human approval gate: 'review only' blocks all downstream 3D nodes."""
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("job_id",)
+    """Human approval gate. 'review only' blocks all downstream 3D nodes. Approval needs the concrete job id
+    shown in the gallery ('latest' is refused), so a newer job can never receive an approval."""
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("job_id", "attempt_id")
     FUNCTION = "run"
 
     @classmethod
     def INPUT_TYPES(cls) -> dict:
         return {
             "required": {
-                "job_id": ("STRING", {"forceInput": True}),
+                "job_id": ("STRING", {"default": "", "tooltip": "exact job id from the gallery summary"}),
                 "approve_candidate": (CANDIDATE_CHOICES, {"default": REVIEW_ONLY}),
+                "override_qa": ("BOOLEAN", {"default": False,
+                                            "tooltip": "approve even if the candidate is not QA-recommended"}),
             }
         }
 
-    def run(self, job_id: str, approve_candidate: str) -> tuple:
+    def run(self, job_id: str, approve_candidate: str, override_qa: bool) -> tuple:
         if approve_candidate == REVIEW_ONLY:
-            return (ExecutionBlocker(None),)
-        select_candidate(load_job(job_id), int(approve_candidate))
-        return (job_id,)
+            return (ExecutionBlocker(None), ExecutionBlocker(None))
+        if job_id.strip() in ("", "latest"):
+            raise JobError("enter the exact job id shown in the gallery summary to approve")
+        job = load_job(job_id)
+        cset = read_candidate_set(job)
+        attempt, _ = approve(job, cset["set_id"], int(approve_candidate), cset["images"][approve_candidate],
+                             override=override_qa)
+        return (job.id, attempt["id"])

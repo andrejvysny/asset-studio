@@ -1,8 +1,9 @@
-"""TRELLIS.2 generation, GLB export, safe cleanup and mesh stats."""
+"""TRELLIS.2 sampling, raw-intermediate persistence and GLB export (GPU side)."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -10,6 +11,11 @@ import trimesh
 from PIL import Image
 
 HDRI = Path("/opt/TRELLIS.2/assets/hdri/studio.exr")
+RAW_FIELDS = ("vertices", "faces", "attrs", "coords", "layout", "voxel_size")
+# Upstream o_voxel.to_glb always fills small holes (max perimeter 3e-2) and removes tiny components;
+# neither is switchable without patching upstream. Recorded on every attempt.
+KNOWN_LIMITATIONS = ["to_glb always fills holes with perimeter < 0.03 (upstream, not switchable)",
+                     "texture bake uses nvdiffrast v0.4.0 (NVIDIA non-commercial licence)"]
 
 
 def run_trellis(pipe: object, cutout: Image.Image, seed: int, pipeline_type: str) -> object:
@@ -19,8 +25,22 @@ def run_trellis(pipe: object, cutout: Image.Image, seed: int, pipeline_type: str
     return mesh
 
 
-def export_glb(mesh: object, decimation_target: int, texture_size: int) -> trimesh.Trimesh:
-    """Hole filling, tiny-component removal and decimation all happen in to_glb before UV/bake."""
+def save_raw(mesh: object, path: Path) -> None:
+    """Everything to_glb needs, so export can be retried without resampling TRELLIS."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    for f in RAW_FIELDS:
+        v = getattr(mesh, f)
+        data[f] = v.detach().cpu() if torch.is_tensor(v) else v
+    torch.save(data, path)
+
+
+def load_raw(path: Path) -> SimpleNamespace:
+    data = torch.load(path, map_location="cpu", weights_only=False)
+    return SimpleNamespace(**{k: v.cuda() if torch.is_tensor(v) else v for k, v in data.items()})
+
+
+def export_glb(mesh: object, decimation_target: int, texture_size: int, remesh: bool) -> trimesh.Trimesh:
     import o_voxel
 
     return o_voxel.postprocess.to_glb(
@@ -33,59 +53,15 @@ def export_glb(mesh: object, decimation_target: int, texture_size: int) -> trime
         aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
         decimation_target=decimation_target,
         texture_size=texture_size,
-        remesh=True,
+        remesh=remesh,
         remesh_band=1,
         remesh_project=0,
         verbose=True,
     )
 
 
-def drop_floaters(mesh: trimesh.Trimesh, min_ratio: float) -> tuple[trimesh.Trimesh, int]:
-    """Drop whole components smaller than min_ratio of faces. Keeps UVs of the remaining faces intact."""
-    labels = trimesh.graph.connected_component_labels(mesh.face_adjacency, node_count=len(mesh.faces))
-    counts = np.bincount(labels)
-    keep_labels = np.nonzero(counts >= min_ratio * len(mesh.faces))[0]
-    if len(keep_labels) == len(counts):
-        return mesh, 0
-    keep = np.isin(labels, keep_labels)
-    mesh.update_faces(keep)
-    mesh.remove_unreferenced_vertices()
-    return mesh, int(len(counts) - len(keep_labels))
-
-
-def mesh_info(mesh: trimesh.Trimesh, glb_path: Path, removed_components: int) -> dict:
-    labels = trimesh.graph.connected_component_labels(mesh.face_adjacency, node_count=len(mesh.faces))
-    material = getattr(mesh.visual, "material", None)
-    return {
-        "triangles": int(len(mesh.faces)),
-        "vertices": int(len(mesh.vertices)),
-        "components": int(labels.max() + 1) if len(labels) else 0,
-        "removed_floater_components": removed_components,
-        "bbox_min": mesh.bounds[0].round(5).tolist(),
-        "bbox_max": mesh.bounds[1].round(5).tolist(),
-        "extents": mesh.extents.round(5).tolist(),
-        "watertight": bool(mesh.is_watertight),
-        "has_uv": getattr(mesh.visual, "uv", None) is not None,
-        "has_base_color_texture": getattr(material, "baseColorTexture", None) is not None,
-        "has_metallic_roughness_texture": getattr(material, "metallicRoughnessTexture", None) is not None,
-        "file_size_bytes": glb_path.stat().st_size,
-    }
-
-
-def save_textures(mesh: trimesh.Trimesh, out_dir: Path) -> list[str]:
-    material = getattr(mesh.visual, "material", None)
-    saved: list[str] = []
-    for name in ("baseColorTexture", "metallicRoughnessTexture"):
-        tex = getattr(material, name, None)
-        if isinstance(tex, Image.Image):
-            out_dir.mkdir(parents=True, exist_ok=True)
-            tex.save(out_dir / f"{name}.png")
-            saved.append(f"{name}.png")
-    return saved
-
-
 def render_preview(mesh: object, out_path: Path) -> None:
-    """2x2 shaded turntable snapshot. Best effort; caller treats failure as non-fatal."""
+    """2x2 shaded snapshot of the raw TRELLIS mesh (pre-export). Best effort; labelled as such by the caller."""
     import cv2
     from trellis2.renderers import EnvMap
     from trellis2.utils import render_utils

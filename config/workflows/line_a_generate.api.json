@@ -1,43 +1,12 @@
 {
-  "1": {
-    "class_type": "LineACreateJob",
-    "_meta": {
-      "title": "create_job"
-    },
-    "inputs": {
-      "prompt": "wooden medieval barrel",
-      "asset_type": "small_prop",
-      "target_triangles": 0,
-      "candidate_count": 4,
-      "seed_family": 0,
-      "lora_name": "none",
-      "lora_strength": 0.8,
-      "notes": ""
-    }
-  },
-  "2": {
-    "class_type": "LineAEnhancePrompt",
-    "_meta": {
-      "title": "enhance"
-    },
-    "inputs": {
-      "job_id": [
-        "1",
-        0
-      ]
-    }
-  },
   "3": {
     "class_type": "LineAConfirmPrompt",
     "_meta": {
       "title": "confirm_prompt"
     },
     "inputs": {
-      "final_prompt": "",
-      "job_id": [
-        "2",
-        0
-      ]
+      "job_id": "",
+      "edited_description": ""
     }
   },
   "4": {

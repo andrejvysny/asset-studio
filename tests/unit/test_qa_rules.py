@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import yaml
-from qa_rules import evaluate
+from jobcore.qa_rules import evaluate
 
 RULES = yaml.safe_load((Path(__file__).resolve().parents[2] / "config" / "qa" / "rules.yaml").read_text())
 GOOD_MASK = {"fill_ratio": 0.3, "touches_border": False, "components": 1, "secondary_ratio": 0.0}
@@ -32,6 +32,35 @@ def test_mask_cropped_and_multi_blob() -> None:
     assert set(r["failed_major"]) == {"mask_not_cropped", "mask_single_blob"}
 
 
-def test_missing_sources_warn_but_do_not_crash() -> None:
-    r = evaluate("00.png", None, None, RULES)
-    assert r["recommended"] and len(r["warnings"]) == 2
+def test_no_qa_is_unverified_not_green() -> None:
+    r = evaluate("00.png", None, None, RULES, vlm_error="timeout", mask_error="down")
+    assert r["status"] == "unverified" and not r["recommended"]
+    assert r["coverage"]["ran"] == 0 and len(r["coverage"]["missing"]) == r["coverage"]["total"]
+    assert any("timeout" in w for w in r["warnings"]) and r["services"]["vlm"] == "timeout"
+
+
+def test_empty_vlm_checks_is_unverified() -> None:
+    r = evaluate("00.png", {"checks": {}, "reasons": []}, GOOD_MASK, RULES)
+    assert r["status"] == "unverified"
+    assert r["coverage"]["ran"] == 3 and "single_object" in r["coverage"]["missing"]
+
+
+def test_mask_only_is_unverified() -> None:
+    r = evaluate("00.png", None, GOOD_MASK, RULES)
+    assert r["status"] == "unverified" and not r["recommended"]
+
+
+def test_failure_beats_missing_coverage() -> None:
+    r = evaluate("00.png", None, {**GOOD_MASK, "touches_border": True}, RULES)
+    assert r["status"] == "not_recommended"
+
+
+def test_reasons_derived_when_model_gives_none() -> None:
+    vlm = {**ALL_OK, "checks": {**ALL_OK["checks"], "no_text": False}, "reasons": []}
+    r = evaluate("00.png", vlm, GOOD_MASK, RULES)
+    assert r["status"] == "not_recommended" and any("text" in x.lower() for x in r["reasons"])
+
+
+def test_full_coverage_recommended() -> None:
+    r = evaluate("00.png", ALL_OK, GOOD_MASK, RULES)
+    assert r["coverage"] == {"ran": r["coverage"]["total"], "total": r["coverage"]["total"], "missing": []}

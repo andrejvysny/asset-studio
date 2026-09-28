@@ -15,7 +15,8 @@ import torch
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
-from .job_io import Job
+from .jobcore.approval import write_candidate_set
+from .jobcore.job_io import Job
 from .nodes_job import CATEGORY, _SideEffectNode, load_job, stage
 from .settings import app_config
 
@@ -80,9 +81,18 @@ class LineAGenerateCandidates(_SideEffectNode):
     def run(self, job_id: str, model: Any, vae: Any, positive: Any, negative: Any, width: int, height: int,
             steps: int, cfg: float, sampler_name: str, scheduler: str, speed_preset: str) -> tuple[torch.Tensor, str]:
         job = load_job(job_id)
+        with job.operation("generate", "prompt_confirmed"):
+            return self._generate(job, model, vae, positive, negative, width, height, steps, cfg,
+                                  sampler_name, scheduler, speed_preset)
+
+    def _generate(self, job: Job, model: Any, vae: Any, positive: Any, negative: Any, width: int, height: int,
+                  steps: int, cfg: float, sampler_name: str, scheduler: str,
+                  speed_preset: str) -> tuple[torch.Tensor, str]:
         req = job.read_json("request.json")
+        lora_strength = req.get("lora_strength")
         if req.get("lora_name"):
-            (model,) = LineAOptionalLora().run(model, req["lora_name"], float(req.get("lora_strength") or 0.8))
+            lora_strength = 0.8 if lora_strength is None else float(lora_strength)  # 0.0 stays 0.0 (no-op)
+            (model,) = LineAOptionalLora().run(model, req["lora_name"], lora_strength)
         if speed_preset != "quality":
             preset = app_config()["image"]["speed_presets"][speed_preset]
             (model,) = LineAOptionalLora().run(model, preset["lora"], 1.0)
@@ -91,7 +101,7 @@ class LineAGenerateCandidates(_SideEffectNode):
         seed_family = int(req["seed_family"])
         params = {"width": width, "height": height, "steps": steps, "cfg": cfg, "sampler": sampler_name,
                   "scheduler": scheduler, "speed_preset": speed_preset, "count": count,
-                  "lora_name": req.get("lora_name"), "lora_strength": req.get("lora_strength")}
+                  "lora_name": req.get("lora_name"), "lora_strength_effective": lora_strength if req.get("lora_name") else None}
         job.update_manifest(generation=params)
         images: list[torch.Tensor] = []
         seeds: list[int] = []
@@ -101,6 +111,8 @@ class LineAGenerateCandidates(_SideEffectNode):
                 images.append(self._sample_one(job, i, seed, model, vae, positive, negative, params))
                 seeds.append(seed)
                 job.update_manifest(seeds=seeds)  # keep partial progress if a later sample fails
+            cset = write_candidate_set(job)
+            job.update_manifest(candidate_set=cset)
             job.set_state("candidates_generated")
         return (torch.cat(images, dim=0), job.id)
 

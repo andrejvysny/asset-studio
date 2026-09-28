@@ -44,3 +44,16 @@ class LazyModel(Generic[T]):
             with self._lock:
                 if self._model is not None and time.monotonic() - self._last_used > self._idle_unload_s:
                     self.unload()
+
+
+def gpu_info() -> dict | None:
+    """VRAM/utilisation via nvidia-smi: no CUDA context is created just to report status."""
+    import subprocess
+
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.used,memory.total,utilization.gpu",
+                              "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5, check=True)
+        name, used, total, util = [x.strip() for x in out.stdout.strip().splitlines()[0].split(",")]
+        return {"name": name, "vram_used_mb": int(used), "vram_total_mb": int(total), "util_pct": int(util)}
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return None

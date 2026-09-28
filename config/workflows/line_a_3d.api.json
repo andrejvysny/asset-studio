@@ -1,0 +1,33 @@
+{
+  "3": {
+    "class_type": "LineACutout",
+    "_meta": {
+      "title": "cutout"
+    },
+    "inputs": {
+      "job_id": "",
+      "attempt_id": ""
+    }
+  },
+  "4": {
+    "class_type": "LineATrellis3D",
+    "_meta": {
+      "title": "trellis"
+    },
+    "inputs": {
+      "model_seed": 42,
+      "pipeline_type": "1024_cascade",
+      "texture_size": 2048,
+      "remesh": false,
+      "drop_floaters": false,
+      "job_id": [
+        "3",
+        0
+      ],
+      "attempt_id": [
+        "3",
+        1
+      ]
+    }
+  }
+}

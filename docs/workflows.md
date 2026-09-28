@@ -1,43 +1,74 @@
-# Workflows & review UI
+# Workflows, Asset Studio and App Mode
 
-Two ComfyUI **App Mode** apps (simple form + outputs, no node graph). Open ComfyUI →
-Workflows sidebar → pick the app. It opens in App Mode.
+**Asset Studio** (http://127.0.0.1:8190) is the day-to-day UI. **ComfyUI** (:8188) stays the execution engine and
+the v1 API: the Studio creates and advances jobs only by queuing the workflows below through the ComfyUI `/prompt`
+API (proxied at `/comfy/*`). The App Mode apps in ComfyUI remain available as a fallback.
 
-| App | Does | Output |
-|---|---|---|
-| `Line A - 1 New Asset` | prompt → enhance → N variants → QA | QA overview grid, per-variant tiles, summary (≡) |
-| `Line A - 2 Review & Approve` | review a job; approving a variant runs cut-out → TRELLIS.2 → GLB | same gallery; after approval: 3D viewer (GLB), preview, mesh info |
+## Flow: two human gates
+| Step | Studio screen | Workflow (config/workflows) | Job state after |
+|---|---|---|---|
+| 1 brief + enhance | New job | `line_a_enhance` | `prompt_enhanced` (no images) |
+| 2 edit + confirm, generate + QA | New job (step 2) | `line_a_generate` | `waiting_for_selection` |
+| 3 review, approve one candidate | Review | `POST /line_a/jobs/{id}/approve` then `line_a_3d` | `completed` / `failed_*` |
+| re-export from raw (no resample) | 3D attempts | `line_a_reexport` | new attempt |
+| assign to catalog slot | 3D attempts / Asset detail | `PUT /api/slots/{slot}/assignment` | library/assignments.json |
 
-## Typical flow
-1. **New Asset**: type prompt, pick asset type → **Run**.
-   `Speed preset`: `quality` (50 steps, ~2 min/variant) or `lightning_8step`/`lightning_4step` (~10 s/variant, more
-   floor/shadow artifacts).
-2. Review the grid: green = recommended, orange = not recommended + reasons. Advisory only.
-   The enhanced prompt is in the summary (≡ icon, last thumbnail).
-3. Want a different prompt? Paste an edited version into `Edited prompt` → **Run** (creates a new job).
-4. **Review & Approve**: `Job` = `latest` (or a job id) → **Run** with `review only` to re-show the gallery.
-5. Set `Approve variant` to e.g. `02` → **Run**. Generates the 3D model; result shows in the 3D viewer.
-   Approving again with another variant archives the previous attempt to `output/<job>/attempts/`.
+- **Prompt**: the user edits the *description* only; `effective = description + model-sheet template`
+  (`config/prompts/model_sheet_template.txt`) is always applied. Stored: `enhanced-prompt.original.txt`,
+  `enhanced-prompt.edited.txt`, `enhanced-prompt.final.txt` (effective).
+- **Approval binding**: generation freezes `candidates/set.json` (`set_id` + sha256 per image). Approval must name
+  `{set_id, index, image_sha256}`; stale set / changed image / busy job -> 409. Repeating an identical approval returns
+  the existing attempt (no second 3D run).
+- **QA** is advisory: `recommended` (all configured checks ran and passed), `not_recommended` (major fail or >= 2 minor
+  fails), `unverified` (some checks did not run, e.g. a service was down). Any candidate can be approved.
+- **3D attempts** live in `output/<job>/model/attempts/att-NN/` (selected.png, cutout, `raw/raw.pt`, processed GLB,
+  `validation.json`, logs). Attempts are immutable; a new approval or re-export creates a new one. `completed` requires
+  GLB validation (reload, non-empty finite geometry, valid indices, UVs, embedded texture).
+- **Cleanup** is conservative by default: remesh off, floater removal off (and computed on a position-welded copy so UV
+  seams are never mistaken for floaters). Upstream `to_glb` always fills holes < 0.03 perimeter (recorded per attempt).
 
-Everything is written to `output/<job-id>/` (see SPEC §15). Gallery images shown in the UI are copies in
-ComfyUI's temp dir; the job dir is the source of truth.
+- **QA override**: approving a `not_recommended` / `unverified` / unchecked candidate needs an explicit override
+  (Studio checkbox "Override QA", App Mode "Approve anyway", CLI `approve --override`, API `override: true`).
+  It is recorded as `qa_override` on the attempt and in the manifest. QA never blocks.
+
+## Asset library
+- Catalog: `config/catalog.json` v2 (Asset Library Kit, 7 biomes x 7 layers) with **explicit, stable ids** for every
+  layer, family and slot, e.g. `forest_prop_containers_storage_a`. Ids never change once assigned (renaming a family keeps
+  them). After adding families or raising a `count`, run `make catalog-ids`; `make catalog-check` fails if ids are missing.
+  The service refuses to start on duplicate/malformed ids or `count` != number of slot ids.
+- Library filter "Assigned only" (`?show=assigned`) hides planned slots.
+- Only completed + validated attempts can be assigned; an attempt occupies one slot (reassigning moves it).
+- Runtime licence inventory: `config/licences.yaml` (shown in Studio > Runtime and as a banner when anything is
+  `not_cleared`). Currently nvdiffrast v0.4.0 (texture bake) is non-commercial.
 
 ## Remote access
-ComfyUI binds to `127.0.0.1:8188` on the host. From your machine:
+Both UIs bind to 127.0.0.1 on the host:
 ```
-ssh -N -L 8188:127.0.0.1:8188 <user>@<host>                 # direct
-ssh -N -J <user>@<gateway> -L 8188:127.0.0.1:8188 <user>@<host>  # via gateway
+ssh -N -L 8190:127.0.0.1:8190 -L 8188:127.0.0.1:8188 <user>@<host>      # add -J <user>@<gateway> if needed
 ```
-then open http://localhost:8188.
+then open http://localhost:8190 (Studio) or http://localhost:8188 (ComfyUI).
 
-## Editing the apps
-Apps are generated, not hand-edited: change `scripts/export-workflows.py`, then
-`python3 scripts/export-workflows.py` (needs running ComfyUI; reads `/object_info` for widget order).
-Writes `config/workflows/*.api.json` (automation, `scripts/run_job.py`) and `*.app.json` (UI) +
-copies into `comfyui/user/default/workflows/`.
+## CLI (same workflows)
+```
+python3 scripts/run_job.py new "wooden medieval barrel" --asset-type small_prop --triangles 500
+python3 scripts/run_job.py confirm <job-id> [--edited-file desc.txt] [--speed lightning_8step]
+python3 scripts/run_job.py approve <job-id> <index>
+python3 scripts/run_job.py reexport <job-id> <att-NN> [--remesh] [--drop-floaters]
+```
 
-## Automation (ComfyUI API)
+## Regenerating workflows
+Edit `scripts/export-workflows.py`, then `python3 scripts/export-workflows.py` with ComfyUI running (widget order is
+read from `/object_info`). Writes `config/workflows/*.api.json`, App Mode `*.app.json`, and copies the apps into
+`comfyui/user/default/workflows/`.
+
+## Web development
+No Node on the host is required: `podman run --rm -v "$PWD/web":/web:Z -w /web docker.io/library/node:22-slim npx tsc -b --noEmit`.
+The library image builds the web bundle (`npm ci` from `web/package-lock.json`); rebuild it after web changes:
+`podman build -f services/library/Dockerfile -t localhost/line-a-library:dev .`
+
+## End-to-end tests (Playwright)
 ```
-./scripts/run_job.py new "wooden medieval barrel" --asset-type small_prop --triangles 500 [--speed lightning_8step]
-./scripts/run_job.py select <job-id> <index>
+make e2e       # builds web, runs tests/e2e: isolated library UI tests (fixture data) + live-stack screens
+make e2e-gpu   # full job flow on the real stack: enhance -> edit -> generate -> review -> (override) -> approve -> 3D
 ```
+Screenshots land in `tests/e2e/artifacts/`. Every test fails on any browser console error or page exception.

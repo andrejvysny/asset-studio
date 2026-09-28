@@ -38,21 +38,42 @@ class App:
     app_inputs: list[tuple[int, str]]
     app_outputs: list[int]
     labels: dict[tuple[int, str], str] = field(default_factory=dict)  # friendly App Mode field names
+    app_mode: bool = True  # False: API-only workflow (queued by the Studio / run_job.py)
 
 
-NEW_ASSET = App(
-    slug="line_a_new_asset",
-    name="Line A - 1 New Asset",
+IMAGE_NODES = [
+    Node(4, "UNETLoader", "unet", (0, 420), {"unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors"}),
+    Node(5, "CLIPLoader", "text_encoder", (0, 560), {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+         "type": "qwen_image"}),
+    Node(6, "VAELoader", "vae", (0, 700), {"vae_name": "qwen_image_vae.safetensors"}),
+    Node(7, "ModelSamplingAuraFlow", "shift", (380, 420), {"shift": 3.1}, {"model": (4, 0)}),
+]
+
+# Step 1: create job + enhance. Stops at prompt_enhanced; no images are generated.
+ENHANCE = App(
+    slug="line_a_enhance",
+    name="Line A - 1 Enhance Prompt",
     nodes=[
         Node(1, "LineACreateJob", "create_job", (0, 0), {"prompt": "wooden medieval barrel", "asset_type": "small_prop",
              "target_triangles": 0, "candidate_count": 4, "seed_family": 0}),
         Node(2, "LineAEnhancePrompt", "enhance", (420, 0), links={"job_id": (1, 0)}),
-        Node(3, "LineAConfirmPrompt", "confirm_prompt", (760, 0), {"final_prompt": ""}, {"job_id": (2, 0)}),
-        Node(4, "UNETLoader", "unet", (0, 420), {"unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors"}),
-        Node(5, "CLIPLoader", "text_encoder", (0, 560), {"clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
-             "type": "qwen_image"}),
-        Node(6, "VAELoader", "vae", (0, 700), {"vae_name": "qwen_image_vae.safetensors"}),
-        Node(7, "ModelSamplingAuraFlow", "shift", (380, 420), {"shift": 3.1}, {"model": (4, 0)}),
+    ],
+    app_inputs=[(1, "prompt"), (1, "asset_type"), (1, "target_triangles"), (1, "lora_name"), (1, "lora_strength"),
+                (1, "candidate_count"), (1, "seed_family")],
+    app_outputs=[2],
+    labels={(1, "prompt"): "Brief", (1, "asset_type"): "Asset type",
+            (1, "target_triangles"): "Target triangles (0 = none, hint only)", (1, "lora_name"): "Style LoRA",
+            (1, "lora_strength"): "LoRA strength", (1, "candidate_count"): "Variants",
+            (1, "seed_family"): "Seed (0 = random)"},
+)
+
+# Step 2: confirm (optionally edited) description for the SAME job, then generate candidates + QA.
+GENERATE = App(
+    slug="line_a_generate",
+    name="Line A - 2 Confirm & Generate",
+    nodes=[
+        Node(3, "LineAConfirmPrompt", "confirm_prompt", (760, 0), {"job_id": "", "edited_description": ""}),
+        *IMAGE_NODES,
         Node(8, "CLIPTextEncode", "positive", (760, 300), links={"clip": (5, 0), "text": (3, 1)}),
         Node(9, "CLIPTextEncode", "negative", (760, 520), links={"clip": (5, 0), "text": (3, 2)}),
         Node(10, "LineAGenerateCandidates", "generate", (1160, 200), {},
@@ -60,32 +81,50 @@ NEW_ASSET = App(
         Node(11, "LineARunQA", "qa", (1560, 200), links={"job_id": (10, 1)}),
         Node(12, "LineAReviewGallery", "gallery", (1900, 200), links={"job_id": (11, 0)}),
     ],
-    app_inputs=[(1, "prompt"), (1, "asset_type"), (1, "target_triangles"), (3, "final_prompt"),
-                (10, "speed_preset"), (1, "lora_name"), (1, "lora_strength"), (1, "candidate_count"), (1, "seed_family")],
+    app_inputs=[(3, "job_id"), (3, "edited_description"), (10, "speed_preset")],
     app_outputs=[12],
-    labels={(1, "prompt"): "Prompt", (1, "asset_type"): "Asset type",
-            (1, "target_triangles"): "Target triangles (0 = none, hint only)",
-            (3, "final_prompt"): "Edited prompt (optional, overrides enhanced)",
-            (10, "speed_preset"): "Speed preset", (1, "lora_name"): "Style LoRA",
-            (1, "lora_strength"): "LoRA strength", (1, "candidate_count"): "Variants",
-            (1, "seed_family"): "Seed (0 = random)"},
+    labels={(3, "job_id"): "Job id (from step 1)",
+            (3, "edited_description"): "Edited description (empty = keep enhanced)",
+            (10, "speed_preset"): "Speed preset"},
 )
 
+# Step 3: review; approving needs the exact job id shown in the gallery.
 REVIEW = App(
     slug="line_a_review_approve",
-    name="Line A - 2 Review & Approve",
+    name="Line A - 3 Review & Approve",
     nodes=[
         Node(1, "LineAReviewGallery", "gallery", (0, 0), {"job_id": "latest"}),
-        Node(2, "LineAApprove", "approve", (400, 0), links={"job_id": (1, 0)}),
-        Node(3, "LineACutout", "cutout", (760, 0), links={"job_id": (2, 0)}),
-        Node(4, "LineATrellis3D", "trellis", (1100, 0), {}, {"job_id": (3, 0)}),
+        Node(2, "LineAApprove", "approve", (400, 0), {"job_id": ""}),
+        Node(3, "LineACutout", "cutout", (760, 0), links={"job_id": (2, 0), "attempt_id": (2, 1)}),
+        Node(4, "LineATrellis3D", "trellis", (1100, 0), {}, {"job_id": (3, 0), "attempt_id": (3, 1)}),
     ],
-    app_inputs=[(1, "job_id"), (2, "approve_candidate"), (4, "pipeline_type"), (4, "texture_size"), (4, "model_seed")],
+    app_inputs=[(1, "job_id"), (2, "job_id"), (2, "approve_candidate"), (2, "override_qa"), (4, "pipeline_type"),
+                (4, "texture_size"),
+                (4, "model_seed"), (4, "remesh"), (4, "drop_floaters")],
     app_outputs=[1, 4],
-    labels={(1, "job_id"): "Job ('latest' = newest)", (2, "approve_candidate"): "Approve variant -> generate 3D",
-            (4, "pipeline_type"): "3D quality", (4, "texture_size"): "Texture size", (4, "model_seed"): "3D seed"},
+    labels={(1, "job_id"): "Show job ('latest' = newest)", (2, "job_id"): "Approve: exact job id from summary",
+            (2, "approve_candidate"): "Approve variant -> generate 3D",
+            (2, "override_qa"): "Approve anyway if QA failed (override)", (4, "pipeline_type"): "3D quality",
+            (4, "texture_size"): "Texture size", (4, "model_seed"): "3D seed", (4, "remesh"): "Remesh (off = safe)",
+            (4, "drop_floaters"): "Drop floaters (off = safe)"},
 )
-APPS = [NEW_ASSET, REVIEW]
+
+# API-only: 3D for an attempt already approved via POST /line_a/jobs/{id}/approve (Asset Studio).
+THREE_D = App(
+    slug="line_a_3d", name="line_a_3d", app_mode=False, app_inputs=[], app_outputs=[4],
+    nodes=[
+        Node(3, "LineACutout", "cutout", (0, 0), {"job_id": "", "attempt_id": ""}),
+        Node(4, "LineATrellis3D", "trellis", (400, 0), {}, {"job_id": (3, 0), "attempt_id": (3, 1)}),
+    ],
+)
+
+# API-only: new attempt from a previous attempt's raw TRELLIS output (no resampling).
+REEXPORT = App(
+    slug="line_a_reexport", name="line_a_reexport", app_mode=False, app_inputs=[], app_outputs=[1],
+    nodes=[Node(1, "LineAReexport", "reexport", (0, 0), {"job_id": "", "from_attempt": ""})],
+)
+
+APPS = [ENHANCE, GENERATE, REVIEW, THREE_D, REEXPORT]
 
 
 def fetch_object_info(url: str) -> dict:
@@ -203,10 +242,14 @@ def main() -> None:
     oi = fetch_object_info(args.url)
     wf_dir, user_dir = ROOT / "config" / "workflows", ROOT / "comfyui" / "user" / "default" / "workflows"
     user_dir.mkdir(parents=True, exist_ok=True)
+    for old in list(user_dir.glob("Line A - *.app.json")) + list(wf_dir.glob("line_a_*.json")):
+        old.unlink()  # generated files only; regenerated below
     for app in APPS:
-        for path, data in [(wf_dir / f"{app.slug}.api.json", to_api(app, oi)),
-                           (wf_dir / f"{app.slug}.app.json", to_ui(app, oi)),
-                           (user_dir / f"{app.name}.app.json", to_ui(app, oi))]:
+        outputs = [(wf_dir / f"{app.slug}.api.json", to_api(app, oi))]
+        if app.app_mode:
+            outputs += [(wf_dir / f"{app.slug}.app.json", to_ui(app, oi)),
+                        (user_dir / f"{app.name}.app.json", to_ui(app, oi))]
+        for path, data in outputs:
             path.write_text(json.dumps(data, indent=2) + "\n")
             print(f"wrote {path.relative_to(ROOT)}")
 

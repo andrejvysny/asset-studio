@@ -3,9 +3,9 @@ from __future__ import annotations
 
 from . import routes  # noqa: F401  (registers /line_a/* HTTP routes)
 from .nodes_gen import LineAGenerateCandidates, LineAOptionalLora
-from .nodes_job import LineAConfirmPrompt, LineACreateJob, LineAEnhancePrompt, LineASelectCandidate
+from .nodes_job import LineAConfirmPrompt, LineACreateJob, LineAEnhancePrompt
 from .nodes_review import LineAApprove, LineAReviewGallery
-from .nodes_stages import LineACutout, LineARunQA, LineATrellis3D
+from .nodes_stages import LineACutout, LineAReexport, LineARunQA, LineATrellis3D
 
 NODE_CLASS_MAPPINGS = {
     "LineACreateJob": LineACreateJob,
@@ -14,9 +14,9 @@ NODE_CLASS_MAPPINGS = {
     "LineAOptionalLora": LineAOptionalLora,
     "LineAGenerateCandidates": LineAGenerateCandidates,
     "LineARunQA": LineARunQA,
-    "LineASelectCandidate": LineASelectCandidate,
     "LineACutout": LineACutout,
     "LineATrellis3D": LineATrellis3D,
+    "LineAReexport": LineAReexport,
     "LineAReviewGallery": LineAReviewGallery,
     "LineAApprove": LineAApprove,
 }

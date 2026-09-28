@@ -2,7 +2,7 @@
   "id": "dcc07b14-8051-5d78-aa35-9fb7c5b175e0",
   "revision": 0,
   "last_node_id": 4,
-  "last_link_id": 3,
+  "last_link_id": 4,
   "nodes": [
     {
       "id": 1,
@@ -28,7 +28,7 @@
           "widget": {
             "name": "job_id"
           },
-          "label": "Job ('latest' = newest)"
+          "label": "Show job ('latest' = newest)"
         }
       ],
       "outputs": [
@@ -36,9 +36,7 @@
           "localized_name": "job_id",
           "name": "job_id",
           "type": "STRING",
-          "links": [
-            1
-          ]
+          "links": null
         }
       ],
       "properties": {
@@ -68,7 +66,11 @@
           "localized_name": "job_id",
           "name": "job_id",
           "type": "STRING",
-          "link": 1
+          "link": null,
+          "widget": {
+            "name": "job_id"
+          },
+          "label": "Approve: exact job id from summary"
         },
         {
           "localized_name": "approve_candidate",
@@ -79,12 +81,30 @@
             "name": "approve_candidate"
           },
           "label": "Approve variant -> generate 3D"
+        },
+        {
+          "localized_name": "override_qa",
+          "name": "override_qa",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "override_qa"
+          },
+          "label": "Approve anyway if QA failed (override)"
         }
       ],
       "outputs": [
         {
           "localized_name": "job_id",
           "name": "job_id",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        },
+        {
+          "localized_name": "attempt_id",
+          "name": "attempt_id",
           "type": "STRING",
           "links": [
             2
@@ -95,7 +115,9 @@
         "Node name for S&R": "LineAApprove"
       },
       "widgets_values": [
-        "review only (no 3D)"
+        "",
+        "review only (no 3D)",
+        false
       ]
     },
     {
@@ -118,7 +140,19 @@
           "localized_name": "job_id",
           "name": "job_id",
           "type": "STRING",
-          "link": 2
+          "link": 1,
+          "widget": {
+            "name": "job_id"
+          }
+        },
+        {
+          "localized_name": "attempt_id",
+          "name": "attempt_id",
+          "type": "STRING",
+          "link": 2,
+          "widget": {
+            "name": "attempt_id"
+          }
         }
       ],
       "outputs": [
@@ -131,6 +165,14 @@
           ]
         },
         {
+          "localized_name": "attempt_id",
+          "name": "attempt_id",
+          "type": "STRING",
+          "links": [
+            4
+          ]
+        },
+        {
           "localized_name": "cutout",
           "name": "cutout",
           "type": "IMAGE",
@@ -140,7 +182,10 @@
       "properties": {
         "Node name for S&R": "LineACutout"
       },
-      "widgets_values": []
+      "widgets_values": [
+        "",
+        ""
+      ]
     },
     {
       "id": 4,
@@ -163,6 +208,12 @@
           "name": "job_id",
           "type": "STRING",
           "link": 3
+        },
+        {
+          "localized_name": "attempt_id",
+          "name": "attempt_id",
+          "type": "STRING",
+          "link": 4
         },
         {
           "localized_name": "model_seed",
@@ -193,6 +244,26 @@
             "name": "texture_size"
           },
           "label": "Texture size"
+        },
+        {
+          "localized_name": "remesh",
+          "name": "remesh",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "remesh"
+          },
+          "label": "Remesh (off = safe)"
+        },
+        {
+          "localized_name": "drop_floaters",
+          "name": "drop_floaters",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "drop_floaters"
+          },
+          "label": "Drop floaters (off = safe)"
         }
       ],
       "outputs": [
@@ -200,12 +271,6 @@
           "localized_name": "glb_path",
           "name": "glb_path",
           "type": "STRING",
-          "links": null
-        },
-        {
-          "localized_name": "preview",
-          "name": "preview",
-          "type": "IMAGE",
           "links": null
         }
       ],
@@ -215,25 +280,27 @@
       "widgets_values": [
         42,
         "1024_cascade",
-        2048
+        2048,
+        false,
+        false
       ]
     }
   ],
   "links": [
     [
       1,
-      1,
-      0,
       2,
+      0,
+      3,
       0,
       "STRING"
     ],
     [
       2,
       2,
-      0,
+      1,
       3,
-      0,
+      1,
       "STRING"
     ],
     [
@@ -242,6 +309,14 @@
       0,
       4,
       0,
+      "STRING"
+    ],
+    [
+      4,
+      3,
+      1,
+      4,
+      1,
       "STRING"
     ]
   ],
@@ -256,8 +331,16 @@
           "job_id"
         ],
         [
+          "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:2:job_id",
+          "job_id"
+        ],
+        [
           "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:2:approve_candidate",
           "approve_candidate"
+        ],
+        [
+          "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:2:override_qa",
+          "override_qa"
         ],
         [
           "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:4:pipeline_type",
@@ -270,6 +353,14 @@
         [
           "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:4:model_seed",
           "model_seed"
+        ],
+        [
+          "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:4:remesh",
+          "remesh"
+        ],
+        [
+          "dcc07b14-8051-5d78-aa35-9fb7c5b175e0:4:drop_floaters",
+          "drop_floaters"
         ]
       ],
       "outputs": [
