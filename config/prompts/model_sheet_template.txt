@@ -1,0 +1,1 @@
+single isolated object, entire object fully visible and centered with margin around it, plain uniform light gray background, no environment, no floor, no ground plane, no cast shadow, no fog, no glow, no particles, no text, no watermark, soft even studio lighting, three-quarter view from a slightly elevated camera, clear readable silhouette, stylized hand-painted game asset

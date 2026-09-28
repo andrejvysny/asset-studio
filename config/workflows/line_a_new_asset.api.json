@@ -1,0 +1,178 @@
+{
+  "1": {
+    "class_type": "LineACreateJob",
+    "_meta": {
+      "title": "create_job"
+    },
+    "inputs": {
+      "prompt": "wooden medieval barrel",
+      "asset_type": "small_prop",
+      "target_triangles": 0,
+      "candidate_count": 4,
+      "seed_family": 0,
+      "lora_name": "none",
+      "lora_strength": 0.8,
+      "notes": ""
+    }
+  },
+  "2": {
+    "class_type": "LineAEnhancePrompt",
+    "_meta": {
+      "title": "enhance"
+    },
+    "inputs": {
+      "job_id": [
+        "1",
+        0
+      ]
+    }
+  },
+  "3": {
+    "class_type": "LineAConfirmPrompt",
+    "_meta": {
+      "title": "confirm_prompt"
+    },
+    "inputs": {
+      "final_prompt": "",
+      "job_id": [
+        "2",
+        0
+      ]
+    }
+  },
+  "4": {
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "unet"
+    },
+    "inputs": {
+      "unet_name": "qwen_image_2512_fp8_e4m3fn.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "5": {
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "text_encoder"
+    },
+    "inputs": {
+      "clip_name": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "6": {
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "vae"
+    },
+    "inputs": {
+      "vae_name": "qwen_image_vae.safetensors"
+    }
+  },
+  "7": {
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "shift"
+    },
+    "inputs": {
+      "shift": 3.1,
+      "sampling": "flow",
+      "model": [
+        "4",
+        0
+      ]
+    }
+  },
+  "8": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive"
+    },
+    "inputs": {
+      "clip": [
+        "5",
+        0
+      ],
+      "text": [
+        "3",
+        1
+      ]
+    }
+  },
+  "9": {
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative"
+    },
+    "inputs": {
+      "clip": [
+        "5",
+        0
+      ],
+      "text": [
+        "3",
+        2
+      ]
+    }
+  },
+  "10": {
+    "class_type": "LineAGenerateCandidates",
+    "_meta": {
+      "title": "generate"
+    },
+    "inputs": {
+      "width": 1328,
+      "height": 1328,
+      "steps": 50,
+      "cfg": 4.0,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "speed_preset": "quality",
+      "job_id": [
+        "3",
+        0
+      ],
+      "model": [
+        "7",
+        0
+      ],
+      "vae": [
+        "6",
+        0
+      ],
+      "positive": [
+        "8",
+        0
+      ],
+      "negative": [
+        "9",
+        0
+      ]
+    }
+  },
+  "11": {
+    "class_type": "LineARunQA",
+    "_meta": {
+      "title": "qa"
+    },
+    "inputs": {
+      "job_id": [
+        "10",
+        1
+      ]
+    }
+  },
+  "12": {
+    "class_type": "LineAReviewGallery",
+    "_meta": {
+      "title": "gallery"
+    },
+    "inputs": {
+      "job_id": [
+        "11",
+        0
+      ]
+    }
+  }
+}

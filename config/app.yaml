@@ -1,0 +1,44 @@
+pipeline:
+  default_candidate_count: 4
+  output_root: /output
+  allow_prompt_edit: true
+  qa_mode: advisory_only   # never auto-reject
+  always_cutout: true
+  enable_lora: true
+
+image:
+  width: 1328
+  height: 1328
+  steps: 50
+  cfg: 4.0
+  sampler: euler
+  scheduler: simple
+  speed_presets:           # optional Lightning LoRA, off by default
+    lightning_8step: {lora: Qwen-Image-2512-Lightning-8steps-V1.0-bf16.safetensors, steps: 8, cfg: 1.0}
+    lightning_4step: {lora: Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors, steps: 4, cfg: 1.0}
+
+gpu:                       # CDI device index per service; see compose.yml
+  image_generation: 0
+  prompt_service: 1        # time-shared with trellis (manual gate => never concurrent)
+  trellis: 1
+
+services:
+  prompt_service_url: http://prompt-service:8001
+  trellis_worker_url: http://trellis-worker:8002
+  idle_unload_seconds: 300
+
+timeouts:
+  enhance_s: 120
+  qa_per_image_s: 120
+  cutout_s: 120
+  trellis_s: 1800
+
+mesh:
+  triangle_floor: 2000
+  default_decimation_target: 200000
+  texture_size: 2048
+  min_component_ratio: 0.01   # drop components < 1% of faces
+
+paths:
+  lora_dir: /models/loras/style
+  workflow_dir: /config/workflows

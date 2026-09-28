@@ -1,0 +1,23 @@
+# Advisory only: a candidate is "not_recommended" if any check with severity=major fails,
+# or >= minor_fail_limit minor checks fail. Nothing is ever auto-rejected.
+minor_fail_limit: 2
+
+# Checked by Qwen3-VL (id -> question shown to the model).
+vlm_checks:
+  single_object:   {severity: major, q: "Exactly one object is depicted."}
+  fully_visible:   {severity: major, q: "The whole object is visible; nothing is cut off by the image border."}
+  no_floor:        {severity: minor, q: "There is no floor, ground plane or pedestal."}
+  no_shadow:       {severity: minor, q: "There is no cast shadow under or behind the object."}
+  no_environment:  {severity: major, q: "The background is plain with no environment or scene clutter."}
+  no_fog:          {severity: minor, q: "There is no fog, haze or mist."}
+  no_glow:         {severity: minor, q: "There is no glow, bloom or VFX haze."}
+  no_text:         {severity: major, q: "There is no text, watermark, logo or UI."}
+  good_view_angle: {severity: minor, q: "The view is three-quarter from a slightly elevated camera."}
+  silhouette:      {severity: minor, q: "The silhouette is clear and readable."}
+  suitable_3d:     {severity: major, q: "The image is well suited for single-image 3D reconstruction."}
+
+# Computed from the BiRefNet mask (deterministic).
+mask_checks:
+  mask_not_cropped: {severity: major, border_px: 4, alpha_threshold: 128}
+  mask_fill_ratio:  {severity: minor, min: 0.08, max: 0.75}
+  mask_single_blob: {severity: major, min_secondary_ratio: 0.02}

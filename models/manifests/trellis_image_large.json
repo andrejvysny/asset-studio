@@ -1,0 +1,16 @@
+{
+  "name": "trellis_image_large",
+  "repo": "microsoft/TRELLIS-image-large",
+  "revision": "25e0d31ffbebe4b5a97464dd851910efc3002d96",
+  "local_dir": "models/checkpoints/trellis-image-large",
+  "files": {
+    "ckpts/ss_dec_conv3d_16l8_fp16.json": {
+      "size": 245,
+      "sha256": null
+    },
+    "ckpts/ss_dec_conv3d_16l8_fp16.safetensors": {
+      "size": 147591972,
+      "sha256": "1c76d4a40519aa2d711cc263a8404105231ac26db31d946bed48b84fee79009a"
+    }
+  }
+}

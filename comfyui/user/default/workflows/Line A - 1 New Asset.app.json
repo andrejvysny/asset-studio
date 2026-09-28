@@ -1,0 +1,943 @@
+{
+  "id": "d07d27e2-8ce6-5111-997c-3eaab5461139",
+  "revision": 0,
+  "last_node_id": 12,
+  "last_link_id": 14,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LineACreateJob",
+      "title": "create_job",
+      "pos": [
+        0,
+        0
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "prompt",
+          "name": "prompt",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "prompt"
+          },
+          "label": "Prompt"
+        },
+        {
+          "localized_name": "asset_type",
+          "name": "asset_type",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "asset_type"
+          },
+          "label": "Asset type"
+        },
+        {
+          "localized_name": "target_triangles",
+          "name": "target_triangles",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "target_triangles"
+          },
+          "label": "Target triangles (0 = none, hint only)"
+        },
+        {
+          "localized_name": "candidate_count",
+          "name": "candidate_count",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "candidate_count"
+          },
+          "label": "Variants"
+        },
+        {
+          "localized_name": "seed_family",
+          "name": "seed_family",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "seed_family"
+          },
+          "label": "Seed (0 = random)"
+        },
+        {
+          "localized_name": "lora_name",
+          "name": "lora_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "lora_name"
+          },
+          "label": "Style LoRA"
+        },
+        {
+          "localized_name": "lora_strength",
+          "name": "lora_strength",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "lora_strength"
+          },
+          "label": "LoRA strength"
+        },
+        {
+          "localized_name": "notes",
+          "name": "notes",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "notes"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": [
+            1
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineACreateJob"
+      },
+      "widgets_values": [
+        "wooden medieval barrel",
+        "small_prop",
+        0,
+        4,
+        0,
+        "none",
+        0.8,
+        ""
+      ]
+    },
+    {
+      "id": 2,
+      "type": "LineAEnhancePrompt",
+      "title": "enhance",
+      "pos": [
+        420,
+        0
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": [
+            2
+          ]
+        },
+        {
+          "localized_name": "enhanced_prompt",
+          "name": "enhanced_prompt",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineAEnhancePrompt"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 3,
+      "type": "LineAConfirmPrompt",
+      "title": "confirm_prompt",
+      "pos": [
+        760,
+        0
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "link": 2,
+          "widget": {
+            "name": "job_id"
+          }
+        },
+        {
+          "localized_name": "final_prompt",
+          "name": "final_prompt",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "final_prompt"
+          },
+          "label": "Edited prompt (optional, overrides enhanced)"
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": [
+            8
+          ]
+        },
+        {
+          "localized_name": "positive",
+          "name": "positive",
+          "type": "STRING",
+          "links": [
+            5
+          ]
+        },
+        {
+          "localized_name": "negative",
+          "name": "negative",
+          "type": "STRING",
+          "links": [
+            7
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineAConfirmPrompt"
+      },
+      "widgets_values": [
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 4,
+      "type": "UNETLoader",
+      "title": "unet",
+      "pos": [
+        0,
+        420
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "unet_name",
+          "name": "unet_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "unet_name"
+          }
+        },
+        {
+          "localized_name": "weight_dtype",
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "weight_dtype"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "MODEL",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "qwen_image_2512_fp8_e4m3fn.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 5,
+      "type": "CLIPLoader",
+      "title": "text_encoder",
+      "pos": [
+        0,
+        560
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip_name",
+          "name": "clip_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "clip_name"
+          }
+        },
+        {
+          "localized_name": "type",
+          "name": "type",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "type"
+          }
+        },
+        {
+          "localized_name": "device",
+          "name": "device",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "device"
+          },
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CLIP",
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            4,
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader"
+      },
+      "widgets_values": [
+        "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+        "qwen_image",
+        "default"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "VAELoader",
+      "title": "vae",
+      "pos": [
+        0,
+        700
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "vae_name",
+          "name": "vae_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "vae_name"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "VAE",
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "qwen_image_vae.safetensors"
+      ]
+    },
+    {
+      "id": 7,
+      "type": "ModelSamplingAuraFlow",
+      "title": "shift",
+      "pos": [
+        380,
+        420
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 3
+        },
+        {
+          "localized_name": "shift",
+          "name": "shift",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "shift"
+          }
+        },
+        {
+          "localized_name": "sampling",
+          "name": "sampling",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "sampling"
+          },
+          "shape": 7
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "MODEL",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            9
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ModelSamplingAuraFlow"
+      },
+      "widgets_values": [
+        3.1,
+        "flow"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "CLIPTextEncode",
+      "title": "positive",
+      "pos": [
+        760,
+        300
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 4
+        },
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "link": 5,
+          "widget": {
+            "name": "text"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CONDITIONING",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            11
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 9,
+      "type": "CLIPTextEncode",
+      "title": "negative",
+      "pos": [
+        760,
+        520
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 6
+        },
+        {
+          "localized_name": "text",
+          "name": "text",
+          "type": "STRING",
+          "link": 7,
+          "widget": {
+            "name": "text"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "CONDITIONING",
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode"
+      },
+      "widgets_values": [
+        ""
+      ]
+    },
+    {
+      "id": 10,
+      "type": "LineAGenerateCandidates",
+      "title": "generate",
+      "pos": [
+        1160,
+        200
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "link": 8
+        },
+        {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 9
+        },
+        {
+          "localized_name": "vae",
+          "name": "vae",
+          "type": "VAE",
+          "link": 10
+        },
+        {
+          "localized_name": "positive",
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 11
+        },
+        {
+          "localized_name": "negative",
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 12
+        },
+        {
+          "localized_name": "width",
+          "name": "width",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "width"
+          }
+        },
+        {
+          "localized_name": "height",
+          "name": "height",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "height"
+          }
+        },
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "steps"
+          }
+        },
+        {
+          "localized_name": "cfg",
+          "name": "cfg",
+          "type": "FLOAT",
+          "link": null,
+          "widget": {
+            "name": "cfg"
+          }
+        },
+        {
+          "localized_name": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "sampler_name"
+          }
+        },
+        {
+          "localized_name": "scheduler",
+          "name": "scheduler",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "scheduler"
+          }
+        },
+        {
+          "localized_name": "speed_preset",
+          "name": "speed_preset",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "speed_preset"
+          },
+          "label": "Speed preset"
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineAGenerateCandidates"
+      },
+      "widgets_values": [
+        1328,
+        1328,
+        50,
+        4.0,
+        "euler",
+        "simple",
+        "quality"
+      ]
+    },
+    {
+      "id": 11,
+      "type": "LineARunQA",
+      "title": "qa",
+      "pos": [
+        1560,
+        200
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "link": 13
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineARunQA"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 12,
+      "type": "LineAReviewGallery",
+      "title": "gallery",
+      "pos": [
+        1900,
+        200
+      ],
+      "size": [
+        340,
+        180
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "link": 14,
+          "widget": {
+            "name": "job_id"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "job_id",
+          "name": "job_id",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LineAReviewGallery"
+      },
+      "widgets_values": [
+        "latest"
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "STRING"
+    ],
+    [
+      2,
+      2,
+      0,
+      3,
+      0,
+      "STRING"
+    ],
+    [
+      3,
+      4,
+      0,
+      7,
+      0,
+      "MODEL"
+    ],
+    [
+      4,
+      5,
+      0,
+      8,
+      0,
+      "CLIP"
+    ],
+    [
+      5,
+      3,
+      1,
+      8,
+      1,
+      "STRING"
+    ],
+    [
+      6,
+      5,
+      0,
+      9,
+      0,
+      "CLIP"
+    ],
+    [
+      7,
+      3,
+      2,
+      9,
+      1,
+      "STRING"
+    ],
+    [
+      8,
+      3,
+      0,
+      10,
+      0,
+      "STRING"
+    ],
+    [
+      9,
+      7,
+      0,
+      10,
+      1,
+      "MODEL"
+    ],
+    [
+      10,
+      6,
+      0,
+      10,
+      2,
+      "VAE"
+    ],
+    [
+      11,
+      8,
+      0,
+      10,
+      3,
+      "CONDITIONING"
+    ],
+    [
+      12,
+      9,
+      0,
+      10,
+      4,
+      "CONDITIONING"
+    ],
+    [
+      13,
+      10,
+      1,
+      11,
+      0,
+      "STRING"
+    ],
+    [
+      14,
+      11,
+      0,
+      12,
+      0,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "linearMode": true,
+    "linearData": {
+      "inputs": [
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:prompt",
+          "prompt"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:asset_type",
+          "asset_type"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:target_triangles",
+          "target_triangles"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:3:final_prompt",
+          "final_prompt"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:10:speed_preset",
+          "speed_preset"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:lora_name",
+          "lora_name"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:lora_strength",
+          "lora_strength"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:candidate_count",
+          "candidate_count"
+        ],
+        [
+          "d07d27e2-8ce6-5111-997c-3eaab5461139:1:seed_family",
+          "seed_family"
+        ]
+      ],
+      "outputs": [
+        "12"
+      ]
+    }
+  },
+  "version": 0.4
+}

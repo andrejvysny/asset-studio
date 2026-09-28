@@ -1,0 +1,19 @@
+.env
+output/*
+!output/.gitkeep
+models/checkpoints/*
+models/loras/*/*
+!models/loras/*/.gitkeep
+models/cache/*
+!models/**/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# ComfyUI runtime state; only the generated Line A apps are tracked
+comfyui/user/*
+!comfyui/user/default/
+comfyui/user/default/*
+!comfyui/user/default/workflows/
+comfyui/user/default/workflows/*
+!comfyui/user/default/workflows/Line A - *.app.json

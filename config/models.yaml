@@ -1,0 +1,57 @@
+# Pinned model sources. Revisions resolved 2026-09-28.
+# local_dir is relative to repo root; mounted as /models in containers.
+models:
+  qwen3_vl_8b_instruct:
+    repo: Qwen/Qwen3-VL-8B-Instruct
+    revision: 0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    local_dir: models/checkpoints/qwen3-vl-8b-instruct
+    used_by: prompt-service
+
+  qwen_image_2512:
+    repo: Comfy-Org/Qwen-Image_ComfyUI
+    revision: 1f12b17be14c89b026c51a91d67c32f84bb047bc
+    local_dir: models/checkpoints/qwen-image-2512
+    include:
+      - split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors
+      - split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors
+      - split_files/vae/qwen_image_vae.safetensors
+    used_by: comfyui
+
+  qwen_image_2512_lightning:
+    repo: lightx2v/Qwen-Image-2512-Lightning
+    revision: a52649c9d0f6e1a248bff13f0df33bb8a2abdb52
+    local_dir: models/loras/speed
+    include:
+      - Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors
+      - Qwen-Image-2512-Lightning-8steps-V1.0-bf16.safetensors
+    optional: true
+    used_by: comfyui
+
+  birefnet:
+    repo: ZhengPeng7/BiRefNet
+    revision: e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4
+    local_dir: models/checkpoints/birefnet
+    used_by: trellis-worker
+
+  trellis2:
+    repo: microsoft/TRELLIS.2-4B
+    revision: af44b45f2e35a493886929c6d786e563ec68364d
+    local_dir: models/checkpoints/trellis2
+    used_by: trellis-worker
+
+  trellis_image_large:
+    # only the sparse-structure decoder is used by TRELLIS.2
+    repo: microsoft/TRELLIS-image-large
+    revision: 25e0d31ffbebe4b5a97464dd851910efc3002d96
+    local_dir: models/checkpoints/trellis-image-large
+    include:
+      - ckpts/ss_dec_conv3d_16l8_fp16.json
+      - ckpts/ss_dec_conv3d_16l8_fp16.safetensors
+    used_by: trellis-worker
+
+  dinov3_vitl16:
+    repo: facebook/dinov3-vitl16-pretrain-lvd1689m
+    revision: ea8dc2863c51be0a264bab82070e3e8836b02d51
+    local_dir: models/checkpoints/dinov3-vitl16
+    gated: true   # accept license on HF + set HF_TOKEN
+    used_by: trellis-worker

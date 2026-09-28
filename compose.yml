@@ -1,0 +1,60 @@
+# GPU pinning uses CDI device names (podman native; Docker >= 25 with CDI enabled).
+# GPU0: comfyui only. GPU1: prompt-service + trellis-worker, time-shared (lazy load/unload).
+name: line-a
+
+x-common: &common
+  restart: unless-stopped
+  userns_mode: keep-id          # rootless podman: files in ./output owned by host user
+  networks: [internal]
+  environment: &env
+    HF_HUB_OFFLINE: "1"
+    TRANSFORMERS_OFFLINE: "1"
+    DO_NOT_TRACK: "1"
+    IDLE_UNLOAD_S: "300"
+    HOME: /tmp                  # keep-id user has no writable home
+
+services:
+  comfyui:
+    <<: *common
+    build: {context: ., dockerfile: comfyui/Dockerfile}
+    image: localhost/line-a-comfyui:dev
+    devices: ["${GPU_IMAGE:-nvidia.com/gpu=0}"]
+    ports: ["127.0.0.1:${COMFYUI_PORT:-8188}:8188"]
+    # keep-id user cannot write /opt/ComfyUI: all writable dirs are mounts or /tmp
+    command: [python, main.py, --listen, 0.0.0.0, --port, "8188", --disable-auto-launch,
+              --output-directory, /output/_comfy, --user-directory, /comfy-user,
+              --temp-directory, /tmp/comfy, --input-directory, /output/_comfy_input]
+    networks: [internal, public]
+    volumes:
+      - ./models:/models:ro
+      - ./output:/output
+      - ./config:/config:ro
+      - ./comfyui/user:/comfy-user
+      - ./comfyui/custom_nodes/line_a:/opt/ComfyUI/custom_nodes/line_a:ro  # code mounted: edit without rebuild
+
+  prompt-service:
+    <<: *common
+    build: {context: ., dockerfile: services/prompt_service/Dockerfile}
+    image: localhost/line-a-prompt-service:dev
+    devices: ["${GPU_3D:-nvidia.com/gpu=1}"]
+    volumes:
+      - ./models:/models:ro
+      - ./config:/config:ro
+      - ./output:/output:ro
+      - ./services/prompt_service:/app:ro
+
+  trellis-worker:
+    <<: *common
+    build: {context: ., dockerfile: services/trellis_worker/Dockerfile}
+    image: localhost/line-a-trellis-worker:dev
+    devices: ["${GPU_3D:-nvidia.com/gpu=1}"]
+    shm_size: 8g
+    volumes:
+      - ./models:/models:ro
+      - ./config:/config:ro
+      - ./output:/output
+      - ./services/trellis_worker:/app:ro
+
+networks:
+  internal: {internal: true}    # workers have no egress
+  public: {}

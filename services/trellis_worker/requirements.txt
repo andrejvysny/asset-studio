@@ -1,0 +1,19 @@
+# TRELLIS.2 --basic deps (gradio/tensorboard/lpips dropped: unused), pinned
+imageio==2.37.2
+imageio-ffmpeg==0.6.0
+tqdm==4.67.1
+easydict==1.13
+opencv-python-headless==4.11.0.86
+ninja==1.13.0
+trimesh==4.9.0
+transformers==4.57.1
+pillow==11.3.0
+kornia==0.8.2
+timm==1.0.22
+zstandard==0.25.0
+numpy==1.26.4
+scipy==1.15.3
+fastapi==0.121.0
+uvicorn==0.38.0
+pydantic==2.12.4
+pyyaml==6.0.3

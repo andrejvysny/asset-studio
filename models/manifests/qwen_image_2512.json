@@ -1,0 +1,20 @@
+{
+  "name": "qwen_image_2512",
+  "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+  "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+  "local_dir": "models/checkpoints/qwen-image-2512",
+  "files": {
+    "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors": {
+      "size": 20430679144,
+      "sha256": "5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b"
+    },
+    "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+      "size": 9384670680,
+      "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+    },
+    "split_files/vae/qwen_image_vae.safetensors": {
+      "size": 253806246,
+      "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+    }
+  }
+}
