@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from assetstudio_core.canonical import now_iso, sha256_json
-from assetstudio_core.domain import BatchItem, QaEvaluation
+from assetstudio_core.domain import JobItem, QaEvaluation
 from assetstudio_core.ids import derived_id
 from assetstudio_core.qa import METRICS, CheckResult, QaRule, QaRuleset, evaluate_policy, parse_vlm_answers
 from assetstudio_processing import metrics
@@ -25,7 +25,8 @@ def reserved_colours(snap: dict[str, Any]) -> list[tuple[str, float]]:
             and not chain & set(c.get("allowed_categories", []))]
 
 
-def _vlm_results(env: TaskEnv, rules: list[QaRule], image: bytes, context: str) -> list[CheckResult]:
+def _vlm_results(env: TaskEnv, rules: list[QaRule], image: bytes, context: str,
+                 epoch: int | None) -> list[CheckResult]:
     vlm_rules = [r for r in rules if r.source == "vlm"]
     if not vlm_rules:
         return []
@@ -34,10 +35,11 @@ def _vlm_results(env: TaskEnv, rules: list[QaRule], image: bytes, context: str) 
     def unavailable(reason: str) -> list[CheckResult]:
         return [CheckResult(rule_id=r.id, source="vlm", severity=r.severity, result="unavailable", reason=reason,
                             evaluator="aux.vlm") for r in vlm_rules]
-    if aux is None:
+    if aux is None or epoch is None:
         return unavailable("no VLM service configured")
     try:
-        res = aux.qa(image=image, questions=[(r.id, r.question or "") for r in vlm_rules], context=context)
+        res = aux.qa(image=image, questions=[(r.id, r.question or "") for r in vlm_rules], context=context,
+                     epoch=epoch)
     except (EngineUnavailable, EngineRejected) as e:
         return unavailable(f"VLM unavailable: {e}"[:300])
     answers = parse_vlm_answers(res.get("checks"), [r.id for r in vlm_rules])
@@ -71,9 +73,10 @@ def qa(env: TaskEnv) -> dict[str, Any]:
     prompt = load_prompt(store, p["batch_id"], cset.prompt_revision_id)
     needs_mask = any(r.metric and "mask" in METRICS[r.metric].requires for r in enabled) or any(
         r.metric == "palette_reserved" for r in enabled)
+    epoch = None
     if any(r.source == "vlm" for r in enabled) or needs_mask:
         if env.studio.aux is not None:
-            env.studio.lanes["gpu1"].acquire("aux")
+            epoch = env.studio.lanes["gpu1"].acquire("aux")
     images = {c.id: store.artifact_bytes(c.artifact_id) for c in cset.candidates}
     masks: dict[str, Any] = {}
     mask_errors: dict[str, str] = {}
@@ -81,9 +84,9 @@ def qa(env: TaskEnv) -> dict[str, Any]:
         for c in cset.candidates:
             env.check_cancel()
             try:
-                if env.studio.aux is None:
+                if env.studio.aux is None or epoch is None:
                     raise EngineUnavailable("no segmentation service configured")
-                res = env.studio.aux.cutout(image=images[c.id])
+                res = env.studio.aux.cutout(image=images[c.id], epoch=epoch)
                 art = store.register_artifact(res["mask_png"], "candidate_mask", "image/png", lineage=[c.artifact_id],
                                               retention="candidate", source={"model": res.get("meta", {})})
                 masks[c.id] = (metrics.mask_array(res["mask_png"]), art.id)
@@ -93,7 +96,7 @@ def qa(env: TaskEnv) -> dict[str, Any]:
     evaluated: dict[str, str] = {}
     for c in cset.candidates:
         env.check_cancel()
-        results = _vlm_results(env, enabled, images[c.id], prompt.positive)
+        results = _vlm_results(env, enabled, images[c.id], prompt.positive, epoch)
         mask = masks.get(c.id, (None, None))[0]
         for r in enabled:
             if r.source == "vlm":
@@ -116,7 +119,7 @@ def qa(env: TaskEnv) -> dict[str, Any]:
                 evaluated_at=now_iso(), op_id=env.op.id))
         evaluated[c.id] = qid
 
-    def apply(x: BatchItem) -> None:
+    def apply(x: JobItem) -> None:
         if x.current_set == cset.id:
             x.qa = {**x.qa, **evaluated}
         set_task(x, "qa", env.op.id, "succeeded")

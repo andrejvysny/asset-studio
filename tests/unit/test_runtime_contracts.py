@@ -9,7 +9,7 @@ import pytest
 from assetstudio_server.adapters.aux import AuxClient
 from assetstudio_server.adapters.base import AckError, LoraUse, T2IRequest
 from assetstudio_server.adapters.comfyui import ComfyEngine, Workflow
-from assetstudio_server.gpu import GpuLane, OwnershipUnknown
+from assetstudio_server.gpu import GpuLane, LaneWorker, OwnershipUnknown
 from assetstudio_server.models import verify_model
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,33 +50,95 @@ def aux_with(handler) -> AuxClient:
     return AuxClient("http://aux", httpx.Client(transport=httpx.MockTransport(handler), base_url="http://aux"))
 
 
+def _ok_release(r: httpx.Request) -> httpx.Response:
+    body = json.loads(r.content)
+    return httpx.Response(200, json={"loaded": False, "owner_token": body["owner_token"], "epoch": body["epoch"],
+                                     "active": 0, "admitting": False, "session_id": "s1"})
+
+
+def _worker(unload, lease=None) -> LaneWorker:
+    return LaneWorker(lease or (lambda e: {"epoch": e, "admitting": True, "session_id": "w", "active": 0}), unload)
+
+
+def _lane(workers: dict[str, LaneWorker]) -> GpuLane:
+    counter = iter(range(1, 1000))
+    return GpuLane("gpu1", workers, lambda: next(counter))
+
+
 @pytest.mark.parametrize("responder", [
     lambda r: (_ for _ in ()).throw(httpx.ReadTimeout("t")),
     lambda r: (_ for _ in ()).throw(httpx.ConnectError("c")),
     lambda r: (_ for _ in ()).throw(httpx.RemoteProtocolError("reset")),
     lambda r: httpx.Response(500, json={"loaded": False}),
+    lambda r: httpx.Response(409, json={"detail": "GPU work still active"}),
     lambda r: httpx.Response(200, text="not json"),
-    lambda r: httpx.Response(200, json={"loaded": True, "owner_token": json.loads(r.content)["owner_token"]}),
-    lambda r: httpx.Response(200, json={"loaded": False, "owner_token": "someone-else"}),
+    lambda r: httpx.Response(200, json={**json.loads(_ok_release(r).content), "loaded": True}),
+    lambda r: httpx.Response(200, json={**json.loads(_ok_release(r).content), "owner_token": "someone-else"}),
+    lambda r: httpx.Response(200, json={**json.loads(_ok_release(r).content), "active": 1}),
+    lambda r: httpx.Response(200, json={**json.loads(_ok_release(r).content), "epoch": 0}),
+    lambda r: httpx.Response(200, json={**json.loads(_ok_release(r).content), "admitting": True}),
 ])
 def test_unload_without_explicit_ack_blocks_handoff(responder) -> None:
+    """RI11: timeout, reset, malformed, loaded=true, wrong token/epoch, active work -> ownership stays unknown."""
     aux = aux_with(responder)
-    with pytest.raises(AckError):
-        aux.unload("tok")
-    lane = GpuLane("gpu1", {"aux": aux.unload, "comfy3d": lambda t: {"loaded": False, "owner_token": t}})
+    lane = _lane({"aux": _worker(aux.unload), "worker3d": _worker(lambda t, e: json.loads(
+        _ok_release(httpx.Request("POST", "/", json={"owner_token": t, "epoch": e})).content))})
     with pytest.raises(OwnershipUnknown):
-        lane.acquire("comfy3d")
+        lane.acquire("worker3d")
     assert lane.state == "unknown" and lane.owner is None
 
 
-def test_explicit_ack_grants() -> None:
-    aux = aux_with(lambda r: httpx.Response(200, json={"loaded": False,
-                                                       "owner_token": json.loads(r.content)["owner_token"]}))
-    lane = GpuLane("gpu1", {"aux": aux.unload, "comfy3d": lambda t: {"loaded": False, "owner_token": t}})
-    lane.acquire("comfy3d")
-    assert lane.owner == "comfy3d" and lane.state == "owned"
-    lane.acquire("aux")  # comfy3d must now ack
-    assert lane.owner == "aux"
+def test_explicit_ack_grants_with_increasing_epochs() -> None:
+    aux = aux_with(_ok_release)
+    w3d = LaneWorker(lambda e: {"epoch": e, "admitting": True, "session_id": "w3"},
+                     lambda t, e: {"loaded": False, "owner_token": t, "epoch": e, "active": 0, "admitting": False})
+    lane = _lane({"aux": LaneWorker(lambda e: {"epoch": e, "admitting": True, "session_id": "a"}, aux.unload),
+                  "worker3d": w3d})
+    e1 = lane.acquire("worker3d")
+    assert lane.owner == "worker3d" and lane.state == "owned" and lane.acquire("worker3d") == e1
+    e2 = lane.acquire("aux")  # worker3d must now ack for the new epoch
+    assert lane.owner == "aux" and e2 > e1 and lane.sessions == {"worker3d": "w3", "aux": "a"}
+    with pytest.raises(OwnershipUnknown):
+        lane.epoch_for("worker3d")
+
+
+def test_rejected_lease_keeps_ownership_unknown() -> None:
+    def refuse(e: int) -> dict:
+        raise AckError("stale")
+    lane = _lane({"worker3d": LaneWorker(refuse, lambda t, e: {})})
+    with pytest.raises(OwnershipUnknown):
+        lane.acquire("worker3d")
+    assert lane.state == "unknown"
+
+
+def test_worker_lease_drain_waits_for_export_and_fences_stale_epochs() -> None:
+    """RI10: unload during export cannot acknowledge release early; nothing is admitted during/after drain."""
+    import sys
+    import threading
+    import time
+
+    sys.path.insert(0, str(ROOT / "services" / "worker_common"))
+    from lease import Lease, StaleLease
+
+    lease = Lease()
+    lease.grant(3)
+    lease.enter(3)  # an export (or sampling, transfer) in flight
+    released: list[float] = []
+    t0 = time.monotonic()
+    th = threading.Thread(target=lambda: released.append(lease.drain(4, timeout=5.0) and time.monotonic() - t0))
+    th.start()
+    time.sleep(0.2)
+    with pytest.raises(StaleLease):
+        lease.enter(3)  # admission stopped the moment drain began
+    with pytest.raises(StaleLease):
+        lease.enter(4)
+    assert not released  # still waiting for the export
+    lease.leave()
+    th.join(2)
+    assert released and released[0] >= 0.2
+    with pytest.raises(StaleLease):
+        lease.grant(2)  # a Studio holding an older epoch can never regain the device
+    assert lease.grant(5)["admitting"] is True
 
 
 def req(**kw) -> T2IRequest:

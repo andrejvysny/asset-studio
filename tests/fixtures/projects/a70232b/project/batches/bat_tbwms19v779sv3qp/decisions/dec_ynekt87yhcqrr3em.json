@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "dec_ynekt87yhcqrr3em",
+  "gate": "final_acceptance",
+  "batch_id": "bat_tbwms19v779sv3qp",
+  "item_id": "itm_kkrsrdve6tytecbr",
+  "bound": {
+    "build_run_id": "run_rfe4fx8r1gam0y2x",
+    "artifacts": {
+      "image": "art_dfe7a8s5qv7wyrsc",
+      "preview": "art_p99kkq0mqkk4nf5n",
+      "meta": "art_50s90rpg9dcd7ep8"
+    }
+  },
+  "qa_status": null,
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:42.948Z",
+  "actor": "operator",
+  "idempotency_key": "fx-sprite-acc"
+}

@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "project_id": "prj_zrce9bd698s4ay7d",
+  "config_revision": 2,
+  "category_id": "props",
+  "category_chain": [
+    "props"
+  ],
+  "values": {
+    "kind": "model3d",
+    "recipe_id": "model3d.default",
+    "naming": "{name}",
+    "budget": null,
+    "build_profile": null,
+    "qa_ruleset": "model3d",
+    "reference_set": null,
+    "style": "house",
+    "style_lora": null,
+    "export_presets": null,
+    "candidate_count": 2
+  },
+  "sources": {
+    "kind": "category:props",
+    "recipe_id": "recipe",
+    "naming": "recipe",
+    "budget": "unset",
+    "build_profile": "unset",
+    "qa_ruleset": "qa:model3d",
+    "reference_set": "unset",
+    "style": "project",
+    "style_lora": "unset",
+    "export_presets": "unset",
+    "candidate_count": "item"
+  },
+  "recipe": {
+    "id": "model3d.default",
+    "version": 1,
+    "kind": "model3d"
+  },
+  "parameters": {
+    "candidate_count": 2,
+    "steps": 50,
+    "cfg": 4.0,
+    "width": 1328,
+    "height": 1328,
+    "speed_preset": "quality",
+    "cutout_padding": 0.1,
+    "texture_size": 2048,
+    "cleanup": "conservative"
+  },
+  "template": "single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+  "negative": "multiple objects, scene, floor, pedestal, cast shadow, text, watermark, cropped",
+  "qa_ruleset": {
+    "label": "3D model candidates",
+    "kind": "model3d",
+    "rules": [
+      {
+        "id": "single_object",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "Exactly one object is depicted.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "fully_visible",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The whole object is visible; nothing is cut off by the frame.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_environment",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The background is plain, with no scene or environment.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_floor",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "There is no floor, ground plane or pedestal.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_shadow",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "There is no cast shadow.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_text",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The image contains no text, letters, logo or watermark.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "suitable_3d",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The object is suitable for single-image 3D reconstruction.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "mask_margin",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": null,
+        "metric": "mask_margin",
+        "params": {}
+      },
+      {
+        "id": "mask_fill",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": null,
+        "metric": "mask_fill",
+        "params": {}
+      },
+      {
+        "id": "mask_single_blob",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": null,
+        "metric": "mask_single_blob",
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "style": {
+    "label": "House",
+    "guide": "painterly, warm light",
+    "negative": "photo",
+    "palette": []
+  },
+  "reference_set": null,
+  "sha256": "cc7936852e1314dfdebb8ffd7584cc9f611259e76645b63e03a6f374978b64cf"
+}

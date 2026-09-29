@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "art_njqh0czar5qe86k4",
+  "role": "preview",
+  "sha256": "371387f80a07b740980baca9df4b69f6fb58c36b7fbb557817149e8784821159",
+  "size": 21001,
+  "mime": "image/png",
+  "meta": {
+    "width": 768,
+    "height": 768,
+    "derived": "3x3 tiling preview"
+  },
+  "lineage": [
+    "art_6ga3pgzktfqvepdf"
+  ],
+  "created_at": "2026-09-29T12:58:27.906Z",
+  "retention": "essential",
+  "source": {}
+}

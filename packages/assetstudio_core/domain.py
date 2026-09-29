@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .kinds import Kind, Origin
 
-SCHEMA_VERSION = 1
+# 2: production "Batch" became "Job" (records read v1 `batch_id` as `job_id`); true Batches group Jobs.
+SCHEMA_VERSION = 2
 TaskState = Literal[
     "queued", "running", "succeeded", "failed", "cancel_requested", "cancelled", "blocked", "reconciling"]
 
@@ -15,6 +16,19 @@ TaskState = Literal[
 class Record(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: int = SCHEMA_VERSION
+
+
+class JobScoped(Record):
+    """v1 records name their Job `batch_id` (the entity was called Batch). Read-compatible; never rewritten when
+    immutable, so published provenance keeps its original bytes and hashes."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _v1_batch_id(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "batch_id" in data and "job_id" not in data:
+            data = {**data, "job_id": data["batch_id"], "schema_version": SCHEMA_VERSION}
+            data.pop("batch_id")
+        return data
 
 
 class Artifact(Record):
@@ -110,7 +124,10 @@ class ShotList(Record):
     items: list[ShotItem] = []
 
 
-class Batch(Record):
+class Job(Record):
+    """A configured production workflow for one or more items of one kind/recipe (formerly "Batch").
+    Legacy ids keep their `bat_` prefix; new Jobs use `job_`."""
+
     id: str
     alias: str
     title: str
@@ -123,6 +140,56 @@ class Batch(Record):
     source: str = "ad hoc"
     config_revision: int
     revision: int = 1
+    archived_at: str | None = None
+
+
+class Batch(Record):
+    """A named group of Jobs of one project, scheduled together. Owns no item content, history or style."""
+
+    id: str
+    alias: str
+    title: str
+    job_ids: list[str] = []
+    policy: dict[str, Any] = {}
+    created_at: str
+    updated_at: str
+    revision: int = 1
+    runs: list[str] = []
+    archived_at: str | None = None
+
+
+RunStatus = Literal["planned", "running", "waiting_for_review", "paused", "completed", "completed_with_errors",
+                    "cancelled", "closed"]
+Gate = Literal["prompt_confirmation", "candidate_approval", "build", "final_acceptance", "publication"]
+
+
+class BatchRun(Record):
+    """Frozen execution selection of a Batch (or of one Job when `batch_id` is None: a standalone run)."""
+
+    id: str
+    batch_id: str | None
+    batch_revision: int | None
+    plan_id: str
+    plan_sha256: str
+    command_id: str
+    selection: dict[str, dict[str, int]]  # job id -> {item id: item revision at start}
+    stop_at: str
+    created_at: str
+    waves: list[str] = []
+    closed_at: str | None = None
+    close_reason: str | None = None
+
+
+class WaveSelection(Record):
+    """One human gate action across Jobs: the exact revisions it bound. Each unit also has its own decision."""
+
+    id: str
+    run_id: str | None
+    gate: Gate
+    command_id: str
+    units: list[dict[str, Any]]
+    created_at: str
+    actor: str = "operator"
 
 
 class TaskRef(BaseModel):
@@ -140,9 +207,12 @@ class Published(BaseModel):
     display_version: int
 
 
-class BatchItem(Record):
+class JobItem(JobScoped):
+    """One requested output. `tasks`/`cancelled` are legacy (v1) fields kept for history: live task state is in
+    the journal only (a single authority avoids the item/journal dual-write crash gap)."""
+
     id: str
-    batch_id: str
+    job_id: str
     name: str
     brief: str
     category_id: str | None
@@ -225,11 +295,13 @@ class QaEvaluation(Record):
     op_id: str | None = None
 
 
-class ReviewDecision(Record):
+class ReviewDecision(JobScoped):
     id: str
     gate: Literal["candidate_approval", "final_acceptance"]
-    batch_id: str
+    job_id: str
     item_id: str
+    run_id: str | None = None
+    wave_id: str | None = None
     bound: dict[str, Any]
     qa_status: str | None = None
     override_qa: bool = False
@@ -241,10 +313,27 @@ class ReviewDecision(Record):
     idempotency_key: str
 
 
-class BuildRun(Record):
+class Checkpoint(BaseModel):
+    """A committed build stage: enough to resume the next stage without redoing this one."""
+
+    model_config = ConfigDict(extra="forbid")
+    stage: str
+    stage_version: int = 1
+    inputs: dict[str, Any] = {}  # input artifact ids + sha256
+    settings: dict[str, Any] = {}
+    identities: dict[str, Any] = {}  # actual model/engine/implementation identities at execution
+    outputs: dict[str, str] = {}  # role -> artifact id
+    receipt: dict[str, Any] = {}
+    committed_at: str
+
+
+class BuildRun(JobScoped):
+    """One build attempt or explicit derivative (re-export/repair). Attached to its item when CREATED, so a
+    failed attempt and its durable intermediates stay visible and recoverable."""
+
     id: str
     item_id: str
-    batch_id: str
+    job_id: str
     build: str
     inputs: dict[str, Any]
     status: TaskState
@@ -255,3 +344,9 @@ class BuildRun(Record):
     updated_at: str
     op_id: str
     error: str | None = None
+    kind: Literal["build", "reexport", "repair"] = "build"
+    derived_from: str | None = None  # source BuildRun of a re-export/repair
+    checkpoints: dict[str, Checkpoint] = {}
+    executions: dict[str, list[str]] = {}  # stage -> worker execution ids, persisted BEFORE each submission
+    preview: Literal["pending", "available", "failed", "unsupported"] | None = None
+    preview_error: str | None = None

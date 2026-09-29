@@ -75,6 +75,35 @@ def cmd_project_register(s: Settings, a: argparse.Namespace) -> int:
     return 0
 
 
+def _exclusive(s: Settings, project: str):  # noqa: ANN202 - ProjectContext
+    """Offline tools need the single-writer lock: a running Studio must be stopped (or drained) first."""
+    ctx = Registry(s).get(project)
+    if ctx.read_only:
+        print(f"project {project} is owned by a running Studio ({ctx.owner.get('instance_id')}); stop it first",
+              file=sys.stderr)
+        raise SystemExit(2)
+    return ctx
+
+
+def cmd_project_backup(s: Settings, a: argparse.Namespace) -> int:
+    from assetstudio_storage.backup import create_backup
+
+    s.ensure()
+    ctx = _exclusive(s, a.project)
+    out = Path(a.out) if a.out else s.instance_dir / "backups"
+    path = create_backup(ctx.root, ctx.id, out, s.instance_dir / "journal" / "operations.sqlite")
+    _print({"backup": str(path), "size": path.stat().st_size})
+    return 0
+
+
+def cmd_project_restore_verify(s: Settings, a: argparse.Namespace) -> int:
+    from assetstudio_storage.backup import verify_backup
+
+    rep = verify_backup(Path(a.backup))
+    _print(rep.__dict__)
+    return 0 if rep.ok else 1
+
+
 def cmd_storage_reindex(s: Settings, a: argparse.Namespace) -> int:
     s.ensure()
     ctx = Registry(s).get(a.project)
@@ -128,6 +157,13 @@ def main(argv: list[str] | None = None) -> int:
     prr = pr.add_parser("register")
     prr.add_argument("root")
     prr.set_defaults(fn=cmd_project_register)
+    pb = pr.add_parser("backup", help="tar of the project root + a consistent journal copy (Studio stopped)")
+    pb.add_argument("project")
+    pb.add_argument("--out", help="directory (default: <instance>/backups)")
+    pb.set_defaults(fn=cmd_project_backup)
+    pv = pr.add_parser("restore-verify", help="verify a backup's inventory, hashes and journal (CPU only)")
+    pv.add_argument("backup")
+    pv.set_defaults(fn=cmd_project_restore_verify)
     st = sub.add_parser("storage").add_subparsers(dest="sub", required=True)
     for name, fn in (("reindex", cmd_storage_reindex), ("verify", cmd_storage_verify)):
         sp = st.add_parser(name)

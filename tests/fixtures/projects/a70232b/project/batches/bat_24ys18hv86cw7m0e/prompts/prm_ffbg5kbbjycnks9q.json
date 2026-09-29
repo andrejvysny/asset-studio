@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_ffbg5kbbjycnks9q",
+  "item_id": "itm_pm4k8cb9avq9z0n0",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:40.808Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Harbour",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Harbour",
+    "tags": [
+      "Concept art"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Harbour, clearly readable form, simulated enhancement.",
+  "template": "",
+  "positive": "Brief for Harbour, clearly readable form, simulated enhancement",
+  "negative": "watermark, signature, text, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "ac765f16f24cbb3364d14c8591615bc3104fb68ca2b03d4f055d61108ed5265c"
+}

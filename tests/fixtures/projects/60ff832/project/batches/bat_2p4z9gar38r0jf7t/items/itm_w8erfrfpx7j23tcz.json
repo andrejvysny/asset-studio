@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "itm_w8erfrfpx7j23tcz",
+  "batch_id": "bat_2p4z9gar38r0jf7t",
+  "name": "Harbour",
+  "brief": "brief for Harbour",
+  "category_id": "concept",
+  "shot_id": null,
+  "target_asset_id": null,
+  "snapshot_sha": "044904a7f76cb6df8bada02a46dfd730bd1de890f308caf8439cd0f33a8bd220",
+  "revision": 13,
+  "prompt_revisions": [
+    "prm_casd2v7hb9bp87fy"
+  ],
+  "current_prompt": "prm_casd2v7hb9bp87fy",
+  "prompt_confirmed": "prm_casd2v7hb9bp87fy",
+  "candidate_sets": [
+    "cs_fanqkkmst13g9dts"
+  ],
+  "current_set": "cs_fanqkkmst13g9dts",
+  "qa": {
+    "cnd_8fdem8zb6nrfasb8": "qa_qry6jp122ya9bq76",
+    "cnd_9db9bsnj8qexmtga": "qa_12gxqsrx33tda7j6"
+  },
+  "decisions": [],
+  "approval": null,
+  "regen_requested": false,
+  "build_runs": [],
+  "current_build": null,
+  "accepted_build": null,
+  "published": null,
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_jqacv42f0ydferm6",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_jjrfd0cdqjxa206d",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_fb9p5hfte8j25mma",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:24.772Z",
+  "updated_at": "2026-09-29T12:58:25.457Z"
+}

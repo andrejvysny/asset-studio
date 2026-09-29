@@ -7,7 +7,10 @@ import secrets
 PREFIXES = {
     "prj", "cat", "shot", "ast", "ver", "bat", "itm", "prm", "cs", "cnd", "qa", "dec", "run", "op", "art", "imp", "exp",
     "ref", "style", "qrs",
+    # Jobs/Batches milestone. `bat` stays valid: legacy production batches ARE Jobs (never new grouping Batches).
+    "job", "bch", "brn", "wav", "stk", "pas", "att", "sty", "san", "xpl", "xrn", "cmd", "sel", "upl", "aud",
 }
+JOB_PREFIXES = ("job", "bat")
 _ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32, lowercase
 _ID_RE = re.compile(r"^([a-z]{2,5})_([0-9a-hjkmnp-tv-z]{16})$")
 # Human-chosen ids inside studio.yaml (categories, rule sets, presets): slug-like, stable once created.
@@ -58,3 +61,13 @@ def derived_id(prefix: str, *parts: str) -> str:
     h = hashlib.blake2b("\x00".join((prefix, *parts)).encode(), digest_size=10).digest()
     n = int.from_bytes(h, "big")
     return f"{prefix}_" + "".join(_ALPHABET[(n >> (5 * i)) & 31] for i in range(16))
+
+
+def is_job_id(value: object) -> bool:
+    return any(is_id(value, p) for p in JOB_PREFIXES)
+
+
+def validate_job_id(value: object) -> str:
+    if not is_job_id(value):
+        raise InvalidId(f"invalid job id: {value!r}")
+    return value  # type: ignore[return-value]

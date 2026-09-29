@@ -45,7 +45,7 @@ def test_full_concept_lifecycle(page, studio_url: str) -> None:
     page.locator("label.field", has_text="Name").locator("input").fill("Concept round 1")
     shot(page, "01-new-batch")
     page.get_by_role("button", name=re.compile(r"Create batch \+ enhance 2 prompts")).click()
-    expect(page).to_have_url(re.compile(r"/batches/bat_[a-z0-9]+"))
+    expect(page).to_have_url(re.compile(r"/batches/(bat|job)_[a-z0-9]+"))
     expect(page.get_by_label("prompt Tavern interior")).to_have_value(re.compile("simulated enhancement"), timeout=15000)
     shot(page, "02-prompts")
     page.get_by_role("button", name=re.compile(r"Confirm 2 prompts \+ generate")).click()

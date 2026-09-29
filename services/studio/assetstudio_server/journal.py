@@ -30,6 +30,19 @@ CREATE INDEX IF NOT EXISTS ops_batch ON operations(project_id, batch_id);
 CREATE TABLE IF NOT EXISTS commands (
   key TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, response TEXT NOT NULL, created_at TEXT NOT NULL);
 """
+# v2: client idempotency keys are scoped by project + action family (a key reused in another project or for another
+# action is a different command). v1 rows stay readable under project '' / action 'legacy' and never alias new ones.
+_V2 = """
+CREATE TABLE IF NOT EXISTS scoped_commands (
+  project_id TEXT NOT NULL, action TEXT NOT NULL, key TEXT NOT NULL, payload_hash TEXT NOT NULL,
+  response TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (project_id, action, key));
+INSERT OR IGNORE INTO scoped_commands SELECT '', 'legacy', key, payload_hash, response, created_at FROM commands;
+"""
+# v3: monotonic GPU-lane fencing epochs survive Studio restarts (a restarted Studio never reuses an epoch).
+_V3 = """
+CREATE TABLE IF NOT EXISTS lane_epochs (lane TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
+"""
+_MIGRATIONS = ((2, _V2), (3, _V3))
 
 
 class IdempotencyConflict(Exception):
@@ -77,6 +90,9 @@ class Journal:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript(_DDL)
+        for version, script in _MIGRATIONS:
+            if self._db.execute("PRAGMA user_version").fetchone()[0] < version:
+                self._db.executescript(f"BEGIN;{script}PRAGMA user_version={version}; COMMIT;")
         self._lock = threading.RLock()
         self.changed = threading.Condition(self._lock)
 
@@ -85,7 +101,9 @@ class Journal:
 
     def enqueue(self, *, project_id: str, kind: str, lane: str, affinity: str, payload: dict[str, Any],
                 idempotency_key: str, batch_id: str | None = None, hold: bool = False) -> tuple[Operation, bool]:
-        """hold=True creates the op unclaimable until release(): callers mark items first, then release."""
+        """hold=True creates the op unclaimable until release(): callers mark items first, then release.
+        The client key is scoped by project and operation kind before it is stored."""
+        idempotency_key = f"{project_id}/{kind}/{idempotency_key}"
         phash = sha256_json({"kind": kind, "payload": payload})
         with self._lock:
             row = self._db.execute("SELECT * FROM operations WHERE idempotency_key=?", (idempotency_key,)).fetchone()
@@ -173,8 +191,11 @@ class Journal:
 
     def finish(self, op_id: str, state: str, *, result: dict[str, Any] | None = None,
                error: dict[str, Any] | None = None) -> None:
+        """A requested cancellation wins over a non-terminal outcome (blocked): it is never lost."""
         assert state in TERMINAL_STATES or state == "blocked"
         with self._lock:
+            if state == "blocked" and (cur := self.get(op_id)) is not None and cur.state == "cancel_requested":
+                state, error = "cancelled", {"code": "cancelled", "message": "cancelled while blocked"}
             self._db.execute("UPDATE operations SET state=?, result=?, error=?, updated_at=? WHERE id=?",
                              (state, json.dumps(result) if result is not None else None,
                               json.dumps(error) if error is not None else None, now_iso(), op_id))
@@ -191,34 +212,52 @@ class Journal:
                 self.update(op_id, state="cancel_requested")
             return self.get(op_id)
 
-    def requeue(self, op_id: str) -> None:
+    def requeue(self, op_id: str, from_states: tuple[str, ...] = ("blocked", "reconciling", "failed")) -> bool:
+        """Conditional: a cancelled/cancel-requested op is never resurrected by a retry or restart race."""
         with self._lock:
-            self._db.execute("UPDATE operations SET state='queued', error=NULL, updated_at=? WHERE id=?",
-                             (now_iso(), op_id))
+            n = self._db.execute(
+                f"UPDATE operations SET state='queued', error=NULL, updated_at=? WHERE id=? "
+                f"AND state IN ({','.join('?' * len(from_states))})", (now_iso(), op_id, *from_states)).rowcount
             self.changed.notify_all()
+            return n == 1
 
     def mark_running_as_reconciling(self) -> list[Operation]:
-        """Startup: never assume work stopped or finished just because this process restarted."""
+        """Startup: never assume work stopped or finished just because this process restarted. A pending
+        cancellation is kept as intent (the op finishes as cancelled), never turned back into runnable work."""
         with self._lock:
-            rows = self._db.execute(
-                "SELECT id FROM operations WHERE state IN ('running','cancel_requested')").fetchall()
+            rows = self._db.execute("SELECT id, state FROM operations WHERE state IN ('running','cancel_requested')"
+                                    ).fetchall()
             for r in rows:
-                self._db.execute("UPDATE operations SET state='reconciling', updated_at=? WHERE id=?",
-                                 (now_iso(), r["id"]))
-        return [op for r in rows if (op := self.get(r["id"])) is not None]
+                if r["state"] == "cancel_requested":
+                    self.finish(r["id"], "cancelled", error={"code": "cancelled",
+                                                             "message": "cancelled (confirmed after restart)"})
+                else:
+                    self._db.execute("UPDATE operations SET state='reconciling', updated_at=? WHERE id=?",
+                                     (now_iso(), r["id"]))
+        return [op for r in rows if r["state"] == "running" and (op := self.get(r["id"])) is not None]
+
+    def next_epoch(self, lane: str) -> int:
+        with self._lock:
+            self._db.execute("INSERT INTO lane_epochs VALUES (?, 1) ON CONFLICT(lane) DO UPDATE SET epoch=epoch+1",
+                             (lane,))
+            return int(self._db.execute("SELECT epoch FROM lane_epochs WHERE lane=?", (lane,)).fetchone()[0])
 
     # --- command idempotency (synchronous commands such as approvals) -------------------------------------------
-    def command_result(self, key: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    def command_result(self, project_id: str, action: str, key: str,
+                       payload: dict[str, Any]) -> dict[str, Any] | None:
+        """Same scope + key + request -> the recorded response; same scope + key + other request -> conflict."""
         phash = sha256_json(payload)
         with self._lock:
-            row = self._db.execute("SELECT * FROM commands WHERE key=?", (key,)).fetchone()
+            row = self._db.execute("SELECT * FROM scoped_commands WHERE project_id=? AND action=? AND key=?",
+                                   (project_id, action, key)).fetchone()
         if row is None:
             return None
         if row["payload_hash"] != phash:
             raise IdempotencyConflict("idempotency key reused with a different request")
         return json.loads(row["response"])
 
-    def record_command(self, key: str, payload: dict[str, Any], response: dict[str, Any]) -> None:
+    def record_command(self, project_id: str, action: str, key: str, payload: dict[str, Any],
+                       response: dict[str, Any]) -> None:
         with self._lock:
-            self._db.execute("INSERT OR IGNORE INTO commands VALUES (?,?,?,?)",
-                             (key, sha256_json(payload), json.dumps(response), now_iso()))
+            self._db.execute("INSERT OR IGNORE INTO scoped_commands VALUES (?,?,?,?,?,?)",
+                             (project_id, action, key, sha256_json(payload), json.dumps(response), now_iso()))

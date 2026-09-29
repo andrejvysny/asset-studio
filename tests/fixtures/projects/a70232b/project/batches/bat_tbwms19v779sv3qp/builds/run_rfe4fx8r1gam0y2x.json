@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "run_rfe4fx8r1gam0y2x",
+  "item_id": "itm_kkrsrdve6tytecbr",
+  "batch_id": "bat_tbwms19v779sv3qp",
+  "build": "sprite",
+  "inputs": {
+    "approval_id": "dec_z18nk05hpecfater",
+    "candidate_artifact_id": "art_hhbe7wbkjcmjx9nf",
+    "image_sha256": "6cd5b1251ecd09e5dfa9c3583f4991d8f2f3d96827130950cffd01e6cd0fa257"
+  },
+  "status": "succeeded",
+  "result": "valid",
+  "artifacts": {
+    "image": "art_dfe7a8s5qv7wyrsc",
+    "preview": "art_p99kkq0mqkk4nf5n",
+    "meta": "art_50s90rpg9dcd7ep8"
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "canvas_size",
+        "ok": true,
+        "detail": "512x512"
+      },
+      {
+        "id": "sprite_has_transparency",
+        "ok": true,
+        "detail": "some pixels fully transparent"
+      },
+      {
+        "id": "sprite_coverage",
+        "ok": true,
+        "detail": "66.7% of pixels opaque"
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "canvas_size",
+      "sprite_has_transparency",
+      "sprite_coverage"
+    ]
+  },
+  "created_at": "2026-09-29T12:58:42.742Z",
+  "updated_at": "2026-09-29T12:58:42.904Z",
+  "op_id": "op_bwd270ghq8gyhsnp",
+  "error": null
+}

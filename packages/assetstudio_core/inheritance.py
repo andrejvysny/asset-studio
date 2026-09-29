@@ -177,8 +177,10 @@ def build_snapshot(cfg: StudioConfig, category_id: str | None, item: dict[str, A
     values = {k: r.value for k, r in resolved.items()}
     pipe = cfg.pipelines.get(recipe.id)
     params = {**recipe.default_params(), **(pipe.parameters if pipe else {})}
+    param_sources = {k: (f"pipeline:{recipe.id}" if pipe and k in pipe.parameters else "recipe") for k in params}
     if values["candidate_count"] is not None:
         params["candidate_count"] = values["candidate_count"]
+        param_sources["candidate_count"] = resolved["candidate_count"].source
 
     def ref(table: dict[str, Any], key: str | None) -> Any:
         return table[key].model_dump(mode="json") if key and key in table else None
@@ -193,6 +195,7 @@ def build_snapshot(cfg: StudioConfig, category_id: str | None, item: dict[str, A
         "sources": {k: r.source for k, r in resolved.items()},
         "recipe": {"id": recipe.id, "version": recipe.version, "kind": recipe.kind.value},
         "parameters": params,
+        "parameter_sources": param_sources,
         "template": (pipe.template if pipe and pipe.template is not None else recipe.template),
         "negative": recipe.negative,
         "qa_ruleset": ref(cfg.qa_rulesets, values["qa_ruleset"]),

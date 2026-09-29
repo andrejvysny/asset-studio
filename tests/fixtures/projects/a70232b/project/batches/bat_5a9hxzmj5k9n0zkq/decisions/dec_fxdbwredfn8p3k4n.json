@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "dec_fxdbwredfn8p3k4n",
+  "gate": "candidate_approval",
+  "batch_id": "bat_5a9hxzmj5k9n0zkq",
+  "item_id": "itm_2edy4hmw0qthetdd",
+  "bound": {
+    "candidate_set_id": "cs_qh4ta9yba7d566kd",
+    "candidate_id": "cnd_3hy4zf2dgkcwc7rz",
+    "image_sha256": "76edcb5b0a8d7e5e830593121ab308400a168a4901715d29734e7b089a99fc25",
+    "artifact_id": "art_ab67bdx3pb86yxpc",
+    "prompt_revision_id": "prm_y4d06fvh837j4ww6",
+    "qa_evaluation_id": "qa_8w1gc34sg4p7501e",
+    "seed": 210797933902266
+  },
+  "qa_status": "recommended",
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:43.591Z",
+  "actor": "operator",
+  "idempotency_key": "fx-material-a0"
+}

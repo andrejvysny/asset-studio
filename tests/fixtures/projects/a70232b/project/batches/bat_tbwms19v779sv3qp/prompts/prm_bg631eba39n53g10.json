@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_bg631eba39n53g10",
+  "item_id": "itm_n3hb9sr9pdfj2wmh",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:41.988Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Archer",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Archer",
+    "tags": [
+      "Sprite"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Archer, clearly readable form, simulated enhancement.",
+  "template": "single subject, plain background, full figure visible",
+  "positive": "Brief for Archer, clearly readable form, simulated enhancement, single subject, plain background, full figure visible",
+  "negative": "multiple subjects, scene, text, watermark, cropped, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "e5a89ebfaff7d018d1ca1a5d0d5c2cf3883533b44bc74df291874af47d4bf15e"
+}

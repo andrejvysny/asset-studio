@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_4yk2fb1nm045fq4j",
+  "version_id": "ver_36a82npy55nm2g11",
+  "display_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "kind": "model3d",
+  "origin": "generated",
+  "display_name": "Crate",
+  "category_id": "props",
+  "tags": [],
+  "artifacts": {
+    "model": {
+      "artifact_id": "art_5pb0hfrem3cjfjvz",
+      "sha256": "f8434c1f88d735420dc026679d17f73f9af6665e3304113f7682057ebcac4324",
+      "size": 29504,
+      "mime": "model/gltf-binary"
+    },
+    "preview": {
+      "artifact_id": "art_1npqcjxb2mx33yt3",
+      "sha256": "f7c7bb6f02e4b012b295f109ddf89dffa19baa0a5862bc0d6b195ab079e9e65d",
+      "size": 75940,
+      "mime": "image/png"
+    },
+    "meta": {
+      "artifact_id": "art_1jd3973azejf4phh",
+      "sha256": "0f7d795f506b73ccfe01aaccee094a71d6906562dddbb4f047ccdd15e8c2f7d6",
+      "size": 554,
+      "mime": "application/json"
+    }
+  },
+  "sources": {
+    "batch_id": "bat_v6k5ecwqpgk7tq3x",
+    "item_id": "itm_vaneyp10m3ygzt5e",
+    "shot_id": null,
+    "prompt_revision_id": "prm_1nan2yjdppb18btr",
+    "candidate_set_id": "cs_y3j2vk7r1cbkq701",
+    "candidate_id": "cnd_3a4hatqdsp9rg54j",
+    "approval_id": "dec_hccs9hwjs55zsz3h",
+    "build_run_id": "run_anax5pgk4acjejsx",
+    "positive": "Brief for Crate, clearly readable form, simulated enhancement, single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+    "negative": "multiple objects, scene, floor, pedestal, cast shadow, text, watermark, cropped, photo",
+    "intermediates": {
+      "cutout": "art_yxrd2ym4tj2zvhcr",
+      "raw": "art_qkxsgwca7k4svd5v"
+    }
+  },
+  "config_snapshot_sha": "d563da67c235944f0183221798732baaca7910cf5696bd19e8b3605e2cdd8861",
+  "models": [
+    {
+      "key": "qwen_image_2512",
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "files": {
+        "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors": {
+          "size": 20430679144,
+          "sha256": "5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b"
+        },
+        "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+          "size": 9384670680,
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        "split_files/vae/qwen_image_vae.safetensors": {
+          "size": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        }
+      }
+    }
+  ],
+  "engine": {
+    "engine": "fake",
+    "simulated": true,
+    "workflow": "fake.t2i",
+    "workflow_version": 0,
+    "params": {
+      "width": 1328,
+      "height": 1328,
+      "steps": 50,
+      "cfg": 4.0,
+      "speed_preset": "quality"
+    },
+    "style_lora": null,
+    "speed_lora": null
+  },
+  "parameters": {
+    "seed": 4511270197526330,
+    "width": 1328,
+    "height": 1328,
+    "steps": 50,
+    "cfg": 4.0,
+    "speed_preset": "quality"
+  },
+  "qa": {
+    "evaluation_id": "qa_93b9xp2krvq0nesy",
+    "status": "recommended",
+    "coverage": {
+      "completed": 10,
+      "applicable": 10
+    },
+    "override": false,
+    "override_reason": null,
+    "failed": [],
+    "missing": []
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "container",
+        "ok": true,
+        "detail": "self-contained GLB 2.0"
+      },
+      {
+        "id": "reload",
+        "ok": true,
+        "detail": "1 mesh(es)"
+      },
+      {
+        "id": "non_empty",
+        "ok": true,
+        "detail": "1280 triangles"
+      },
+      {
+        "id": "finite_vertices",
+        "ok": true
+      },
+      {
+        "id": "valid_indices",
+        "ok": true
+      },
+      {
+        "id": "uvs_present",
+        "ok": true
+      },
+      {
+        "id": "material_texture_present",
+        "ok": true
+      },
+      {
+        "id": "triangle_budget",
+        "ok": true,
+        "detail": "1280 triangles (requested ≤100000, effective 100000)",
+        "advisory": true
+      },
+      {
+        "id": "single_component",
+        "ok": true,
+        "detail": "1 geometric components",
+        "advisory": true
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "container",
+      "reload",
+      "non_empty",
+      "finite_vertices",
+      "valid_indices",
+      "uvs_present",
+      "material_texture_present"
+    ]
+  },
+  "licence": {
+    "status": "not_cleared",
+    "components": [
+      {
+        "id": "qwen_image_2512",
+        "name": "Qwen-Image-2512 (fp8, Comfy-Org repack)",
+        "scope": "weights",
+        "licence": "Apache-2.0",
+        "status": "cleared"
+      },
+      {
+        "id": "birefnet",
+        "name": "BiRefNet (ZhengPeng7)",
+        "scope": "weights",
+        "licence": "MIT",
+        "status": "cleared"
+      },
+      {
+        "id": "trellis2",
+        "name": "TRELLIS.2-4B",
+        "scope": "weights",
+        "licence": "MIT",
+        "status": "cleared"
+      },
+      {
+        "id": "trellis_image_large",
+        "name": "TRELLIS-image-large (sparse-structure decoder used by TRELLIS.2)",
+        "scope": "weights",
+        "licence": "MIT",
+        "status": "cleared"
+      },
+      {
+        "id": "dinov3_vitl16",
+        "name": "DINOv3 ViT-L/16",
+        "scope": "weights",
+        "licence": "DINOv3 License",
+        "status": "review",
+        "note": "Gated (access granted 2026-09-29); image encoder for TRELLIS.2; audit terms before commercial use"
+      },
+      {
+        "id": "trellis2_runtime",
+        "name": "TRELLIS.2 code + o-voxel @75fbf01, CuMesh @12289e1, FlexGEMM @6dd94a8",
+        "scope": "runtime",
+        "licence": "MIT",
+        "status": "cleared"
+      },
+      {
+        "id": "exporter_clean",
+        "name": "AssetStudio GLB exporter (o-voxel to_glb port, PyTorch UV rasteriser)",
+        "scope": "runtime",
+        "licence": "MIT",
+        "status": "cleared",
+        "note": "Default; ships no NVIDIA non-commercial code"
+      },
+      {
+        "id": "simulation",
+        "name": "SIMULATED engine output",
+        "licence": "n/a",
+        "status": "not_cleared",
+        "note": "test/demo output, not a real generation"
+      }
+    ],
+    "note": "Captured at creation. Traceability only; not a legal guarantee of rights or non-infringement."
+  },
+  "publication": {
+    "op_id": "op_07ab365m5e3v1j43.itm_vaneyp10m3ygzt5e",
+    "idempotency_key": "fx-model3d-p",
+    "published_at": "2026-09-29T12:58:29.625Z",
+    "expected_previous_version": null
+  },
+  "note": ""
+}

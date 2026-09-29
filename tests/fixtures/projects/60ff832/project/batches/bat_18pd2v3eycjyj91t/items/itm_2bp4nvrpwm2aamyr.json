@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "itm_2bp4nvrpwm2aamyr",
+  "batch_id": "bat_18pd2v3eycjyj91t",
+  "name": "Knight",
+  "brief": "brief for Knight",
+  "category_id": "sprites",
+  "shot_id": null,
+  "target_asset_id": "ast_qg2475zd3btaahzw",
+  "snapshot_sha": "b2e62cd5c2ddaef82ba8ff7764506461d42dcb9fc2be1fecf5c086ae72682331",
+  "revision": 22,
+  "prompt_revisions": [
+    "prm_5w46g6h4zd72jx3w"
+  ],
+  "current_prompt": "prm_5w46g6h4zd72jx3w",
+  "prompt_confirmed": "prm_5w46g6h4zd72jx3w",
+  "candidate_sets": [
+    "cs_kdwk9mavc1xpd506"
+  ],
+  "current_set": "cs_kdwk9mavc1xpd506",
+  "qa": {
+    "cnd_j5nzd3gbb8z9pa2f": "qa_jghh8c3acmzngqq1",
+    "cnd_9vps4cxepk366j6h": "qa_6sgsnn2am1ag9gjw"
+  },
+  "decisions": [
+    "dec_6szxgnk2gmc514z7",
+    "dec_gp6vr9xxba926hke"
+  ],
+  "approval": "dec_6szxgnk2gmc514z7",
+  "regen_requested": false,
+  "build_runs": [
+    "run_8n1k32hrn8y19mtj"
+  ],
+  "current_build": "run_8n1k32hrn8y19mtj",
+  "accepted_build": "run_8n1k32hrn8y19mtj",
+  "published": {
+    "asset_id": "ast_qg2475zd3btaahzw",
+    "version_id": "ver_80ya3n5h573ck4fj",
+    "display_version": 1
+  },
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_pmg9f8f2rzbvvtep",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_6e6vjkm2yyq5ywr0",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_mqq2e68b9kfczgee",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "build": {
+      "op_id": "op_xymfmjf5bjmw0r46",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "publish": {
+      "op_id": "op_zyzwq7naq413g6t6",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:25.929Z",
+  "updated_at": "2026-09-29T12:58:27.194Z"
+}

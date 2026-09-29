@@ -40,7 +40,7 @@ packages = [
 dev-mode-dirs = ["packages", "services/studio"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/contract"]
+testpaths = ["tests/unit", "tests/contract", "tests/regression"]
 markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests"]
 addopts = "-p no:cacheprovider"
 

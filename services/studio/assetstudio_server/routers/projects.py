@@ -207,7 +207,7 @@ def reset_lane(lane: str, s: Studio = Depends(studio)) -> dict[str, Any]:
     if res["ok"]:
         for op in s.journal.list(states=("blocked",)):
             if (op.error or {}).get("code") == "gpu_ownership_unknown":
-                s.journal.requeue(op.id)
+                s.journal.requeue(op.id, ("blocked",))
     return {**res, "lane": s.lanes[lane].public()}
 
 
@@ -244,9 +244,8 @@ def retry_operation(op_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
     op = s.journal.get(op_id)
     if op is None:
         raise ApiError(404, "unknown_operation", op_id)
-    if op.state not in ("failed", "blocked"):
-        raise ApiError(409, "not_retryable", f"operation is {op.state}")
-    s.journal.requeue(op_id)
+    if op.state not in ("failed", "blocked") or not s.journal.requeue(op_id, ("failed", "blocked")):
+        raise ApiError(409, "not_retryable", f"operation is {s.journal.get(op_id).state}")  # type: ignore[union-attr]
     s.events.publish("operation", project_id=op.project_id, batch_id=op.batch_id, op_id=op.id)
     return s.journal.get(op_id).public()  # type: ignore[union-attr]
 

@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "id": "itm_c2cvxr4fn4cj6pth",
+  "batch_id": "bat_rcy5303054r7ma8b",
+  "name": "Crate",
+  "brief": "brief for Crate",
+  "category_id": "props",
+  "shot_id": null,
+  "target_asset_id": null,
+  "snapshot_sha": "cc7936852e1314dfdebb8ffd7584cc9f611259e76645b63e03a6f374978b64cf",
+  "revision": 14,
+  "prompt_revisions": [
+    "prm_8jqwt42a8qg08nhv"
+  ],
+  "current_prompt": "prm_8jqwt42a8qg08nhv",
+  "prompt_confirmed": "prm_8jqwt42a8qg08nhv",
+  "candidate_sets": [
+    "cs_fhc1bfn4204vwb7e"
+  ],
+  "current_set": "cs_fhc1bfn4204vwb7e",
+  "qa": {
+    "cnd_f5e34c1rrz9bdxkm": "qa_ry514ajxfm6tqwyv",
+    "cnd_ce6r1z8xp925drw5": "qa_gmfpttqmg2tpf8nr"
+  },
+  "decisions": [
+    "dec_whxpk0tbgget1zs4"
+  ],
+  "approval": "dec_whxpk0tbgget1zs4",
+  "regen_requested": false,
+  "build_runs": [],
+  "current_build": null,
+  "accepted_build": null,
+  "published": null,
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_adfnzzkqpbgem65a",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_90qr27g93fjnn2gs",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_jqk1yrcx9ncpr86m",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:43.903Z",
+  "updated_at": "2026-09-29T12:58:44.732Z"
+}

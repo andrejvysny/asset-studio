@@ -14,7 +14,7 @@ from assetstudio_core.inheritance import validate_semantics
 from assetstudio_core.safeyaml import ParseError, dump_yaml, load_yaml
 from pydantic import BaseModel
 
-from .repo import BlobRef, Conflict, NotFound, Repository, StorageError
+from .repo import BlobRef, Conflict, IntegrityError, NotFound, Repository, StorageError
 
 M = TypeVar("M", bound=BaseModel)
 CONFIG_KEY = "studio.yaml"
@@ -46,8 +46,24 @@ def snapshot_key(sha: str) -> str:
     return f"config/revisions/{sha}.json"
 
 
-def batch_key(batch_id: str, *rest: str) -> str:
-    return "/".join(("batches", batch_id, *rest))
+def job_key(job_id: str, *rest: str) -> str:
+    """Job records live where they were written: legacy `bat_` Jobs stay under batches/ (no file moves on
+    migration), new `job_` Jobs under jobs/. The prefix decides; `bch_` grouping Batches never live here."""
+    if job_id.startswith("bat_"):
+        return "/".join(("batches", job_id, *rest))
+    if job_id.startswith("job_"):
+        return "/".join(("jobs", job_id, *rest))
+    raise StorageError(f"not a job id: {job_id!r}")
+
+
+def job_descriptor_key(job_id: str) -> str:
+    return job_key(job_id, "batch.json" if job_id.startswith("bat_") else "job.json")
+
+
+def batch_group_key(batch_id: str, *rest: str) -> str:
+    if not batch_id.startswith("bch_"):
+        raise StorageError(f"not a batch id: {batch_id!r}")
+    return "/".join(("execution_batches", batch_id, *rest))
 
 
 class ProjectStore:
@@ -152,19 +168,44 @@ class ProjectStore:
     # --- artifacts -------------------------------------------------------------------------------------------------
     def register_artifact(self, content: bytes | BinaryIO, role: str, mime: str, *, meta: dict | None = None,
                           lineage: list[str] | None = None, retention: str = "essential",
-                          source: dict | None = None, expected_sha256: str | None = None) -> Artifact:
+                          source: dict | None = None, expected_sha256: str | None = None,
+                          artifact_id: str | None = None) -> Artifact:
+        """`artifact_id` (derived, e.g. from an import/execution id) makes registration replay-safe: a retry
+        returns the existing record when it holds the same bytes and role, and conflicts otherwise."""
         stream = io.BytesIO(content) if isinstance(content, bytes) else content
         ref: BlobRef = self.repo.write_blob(stream, expected_sha256)
-        art = Artifact(id=new_id("art"), role=role, sha256=ref.sha256, size=ref.size, mime=mime, meta=meta or {},
-                       lineage=lineage or [], created_at=now_iso(), retention=retention,  # type: ignore[arg-type]
-                       source=source or {})
-        self.create(artifact_key(art.id), art)
+        if artifact_id is not None:
+            existing, _ = self.get_opt(artifact_key(artifact_id), Artifact)
+            if existing is not None:
+                if existing.sha256 != ref.sha256 or existing.role != role:
+                    raise Conflict(f"artifact {artifact_id} already holds different content")
+                return existing
+        art = Artifact(id=artifact_id or new_id("art"), role=role, sha256=ref.sha256, size=ref.size, mime=mime,
+                       meta=meta or {}, lineage=lineage or [], created_at=now_iso(),
+                       retention=retention, source=source or {})  # type: ignore[arg-type]
+        try:
+            self.create(artifact_key(art.id), art)
+        except Conflict:
+            if artifact_id is None:
+                raise
+            existing = self.get(artifact_key(artifact_id), Artifact)[0]  # lost a race with a concurrent replay
+            if existing.sha256 != ref.sha256 or existing.role != role:
+                raise
+            return existing
         return art
 
     def artifact(self, artifact_id: str) -> Artifact:
         return self.get(artifact_key(artifact_id), Artifact)[0]
 
-    def artifact_bytes(self, artifact_id: str) -> bytes:
+    def artifact_bytes(self, artifact_id: str, max_bytes: int | None = None) -> bytes:
+        """Always a verified read: bytes that no longer match the recorded digest raise CorruptBlob."""
         art = self.artifact(artifact_id)
-        with self.repo.open_blob(art.sha256) as f:
-            return f.read()
+        data = self.repo.read_blob_verified(art.sha256, max_bytes)
+        if len(data) != art.size:
+            raise IntegrityError(f"artifact {artifact_id} size {len(data)} != recorded {art.size}")
+        return data
+
+    def verify_artifact(self, artifact_id: str, use_cache: bool = True) -> Artifact:
+        art = self.artifact(artifact_id)
+        self.repo.verify_blob(art.sha256, art.size, use_cache)
+        return art

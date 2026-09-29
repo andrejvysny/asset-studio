@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "dec_b5x1b0t03rb7zb09",
+  "gate": "candidate_approval",
+  "batch_id": "bat_24ys18hv86cw7m0e",
+  "item_id": "itm_tmq6z5tkcyq11nrq",
+  "bound": {
+    "candidate_set_id": "cs_mcw7bwg9cnyrn4qf",
+    "candidate_id": "cnd_brzmm7shys06gnh9",
+    "image_sha256": "336c32515ee379f8b614755b93b70d8e246d9e560f14b030c17f8c96210f24cd",
+    "artifact_id": "art_rzywqx5fyqewgh9t",
+    "prompt_revision_id": "prm_89htbjsr04rtdpvk",
+    "qa_evaluation_id": "qa_140z5w9025700kf8",
+    "seed": 4701467101962118
+  },
+  "qa_status": "recommended",
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:41.429Z",
+  "actor": "operator",
+  "idempotency_key": "fx-concept-a0"
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "bat_rcy5303054r7ma8b",
+  "alias": "b-0004",
+  "title": "fixture props",
+  "kind": "model3d",
+  "recipe_id": "model3d.default",
+  "category_id": "props",
+  "created_at": "2026-09-29T12:58:43.903Z",
+  "seed_family": 8889246490242389,
+  "item_ids": [
+    "itm_c2cvxr4fn4cj6pth",
+    "itm_dvh0svecpt724qxh"
+  ],
+  "source": "ad hoc",
+  "config_revision": 2,
+  "revision": 1
+}

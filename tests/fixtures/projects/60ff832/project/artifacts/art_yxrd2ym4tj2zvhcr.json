@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "art_yxrd2ym4tj2zvhcr",
+  "role": "cutout",
+  "sha256": "295a048dbc3920054020f93693e80230ee093d26299649a206b75aa93b0df617",
+  "size": 2790,
+  "mime": "image/png",
+  "meta": {},
+  "lineage": [
+    "art_7mfqa6z9r9xeyw8f"
+  ],
+  "created_at": "2026-09-29T12:58:28.969Z",
+  "retention": "essential",
+  "source": {}
+}

@@ -9,20 +9,31 @@ from __future__ import annotations
 
 import torch
 
-CANDIDATE_BUDGET = 1 << 25  # texel candidates per batch (~32M) bounds peak memory
+CANDIDATE_BUDGET = 1 << 25  # texel candidates per step (~32M) bounds peak memory, even for one huge triangle
 
 
-def _batches(counts: torch.Tensor) -> list[tuple[int, int]]:
-    """Consecutive face ranges whose bounding-box texel counts stay within the budget."""
-    csum = torch.cumsum(counts, 0).cpu()
-    out, start, base = [], 0, 0
-    n = len(counts)
-    while start < n:
-        end = int(torch.searchsorted(csum, base + CANDIDATE_BUDGET, right=True))
-        end = max(end, start + 1)
-        out.append((start, end))
-        base = int(csum[end - 1])
-        start = end
+def _segments(lo: torch.Tensor, wh: torch.Tensor) -> list[tuple[int, int, int, int]]:
+    """(first face, end face, row offset, row count) steps. Consecutive small faces share a step; a face whose
+    bounding box alone exceeds the budget is split into row tiles instead of allocating it whole."""
+    counts = (wh[:, 0] * wh[:, 1]).tolist()
+    widths = wh[:, 0].tolist()
+    heights = wh[:, 1].tolist()
+    out: list[tuple[int, int, int, int]] = []
+    start, acc = 0, 0
+    for i, n in enumerate(counts):
+        if n > CANDIDATE_BUDGET:
+            if start < i:
+                out.append((start, i, 0, -1))
+            rows = max(1, CANDIDATE_BUDGET // max(1, widths[i]))
+            out += [(i, i + 1, r, min(rows, heights[i] - r)) for r in range(0, heights[i], rows)]
+            start, acc = i + 1, 0
+            continue
+        if acc + n > CANDIDATE_BUDGET and start < i:
+            out.append((start, i, 0, -1))
+            start, acc = i, 0
+        acc += n
+    if start < len(counts):
+        out.append((start, len(counts), 0, -1))
     return out
 
 
@@ -32,16 +43,23 @@ def rasterize_uv_torch(uvs: torch.Tensor, faces: torch.Tensor, size: int) -> tup
     lo = tri.amin(1).ceil().clamp(0, size - 1).long()
     hi = tri.amax(1).floor().clamp(0, size - 1).long()
     wh = (hi - lo + 1).clamp(min=0)  # empty when the triangle covers no texel centre
-    counts = wh[:, 0] * wh[:, 1]
     face_id = torch.full((size * size,), -1, dtype=torch.long, device=dev)
     bary = torch.zeros((size * size, 3), dtype=torch.float32, device=dev)
-    for a, b in _batches(counts):
-        _raster_batch(tri[a:b], lo[a:b], wh[a:b], counts[a:b], a, size, face_id, bary)
+    for a, b, row0, rows in _segments(lo, wh):
+        lo_s, wh_s = lo[a:b].clone(), wh[a:b].clone()
+        if rows >= 0:  # one tiled face: restrict its box to this row band
+            lo_s[:, 1] += row0
+            wh_s[:, 1] = rows
+        _raster_step(tri[a:b], lo_s, wh_s, a, size, face_id, bary)
     return face_id.view(size, size), bary.view(size, size, 3)
 
 
-def _raster_batch(tri: torch.Tensor, lo: torch.Tensor, wh: torch.Tensor, counts: torch.Tensor, offset: int,
-                  size: int, face_id: torch.Tensor, bary: torch.Tensor) -> None:
+def _raster_step(tri: torch.Tensor, lo: torch.Tensor, wh: torch.Tensor, offset: int, size: int,
+                 face_id: torch.Tensor, bary: torch.Tensor) -> None:
+    """Winner per texel = highest face index covering it (nvdiffrast convention: later faces win), decided by an
+    order-independent amax, and the barycentrics are gathered from exactly that winner: face id and weights are
+    always correlated, whatever the step order or duplicate texels (plain duplicate-index writes are not)."""
+    counts = wh[:, 0] * wh[:, 1]
     total = int(counts.sum())
     if total == 0:
         return
@@ -59,10 +77,12 @@ def _raster_batch(tri: torch.Tensor, lo: torch.Tensor, wh: torch.Tensor, counts:
     l2 = (v0[:, 0] * v2[:, 1] - v2[:, 0] * v0[:, 1]) / safe
     l0 = 1 - l1 - l2
     eps = -1e-6
-    inside = (den.abs() > 1e-12) & (l0 >= eps) & (l1 >= eps) & (l2 >= eps)
+    inside = (den.abs() > 1e-12) & (l0 >= eps) & (l1 >= eps) & (l2 >= eps)  # degenerate faces never win
     lin = (py * size + px)[inside]
-    face_id[lin] = idx[inside] + offset
-    bary[lin] = torch.stack([l0, l1, l2], -1)[inside]
+    fid = idx[inside] + offset
+    face_id.scatter_reduce_(0, lin, fid, reduce="amax", include_self=True)
+    won = face_id[lin] == fid  # unique: a face contributes at most one candidate per texel
+    bary[lin[won]] = torch.stack([l0, l1, l2], -1)[inside][won]
 
 
 def rasterize_uv_nvdiffrast(uvs: torch.Tensor, faces: torch.Tensor, size: int) -> tuple[torch.Tensor, torch.Tensor]:

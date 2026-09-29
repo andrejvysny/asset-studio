@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_4bxk8g0w9c8n3tfr",
+  "name_id": "tavern",
+  "display_name": "Tavern",
+  "kind": "concept_art",
+  "origin": "generated",
+  "category_id": "concept",
+  "tags": [],
+  "created_at": "2026-09-29T12:58:25.836Z",
+  "current_version_id": "ver_khqcxq46zrg5k21m",
+  "versions": [
+    {
+      "version_id": "ver_khqcxq46zrg5k21m",
+      "display_version": 1,
+      "published_at": "2026-09-29T12:58:25.836Z",
+      "publication_op": "op_b4pf9tmfva1z63fp.itm_rqf7x2vvpcrah45e",
+      "preview_artifact_id": "art_gftfxbsn8cxbe456",
+      "note": ""
+    }
+  ],
+  "pointer_log": [
+    {
+      "from_version": null,
+      "to_version": "ver_khqcxq46zrg5k21m",
+      "at": "2026-09-29T12:58:25.836Z",
+      "op": "op_b4pf9tmfva1z63fp.itm_rqf7x2vvpcrah45e",
+      "reason": "publish"
+    }
+  ],
+  "revision": 1
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "dec_yfcrksknfv0ttskn",
+  "gate": "final_acceptance",
+  "batch_id": "bat_v6k5ecwqpgk7tq3x",
+  "item_id": "itm_vaneyp10m3ygzt5e",
+  "bound": {
+    "build_run_id": "run_anax5pgk4acjejsx",
+    "artifacts": {
+      "cutout": "art_yxrd2ym4tj2zvhcr",
+      "raw": "art_qkxsgwca7k4svd5v",
+      "model": "art_5pb0hfrem3cjfjvz",
+      "preview": "art_1npqcjxb2mx33yt3",
+      "meta": "art_1jd3973azejf4phh"
+    }
+  },
+  "qa_status": null,
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:29.526Z",
+  "actor": "operator",
+  "idempotency_key": "fx-model3d-acc"
+}

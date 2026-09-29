@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "qa_wtr1ff7e2h84ps0x",
+  "item_id": "itm_2edy4hmw0qthetdd",
+  "candidate_set_id": "cs_qh4ta9yba7d566kd",
+  "candidate_id": "cnd_4yk9ws6s03021ge9",
+  "image_sha256": "6bf68378c39c0c403084e1b7110e7096e61e58c90128216c1831947239ece8d8",
+  "ruleset": {
+    "label": "Material candidates",
+    "kind": "material",
+    "rules": [
+      {
+        "id": "surface_only",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The image shows only a surface texture, with no distinct objects.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "even_light",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "Lighting is even, with no strong directional shadows.",
+        "metric": null,
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "ruleset_sha": "117a6a399c45b3778f1538625efb4705f2aa33c1c3d7d556c2fbf4a2bb431269",
+  "results": [
+    {
+      "rule_id": "surface_only",
+      "source": "vlm",
+      "severity": "major",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    },
+    {
+      "rule_id": "even_light",
+      "source": "vlm",
+      "severity": "minor",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    }
+  ],
+  "policy": {
+    "status": "recommended",
+    "not_evaluated": false,
+    "coverage": {
+      "completed": 2,
+      "applicable": 2
+    },
+    "failed_major": [],
+    "failed_minor": [],
+    "unavailable": [],
+    "disabled": [],
+    "minor_fail_limit": 2
+  },
+  "evaluators": {
+    "mask_artifact_id": null,
+    "simulated": true
+  },
+  "evaluated_at": "2026-09-29T12:58:43.511Z",
+  "op_id": "op_56cazs1p7pna0th2"
+}

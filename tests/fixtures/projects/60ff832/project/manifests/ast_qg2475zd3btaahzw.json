@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_qg2475zd3btaahzw",
+  "name_id": "knight",
+  "display_name": "Knight",
+  "kind": "sprite",
+  "origin": "generated",
+  "category_id": "sprites",
+  "tags": [],
+  "created_at": "2026-09-29T12:58:27.168Z",
+  "current_version_id": "ver_80ya3n5h573ck4fj",
+  "versions": [
+    {
+      "version_id": "ver_80ya3n5h573ck4fj",
+      "display_version": 1,
+      "published_at": "2026-09-29T12:58:27.168Z",
+      "publication_op": "op_zyzwq7naq413g6t6.itm_2bp4nvrpwm2aamyr",
+      "preview_artifact_id": "art_gvtdxsa6xbeeptka",
+      "note": ""
+    }
+  ],
+  "pointer_log": [
+    {
+      "from_version": null,
+      "to_version": "ver_80ya3n5h573ck4fj",
+      "at": "2026-09-29T12:58:27.168Z",
+      "op": "op_zyzwq7naq413g6t6.itm_2bp4nvrpwm2aamyr",
+      "reason": "publish"
+    }
+  ],
+  "revision": 1
+}

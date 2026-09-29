@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "itm_tmq6z5tkcyq11nrq",
+  "batch_id": "bat_24ys18hv86cw7m0e",
+  "name": "Tavern",
+  "brief": "brief for Tavern",
+  "category_id": "concept",
+  "shot_id": null,
+  "target_asset_id": "ast_gcdwd72zxz9eqq24",
+  "snapshot_sha": "ac765f16f24cbb3364d14c8591615bc3104fb68ca2b03d4f055d61108ed5265c",
+  "revision": 22,
+  "prompt_revisions": [
+    "prm_89htbjsr04rtdpvk"
+  ],
+  "current_prompt": "prm_89htbjsr04rtdpvk",
+  "prompt_confirmed": "prm_89htbjsr04rtdpvk",
+  "candidate_sets": [
+    "cs_mcw7bwg9cnyrn4qf"
+  ],
+  "current_set": "cs_mcw7bwg9cnyrn4qf",
+  "qa": {
+    "cnd_brzmm7shys06gnh9": "qa_140z5w9025700kf8",
+    "cnd_tf39bkjgs6sr53mm": "qa_n7kdcjarpbaydga5"
+  },
+  "decisions": [
+    "dec_b5x1b0t03rb7zb09",
+    "dec_sds3h3tggs14407r"
+  ],
+  "approval": "dec_b5x1b0t03rb7zb09",
+  "regen_requested": false,
+  "build_runs": [
+    "run_1bjdgaqvbqx51nvp"
+  ],
+  "current_build": "run_1bjdgaqvbqx51nvp",
+  "accepted_build": "run_1bjdgaqvbqx51nvp",
+  "published": {
+    "asset_id": "ast_gcdwd72zxz9eqq24",
+    "version_id": "ver_4qhw6p9mkhpwg6t2",
+    "display_version": 1
+  },
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_8xj4h2acpakkcv3q",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_cwmhvsy0a4c0shtq",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_wgyzkf0m8gj884qh",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "build": {
+      "op_id": "op_9p0cf9zpv5drj7h6",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "publish": {
+      "op_id": "op_17y7zbmyyaw21zny",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:40.653Z",
+  "updated_at": "2026-09-29T12:58:41.765Z"
+}

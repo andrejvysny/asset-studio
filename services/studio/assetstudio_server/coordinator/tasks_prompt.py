@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.domain import BatchItem
+from assetstudio_core.domain import JobItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import KINDS, Kind
 
@@ -15,7 +15,7 @@ from .runner import Blocked, TaskEnv
 
 def _items_error(env: TaskEnv, stage: str, state: str, message: str, ids: list[str]) -> None:
     for iid in ids:
-        def apply(item: BatchItem) -> None:
+        def apply(item: JobItem) -> None:
             t = item.tasks.get(stage)
             if t is not None and t.op_id == env.op.id and t.state not in ("succeeded", "failed"):
                 set_task(item, stage, env.op.id, state, message)
@@ -26,7 +26,7 @@ def enhance(env: TaskEnv) -> dict[str, Any]:
     aux = env.studio.aux
     if aux is None:
         raise Blocked("no aux service configured (library-only mode)", "aux_unconfigured", operator=True)
-    env.studio.lanes["gpu1"].acquire("aux")
+    epoch = env.studio.lanes["gpu1"].acquire("aux")
     batch_id = env.op.payload["batch_id"]
     done, failed = 0, 0
     for iid in env.op.payload["item_ids"]:
@@ -39,7 +39,8 @@ def enhance(env: TaskEnv) -> dict[str, Any]:
         snap = env.ctx.store.read_snapshot(item.snapshot_sha)
         try:
             res = aux.enhance(brief=item.brief or item.name, kind=KINDS[Kind(snap["recipe"]["kind"])].label,
-                              constraints=snap["template"], style_guide=(snap.get("style") or {}).get("guide", ""))
+                              constraints=snap["template"], style_guide=(snap.get("style") or {}).get("guide", ""),
+                              epoch=epoch, execution_id=derived_id("att", env.op.id, iid))
             description = res.get("description")
             if not isinstance(description, str) or not description.strip():
                 raise EngineRejected("enhancer returned no description")
@@ -56,7 +57,7 @@ def enhance(env: TaskEnv) -> dict[str, Any]:
         enhancer = {"raw": meta.get("raw"), "model": meta.get("model"), "seconds": meta.get("seconds"),
                     "short_title": res.get("short_title"), "tags": res.get("tags", []), "simulated": aux.simulated}
 
-        def apply(x: BatchItem, rev_id: str = rev_id, enhancer: dict = enhancer, description: str = description,
+        def apply(x: JobItem, rev_id: str = rev_id, enhancer: dict = enhancer, description: str = description,
                   ) -> None:
             rev = make_revision(env.ctx.store, x, rid=rev_id, origin="enhanced", description=description,
                                 enhancer=enhancer)

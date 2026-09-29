@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "itm_tgmdjg2m62pd5eeg",
+  "batch_id": "bat_18pd2v3eycjyj91t",
+  "name": "Archer",
+  "brief": "brief for Archer",
+  "category_id": "sprites",
+  "shot_id": null,
+  "target_asset_id": null,
+  "snapshot_sha": "b2e62cd5c2ddaef82ba8ff7764506461d42dcb9fc2be1fecf5c086ae72682331",
+  "revision": 13,
+  "prompt_revisions": [
+    "prm_vk3pz51qvt7gm9x6"
+  ],
+  "current_prompt": "prm_vk3pz51qvt7gm9x6",
+  "prompt_confirmed": "prm_vk3pz51qvt7gm9x6",
+  "candidate_sets": [
+    "cs_ftr4940nfcz4kc64"
+  ],
+  "current_set": "cs_ftr4940nfcz4kc64",
+  "qa": {
+    "cnd_0e37mh5b1tffk2pv": "qa_yp3qg6e1fw0qmg0z",
+    "cnd_37mct7kmg8zwhkc6": "qa_ftteqk315afmbg7s"
+  },
+  "decisions": [],
+  "approval": null,
+  "regen_requested": false,
+  "build_runs": [],
+  "current_build": null,
+  "accepted_build": null,
+  "published": null,
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_pmg9f8f2rzbvvtep",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_6e6vjkm2yyq5ywr0",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_f8h5cw4yqs7wbr4y",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:25.929Z",
+  "updated_at": "2026-09-29T12:58:26.681Z"
+}

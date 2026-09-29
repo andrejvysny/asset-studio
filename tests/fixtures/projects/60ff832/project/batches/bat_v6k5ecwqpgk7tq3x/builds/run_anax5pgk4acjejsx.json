@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "id": "run_anax5pgk4acjejsx",
+  "item_id": "itm_vaneyp10m3ygzt5e",
+  "batch_id": "bat_v6k5ecwqpgk7tq3x",
+  "build": "model3d",
+  "inputs": {
+    "approval_id": "dec_hccs9hwjs55zsz3h",
+    "candidate_artifact_id": "art_7mfqa6z9r9xeyw8f",
+    "image_sha256": "513dc83f57564737ecf4ff12e4819c1ed68adfd972ad90b52fc0ec9aeff206b5",
+    "components": [
+      "birefnet",
+      "trellis2",
+      "trellis_image_large",
+      "dinov3_vitl16",
+      "trellis2_runtime",
+      "exporter_clean"
+    ]
+  },
+  "status": "succeeded",
+  "result": "valid",
+  "artifacts": {
+    "cutout": "art_yxrd2ym4tj2zvhcr",
+    "raw": "art_qkxsgwca7k4svd5v",
+    "model": "art_5pb0hfrem3cjfjvz",
+    "preview": "art_1npqcjxb2mx33yt3",
+    "meta": "art_1jd3973azejf4phh"
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "container",
+        "ok": true,
+        "detail": "self-contained GLB 2.0"
+      },
+      {
+        "id": "reload",
+        "ok": true,
+        "detail": "1 mesh(es)"
+      },
+      {
+        "id": "non_empty",
+        "ok": true,
+        "detail": "1280 triangles"
+      },
+      {
+        "id": "finite_vertices",
+        "ok": true
+      },
+      {
+        "id": "valid_indices",
+        "ok": true
+      },
+      {
+        "id": "uvs_present",
+        "ok": true
+      },
+      {
+        "id": "material_texture_present",
+        "ok": true
+      },
+      {
+        "id": "triangle_budget",
+        "ok": true,
+        "detail": "1280 triangles (requested ≤100000, effective 100000)",
+        "advisory": true
+      },
+      {
+        "id": "single_component",
+        "ok": true,
+        "detail": "1 geometric components",
+        "advisory": true
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "container",
+      "reload",
+      "non_empty",
+      "finite_vertices",
+      "valid_indices",
+      "uvs_present",
+      "material_texture_present"
+    ]
+  },
+  "created_at": "2026-09-29T12:58:28.922Z",
+  "updated_at": "2026-09-29T12:58:29.483Z",
+  "op_id": "op_pjzd5nq7d4fb55j6",
+  "error": null
+}

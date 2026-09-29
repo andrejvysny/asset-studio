@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_y4d06fvh837j4ww6",
+  "item_id": "itm_2edy4hmw0qthetdd",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:43.230Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Cobble",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Cobble",
+    "tags": [
+      "Material"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Cobble, clearly readable form, simulated enhancement.",
+  "template": "seamless tileable surface texture, orthographic top-down, even diffuse lighting, no objects",
+  "positive": "Brief for Cobble, clearly readable form, simulated enhancement, seamless tileable surface texture, orthographic top-down, even diffuse lighting, no objects",
+  "negative": "objects, perspective, directional shadows, text, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "10205d4b07087b31291b96660b5f1cef6a4a89479ceee5b881e32d167356fbe7"
+}

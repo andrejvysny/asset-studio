@@ -18,6 +18,10 @@ log = logging.getLogger("assetstudio.coordinator")
 LANES = ("gpu0", "gpu1", "cpu")
 MAX_AFFINITY_STREAK = 6  # bound model-affinity preference so other ready batches are not starved
 RETRY_BLOCKED_S = 20.0
+# Automatic retries of transiently blocked work are bounded (no hidden infinite retry): after this many attempts or
+# this much elapsed time the operation stays blocked for an explicit operator decision.
+MAX_AUTO_ATTEMPTS = 6
+MAX_AUTO_RETRY_S = 2 * 3600.0
 
 
 class Cancelled(Exception):
@@ -153,14 +157,34 @@ class Coordinator:
 
     def _retry_loop(self) -> None:
         while not self._stop.wait(RETRY_BLOCKED_S):
-            for op in self.studio.journal.list(states=("blocked",)):
-                if (op.error or {}).get("retryable"):
-                    self.studio.journal.requeue(op.id)
+            self.retry_blocked()
+
+    def retry_blocked(self) -> None:
+        for op in self.studio.journal.list(states=("blocked",)):
+            err = op.error or {}
+            if not err.get("retryable"):
+                continue
+            if op.attempts >= MAX_AUTO_ATTEMPTS or _age_s(op.created_at) > MAX_AUTO_RETRY_S:
+                self.studio.journal.finish(op.id, "blocked", error={
+                    **err, "retryable": False, "retry_budget_exhausted": True,
+                    "message": f"{err.get('message', '')} (automatic retries exhausted after {op.attempts} "
+                               "attempts; retry explicitly)"[:500]})
+                continue
+            self.studio.journal.requeue(op.id, ("blocked",))
 
     def status(self) -> dict[str, Any]:
         return {"lanes": {lane: {"running": self.running[lane],
                                  "queued": len(self.studio.journal.list(lane=lane, states=("queued",)))}
                           for lane in LANES}}
+
+
+def _age_s(iso: str) -> float:
+    from datetime import UTC, datetime
+
+    try:
+        return (datetime.now(UTC) - datetime.fromisoformat(iso.replace("Z", "+00:00"))).total_seconds()
+    except ValueError:
+        return 0.0
 
 
 def wait_until(predicate: Callable[[], bool], timeout: float, interval: float = 0.05) -> bool:

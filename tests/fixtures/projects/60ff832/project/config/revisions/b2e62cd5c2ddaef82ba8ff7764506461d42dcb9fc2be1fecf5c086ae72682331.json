@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "config_revision": 2,
+  "category_id": "sprites",
+  "category_chain": [
+    "sprites"
+  ],
+  "values": {
+    "kind": "sprite",
+    "recipe_id": "sprite.default",
+    "naming": "{name}",
+    "budget": null,
+    "build_profile": null,
+    "qa_ruleset": "sprite",
+    "reference_set": null,
+    "style": "house",
+    "style_lora": null,
+    "export_presets": null,
+    "candidate_count": 2
+  },
+  "sources": {
+    "kind": "category:sprites",
+    "recipe_id": "recipe",
+    "naming": "recipe",
+    "budget": "unset",
+    "build_profile": "unset",
+    "qa_ruleset": "qa:sprite",
+    "reference_set": "unset",
+    "style": "project",
+    "style_lora": "unset",
+    "export_presets": "unset",
+    "candidate_count": "item"
+  },
+  "recipe": {
+    "id": "sprite.default",
+    "version": 1,
+    "kind": "sprite"
+  },
+  "parameters": {
+    "candidate_count": 2,
+    "steps": 50,
+    "cfg": 4.0,
+    "width": 1328,
+    "height": 1328,
+    "speed_preset": "quality",
+    "alpha_threshold": 128,
+    "padding": 0.04,
+    "pivot": "bottom_center",
+    "canvas": 512
+  },
+  "template": "single subject, plain background, full figure visible",
+  "negative": "multiple subjects, scene, text, watermark, cropped",
+  "qa_ruleset": {
+    "label": "Sprite candidates",
+    "kind": "sprite",
+    "rules": [
+      {
+        "id": "single_subject",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "Exactly one subject is depicted.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "fully_visible",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The whole subject is visible; nothing is cut off.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_text",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The image contains no text, letters, logo or watermark.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "mask_margin",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": null,
+        "metric": "mask_margin",
+        "params": {}
+      },
+      {
+        "id": "mask_single_blob",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": null,
+        "metric": "mask_single_blob",
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "style": {
+    "label": "House",
+    "guide": "painterly, warm light",
+    "negative": "photo",
+    "palette": []
+  },
+  "reference_set": null,
+  "sha256": "b2e62cd5c2ddaef82ba8ff7764506461d42dcb9fc2be1fecf5c086ae72682331"
+}

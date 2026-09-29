@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_6k62m1pz7fcaafkv",
+  "item_id": "itm_dvh0svecpt724qxh",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:44.053Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Barrel",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Barrel",
+    "tags": [
+      "3D model"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Barrel, clearly readable form, simulated enhancement.",
+  "template": "single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+  "positive": "Brief for Barrel, clearly readable form, simulated enhancement, single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+  "negative": "multiple objects, scene, floor, pedestal, cast shadow, text, watermark, cropped, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "cc7936852e1314dfdebb8ffd7584cc9f611259e76645b63e03a6f374978b64cf"
+}

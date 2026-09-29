@@ -5,14 +5,14 @@ import time
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.domain import Batch, BatchItem, Candidate, CandidateSet
+from assetstudio_core.domain import Candidate, CandidateSet, Job, JobItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.seeds import derive_seed
 from assetstudio_processing.images import ImageRejected, inspect_image
 
 from ..adapters.base import EngineRejected, LoraUse, T2IRequest, engine_prompt_id
 from ..models import load_lock
-from ..services.records import cset_key, load_batch, load_item, load_prompt, mutate_item, set_task
+from ..services.records import cset_key, load_item, load_job, load_prompt, mutate_item, set_task
 from .runner import Blocked, TaskEnv
 from .tasks_prompt import _items_error
 
@@ -62,7 +62,7 @@ def _await(env: TaskEnv, prompt_id: str) -> None:
         time.sleep(POLL_S)
 
 
-def _one_item(env: TaskEnv, batch: Batch, entry: dict[str, str]) -> str:
+def _one_item(env: TaskEnv, batch: Job, entry: dict[str, str]) -> str:
     store, engine = env.ctx.store, env.studio.engine
     assert engine is not None
     item, _ = load_item(store, batch.id, entry["item_id"])
@@ -135,7 +135,7 @@ def _one_item(env: TaskEnv, batch: Batch, entry: dict[str, str]) -> str:
     if store.repo.stat_object(cset_key(batch.id, cs_id)) is None:
         store.create(cset_key(batch.id, cs_id), cset)
 
-    def apply(x: BatchItem) -> None:
+    def apply(x: JobItem) -> None:
         if cs_id not in x.candidate_sets:
             x.candidate_sets.append(cs_id)
         x.current_set, x.qa, x.approval, x.regen_requested = cs_id, {}, None, False
@@ -155,7 +155,7 @@ def _one_item(env: TaskEnv, batch: Batch, entry: dict[str, str]) -> str:
 def generate(env: TaskEnv) -> dict[str, Any]:
     if env.studio.engine is None:
         raise Blocked("no image engine configured (library-only mode)", "engine_unconfigured", operator=True)
-    batch, _ = load_batch(env.ctx.store, env.op.payload["batch_id"])
+    batch, _ = load_job(env.ctx.store, env.op.payload["batch_id"])
     outcomes: dict[str, str] = {}
     for n, entry in enumerate(env.op.payload["items"]):
         env.check_cancel()

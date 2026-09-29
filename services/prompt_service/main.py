@@ -14,8 +14,9 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from lazy_model import LazyModel, gpu_info
+from lease import Lease, StaleLease
 from PIL import Image
 from pydantic import BaseModel, Field, ValidationError
 
@@ -46,7 +47,21 @@ def _load_birefnet() -> torch.nn.Module:
 
 vlm = LazyModel(_load_vlm, IDLE_UNLOAD_S)
 birefnet = LazyModel(_load_birefnet, IDLE_UNLOAD_S)
+lease = Lease()
 app = FastAPI(title="assetstudio aux")
+
+
+def gpu_work(x_lease_epoch: str | None = Header(default=None),
+             x_execution_id: str | None = Header(default=None, max_length=80)):  # noqa: ANN201 - dependency
+    """Every GPU request runs inside the lease: counted for /unload, refused without the admitted epoch."""
+    try:
+        lease.enter(int(x_lease_epoch) if x_lease_epoch and x_lease_epoch.isdigit() else None)
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
+    try:
+        yield x_execution_id
+    finally:
+        lease.leave()
 
 
 def _image(b64: str) -> Image.Image:
@@ -107,7 +122,7 @@ class EnhanceResult(BaseModel):
 
 
 @app.post("/enhance")
-def enhance(req: EnhanceRequest) -> dict:
+def enhance(req: EnhanceRequest, execution_id: str | None = Depends(gpu_work)) -> dict:
     tpl = (PROMPTS / "system_prompt_enhancer.txt").read_text()
     system = tpl.format(kind=req.kind, constraints=req.constraints or "(none)", style_guide=req.style_guide or "(none)")
     messages = [{"role": "system", "content": [{"type": "text", "text": system}]},
@@ -115,7 +130,7 @@ def enhance(req: EnhanceRequest) -> dict:
     t0 = time.monotonic()
     result, raw = _generate_json(messages, EnhanceResult, 512)
     return {**result.model_dump(), "meta": {"model": "Qwen3-VL-8B-Instruct", "seconds": round(time.monotonic() - t0, 2),
-                                            "raw": raw}}
+                                            "raw": raw, "execution_id": execution_id, "vlm_loads": vlm.loads}}
 
 
 class Question(BaseModel):
@@ -130,7 +145,7 @@ class QARequest(BaseModel):
 
 
 @app.post("/qa")
-def qa(req: QARequest) -> dict:
+def qa(req: QARequest, execution_id: str | None = Depends(gpu_work)) -> dict:
     image = _image(req.image_b64)
     checks = "\n".join(f"- {q.id}: {q.question}" for q in req.questions)
     system = (PROMPTS / "system_prompt_qa.txt").read_text().format(checks=checks)
@@ -147,7 +162,8 @@ def qa(req: QARequest) -> dict:
     return {"checks": body.get("checks") if isinstance(body, dict) else None,
             "reasons": body.get("reasons", []) if isinstance(body, dict) else [],
             "summary": body.get("summary", "") if isinstance(body, dict) else "",
-            "meta": {"model": "Qwen3-VL-8B-Instruct", "seconds": round(time.monotonic() - t0, 2), "raw": raw[:2000]}}
+            "meta": {"model": "Qwen3-VL-8B-Instruct", "seconds": round(time.monotonic() - t0, 2), "raw": raw[:2000],
+                     "execution_id": execution_id, "vlm_loads": vlm.loads}}
 
 
 class CutoutRequest(BaseModel):
@@ -155,7 +171,7 @@ class CutoutRequest(BaseModel):
 
 
 @app.post("/cutout")
-def cutout(req: CutoutRequest) -> dict:
+def cutout(req: CutoutRequest, execution_id: str | None = Depends(gpu_work)) -> dict:
     from torchvision import transforms
 
     image = _image(req.image_b64)
@@ -168,7 +184,8 @@ def cutout(req: CutoutRequest) -> dict:
     mask = Image.fromarray((pred * 255).astype(np.uint8)).resize(image.size, Image.Resampling.BILINEAR)
     out = io.BytesIO()
     mask.save(out, "PNG")
-    return {"mask_b64": base64.b64encode(out.getvalue()).decode(), "meta": {"model": "BiRefNet"}}
+    return {"mask_b64": base64.b64encode(out.getvalue()).decode(),
+            "meta": {"model": "BiRefNet", "execution_id": execution_id, "birefnet_loads": birefnet.loads}}
 
 
 @app.get("/health")
@@ -177,16 +194,33 @@ def health() -> dict:
                                            "birefnet": (BIREFNET_DIR / "config.json").is_file()},
             "loaded": {"vlm": vlm.loaded, "birefnet": birefnet.loaded}, "loads": {"vlm": vlm.loads,
                                                                                   "birefnet": birefnet.loads},
-            "cuda": torch.cuda.is_available(), "gpu": gpu_info()}
+            "cuda": torch.cuda.is_available(), "gpu": gpu_info(), "lease": lease.info()}
+
+
+class LeaseRequest(BaseModel):
+    epoch: int = Field(ge=1)
+
+
+@app.post("/lease")
+def grant(req: LeaseRequest) -> dict:
+    try:
+        return lease.grant(req.epoch)
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
 
 
 class UnloadRequest(BaseModel):
     owner_token: str = Field(min_length=1, max_length=100)
+    epoch: int = Field(ge=0)
 
 
 @app.post("/unload")
 def unload(req: UnloadRequest) -> dict:
-    """Acknowledges release only after both models are really gone (waits for in-flight requests)."""
-    if not (vlm.unload() and birefnet.unload()):
+    """Acknowledges release only after admission stopped, no request is active and both models are gone."""
+    try:
+        drained = lease.drain(req.epoch, timeout=300.0)
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
+    if not drained or not (vlm.unload() and birefnet.unload()):
         raise HTTPException(409, "models still in use")
-    return {"loaded": vlm.loaded or birefnet.loaded, "owner_token": req.owner_token}
+    return {"loaded": vlm.loaded or birefnet.loaded, "owner_token": req.owner_token, **lease.info()}

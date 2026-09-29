@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "config_revision": 2,
+  "category_id": "concept",
+  "category_chain": [
+    "concept"
+  ],
+  "values": {
+    "kind": "concept_art",
+    "recipe_id": "concept.default",
+    "naming": "{name}",
+    "budget": null,
+    "build_profile": null,
+    "qa_ruleset": "concept_art",
+    "reference_set": null,
+    "style": "house",
+    "style_lora": null,
+    "export_presets": null,
+    "candidate_count": 2
+  },
+  "sources": {
+    "kind": "category:concept",
+    "recipe_id": "recipe",
+    "naming": "recipe",
+    "budget": "unset",
+    "build_profile": "unset",
+    "qa_ruleset": "qa:concept_art",
+    "reference_set": "unset",
+    "style": "project",
+    "style_lora": "unset",
+    "export_presets": "unset",
+    "candidate_count": "item"
+  },
+  "recipe": {
+    "id": "concept.default",
+    "version": 1,
+    "kind": "concept_art"
+  },
+  "parameters": {
+    "candidate_count": 2,
+    "steps": 50,
+    "cfg": 4.0,
+    "width": 1328,
+    "height": 1328,
+    "speed_preset": "quality"
+  },
+  "template": "",
+  "negative": "watermark, signature, text",
+  "qa_ruleset": {
+    "label": "Concept art candidates",
+    "kind": "concept_art",
+    "rules": [
+      {
+        "id": "no_text",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "The image contains no text, letters, logo or watermark.",
+        "metric": null,
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "style": {
+    "label": "House",
+    "guide": "painterly, warm light",
+    "negative": "photo",
+    "palette": []
+  },
+  "reference_set": null,
+  "sha256": "044904a7f76cb6df8bada02a46dfd730bd1de890f308caf8439cd0f33a8bd220"
+}

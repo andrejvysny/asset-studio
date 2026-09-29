@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "art_6tcxy357twavaadr",
+  "role": "preview",
+  "sha256": "20c0b23103918112db9e2e657a4d1c72ca132c1ffd9f02f95184a17d2547a210",
+  "size": 22369,
+  "mime": "image/png",
+  "meta": {
+    "width": 768,
+    "height": 768,
+    "derived": "3x3 tiling preview"
+  },
+  "lineage": [
+    "art_ab67bdx3pb86yxpc"
+  ],
+  "created_at": "2026-09-29T12:58:43.789Z",
+  "retention": "essential",
+  "source": {}
+}

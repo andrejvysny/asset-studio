@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "dec_rx33vw5emzr0fv4x",
+  "gate": "candidate_approval",
+  "batch_id": "bat_jbpfcn22c1543nax",
+  "item_id": "itm_hq3vvd48cbrre053",
+  "bound": {
+    "candidate_set_id": "cs_dkamzte80t6z9y2a",
+    "candidate_id": "cnd_56xr16p6bhk77rte",
+    "image_sha256": "31d7709c08a0c8ae8ae0eed5c3f8b2339f211658d568694717c2ba4bb400a4b9",
+    "artifact_id": "art_6ga3pgzktfqvepdf",
+    "prompt_revision_id": "prm_bmb1j02fjs0kqn4z",
+    "qa_evaluation_id": "qa_k86t383yds1vkjf5",
+    "seed": 7026310772968684
+  },
+  "qa_status": "recommended",
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:27.705Z",
+  "actor": "operator",
+  "idempotency_key": "fx-material-a0"
+}

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_89htbjsr04rtdpvk",
+  "item_id": "itm_tmq6z5tkcyq11nrq",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:40.772Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Tavern",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Tavern",
+    "tags": [
+      "Concept art"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Tavern, clearly readable form, simulated enhancement.",
+  "template": "",
+  "positive": "Brief for Tavern, clearly readable form, simulated enhancement",
+  "negative": "watermark, signature, text, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "ac765f16f24cbb3364d14c8591615bc3104fb68ca2b03d4f055d61108ed5265c"
+}

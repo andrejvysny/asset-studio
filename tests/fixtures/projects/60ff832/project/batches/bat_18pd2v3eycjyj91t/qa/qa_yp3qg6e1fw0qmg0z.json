@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "id": "qa_yp3qg6e1fw0qmg0z",
+  "item_id": "itm_tgmdjg2m62pd5eeg",
+  "candidate_set_id": "cs_ftr4940nfcz4kc64",
+  "candidate_id": "cnd_0e37mh5b1tffk2pv",
+  "image_sha256": "ad2faf15ebf0a3f9b8f1e26e41debb01f8445a83ce58090087f3a99bf307d42d",
+  "ruleset": {
+    "label": "Sprite candidates",
+    "kind": "sprite",
+    "rules": [
+      {
+        "id": "single_subject",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "Exactly one subject is depicted.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "fully_visible",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The whole subject is visible; nothing is cut off.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "no_text",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The image contains no text, letters, logo or watermark.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "mask_margin",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": null,
+        "metric": "mask_margin",
+        "params": {}
+      },
+      {
+        "id": "mask_single_blob",
+        "source": "mask_metric",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": null,
+        "metric": "mask_single_blob",
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "ruleset_sha": "57cbeb5b32ce9e08d3501e3a63544bd17454a4665a6d111d9e4a00e2f47278f2",
+  "results": [
+    {
+      "rule_id": "single_subject",
+      "source": "vlm",
+      "severity": "major",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    },
+    {
+      "rule_id": "fully_visible",
+      "source": "vlm",
+      "severity": "major",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    },
+    {
+      "rule_id": "no_text",
+      "source": "vlm",
+      "severity": "major",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    },
+    {
+      "rule_id": "mask_margin",
+      "source": "mask_metric",
+      "severity": "major",
+      "result": "pass",
+      "reason": "",
+      "observed": {
+        "touches_border": false
+      },
+      "threshold": {
+        "border_px": 4
+      },
+      "evaluator": "assetstudio_processing.metrics/1"
+    },
+    {
+      "rule_id": "mask_single_blob",
+      "source": "mask_metric",
+      "severity": "minor",
+      "result": "pass",
+      "reason": "",
+      "observed": 0.0,
+      "threshold": 0.02,
+      "evaluator": "assetstudio_processing.metrics/1"
+    }
+  ],
+  "policy": {
+    "status": "recommended",
+    "not_evaluated": false,
+    "coverage": {
+      "completed": 5,
+      "applicable": 5
+    },
+    "failed_major": [],
+    "failed_minor": [],
+    "unavailable": [],
+    "disabled": [],
+    "minor_fail_limit": 2
+  },
+  "evaluators": {
+    "mask_artifact_id": "art_gveqdptwmkxht8zt",
+    "simulated": true
+  },
+  "evaluated_at": "2026-09-29T12:58:26.656Z",
+  "op_id": "op_f8h5cw4yqs7wbr4y"
+}

@@ -1,35 +1,44 @@
-"""worker3d: TRELLIS.2 (image -> raw mesh + attribute volume) and GLB export. Stateless: bytes in, bytes out.
+"""worker3d: TRELLIS.2 (image -> raw mesh + attribute volume) and GLB export as recoverable executions.
 
-The Studio stores every result; this service keeps nothing but lazily loaded weights, released on /unload.
+Owns no product state. Each execution (id chosen by the Studio) is spooled on a persistent volume until the Studio
+acknowledges ingestion, so a lost HTTP response or a Studio restart never forces a second TRELLIS.2 run. Work that
+had not finished when THIS process died is reported `lost` (never silently re-run).
 """
 from __future__ import annotations
 
-import base64
+import hashlib
 import io
 import json
 import os
+import queue
+import re
+import shutil
 import threading
 import time
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 import raw as rawio
 import torch
 from export import to_glb
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.concurrency import run_in_threadpool
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response
 from lazy_model import LazyModel, gpu_info
+from lease import Lease, StaleLease
 from PIL import Image
 from pipeline_config import MODELS, TRELLIS_DIR, write_local_pipeline_json
 from pydantic import BaseModel, Field
 from rasterize import available
 
 IDLE_UNLOAD_S = float(os.environ.get("IDLE_UNLOAD_S", "300"))
+SPOOL = Path(os.environ.get("WORKER3D_SPOOL", "/spool"))
 TRELLIS_REF = "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
-MAX_RAW_BYTES = 1 << 30
+MAX_IMAGE_BYTES = 64 * 2**20
 LIMITATIONS = [f"export always fills holes with perimeter < {0.03} (upstream constant)"]
 EXPORTER_LICENCE = {"clean": "MIT (TRELLIS.2 o-voxel port + AssetStudio UV rasteriser)",
                     "research": "NVIDIA Source Code License (nvdiffrast v0.4.0): research/evaluation only"}
+EXEC_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
+TERMINAL = ("succeeded", "failed", "cancelled", "lost")
 
 
 def missing_models() -> list[str]:
@@ -50,88 +59,290 @@ def _load() -> object:
 
 
 trellis = LazyModel(_load, IDLE_UNLOAD_S)
-gpu = threading.Lock()  # one GPU job at a time
+lease = Lease()
+jobs: queue.Queue[str] = queue.Queue()
+cancel_flags: set[str] = set()
 app = FastAPI(title="assetstudio worker3d")
 
 
-class GenerateRequest(BaseModel):
-    image_b64: str = Field(max_length=64 * 2**20)  # RGBA cut-out PNG (alpha = foreground)
-    seed: int = Field(ge=0, lt=2**31)
-    pipeline_type: Literal["512", "1024", "1024_cascade", "1536_cascade"] = "1024_cascade"
+# --- spool -------------------------------------------------------------------------------------------------------
+def _dir(eid: str) -> Path:
+    if not EXEC_ID.fullmatch(eid):
+        raise HTTPException(400, "invalid execution id")
+    return SPOOL / eid
 
 
-def _meta_headers(meta: dict) -> dict[str, str]:
-    return {"x-worker-meta": json.dumps(meta, separators=(",", ":"))}
+def _write(path: Path, data: bytes) -> None:
+    tmp = path.with_name(f".tmp-{path.name}")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
 
 
-@app.post("/generate")
-def generate(req: GenerateRequest) -> Response:
+def _state(eid: str) -> dict[str, Any] | None:
     try:
-        image = Image.open(io.BytesIO(base64.b64decode(req.image_b64, validate=True)))
-        image.load()
-    except (ValueError, OSError) as e:
-        raise HTTPException(422, f"not a decodable image: {e}") from e
-    if image.mode != "RGBA":
-        raise HTTPException(422, "expected an RGBA cut-out (alpha = foreground)")
+        return json.loads((_dir(eid) / "state.json").read_text())
+    except FileNotFoundError:
+        return None
+
+
+def _set_state(eid: str, **fields: Any) -> None:
+    st = {**(_state(eid) or {}), **fields, "updated_at": time.time()}
+    _write(_dir(eid) / "state.json", json.dumps(st).encode())
+
+
+def _recover_spool() -> None:
+    """Executions that were queued/running when a previous process died can no longer complete."""
+    SPOOL.mkdir(parents=True, exist_ok=True)
+    for d in SPOOL.iterdir():
+        st = _state(d.name) if EXEC_ID.fullmatch(d.name) else None
+        if st is not None and st.get("state") not in TERMINAL:
+            _set_state(d.name, state="lost", error="worker restarted before this execution finished",
+                       lost_session=st.get("session_id"))
+
+
+# --- execution ---------------------------------------------------------------------------------------------------
+def _cancelled(eid: str) -> bool:
+    return eid in cancel_flags
+
+
+def _run_generate(eid: str, params: dict[str, Any], body: bytes) -> tuple[bytes, dict[str, Any]]:
+    image = Image.open(io.BytesIO(body))
+    image.load()
     t0 = time.monotonic()
-    with gpu, trellis.use() as pipe:
+    with trellis.use() as pipe:
         torch.cuda.reset_peak_memory_stats()
-        torch.manual_seed(req.seed)
-        mesh = pipe.run(image, seed=req.seed, pipeline_type=req.pipeline_type)[0]  # type: ignore[attr-defined]
+        torch.manual_seed(params["seed"])
+        mesh = pipe.run(image, seed=params["seed"], pipeline_type=params["pipeline_type"])[0]  # type: ignore
         t1 = time.monotonic()
         data = rawio.dump(mesh)
         faces = int(mesh.faces.shape[0])
         del mesh
         torch.cuda.empty_cache()
-    return Response(data, media_type="application/octet-stream", headers=_meta_headers({
-        "engine": "TRELLIS.2", "trellis_ref": TRELLIS_REF, "pipeline_type": req.pipeline_type, "seed": req.seed,
-        "raw_format": rawio.FORMAT, "raw_faces": faces, "timings_s": {"sample": round(t1 - t0, 2)},
-        "peak_vram_mb": torch.cuda.max_memory_allocated() // 2**20}))
+    return data, {"engine": "TRELLIS.2", "trellis_ref": TRELLIS_REF, "pipeline_type": params["pipeline_type"],
+                  "seed": params["seed"], "raw_format": rawio.FORMAT, "raw_faces": faces,
+                  "timings_s": {"sample": round(t1 - t0, 2)},
+                  "peak_vram_mb": torch.cuda.max_memory_allocated() // 2**20, "trellis_loads": trellis.loads}
 
 
-@app.post("/export")
-async def export(request: Request, exporter: Literal["clean", "research"] = "clean",
-                 decimation_target: int = Query(200_000, ge=1_000, le=2_000_000),
-                 texture_size: int = Query(2048, ge=256, le=8192), remesh: bool = False) -> Response:
-    if not available()[exporter]:
-        raise HTTPException(422, f"exporter {exporter!r} is not installed in this worker image")
-    body = await request.body()
-    if not body or len(body) > MAX_RAW_BYTES:
-        raise HTTPException(413, "raw payload missing or too large")
-    glb, meta = await run_in_threadpool(_export, body, exporter, decimation_target, texture_size, remesh)
-    meta.update(licence=EXPORTER_LICENCE[exporter], limitations=LIMITATIONS)
-    return Response(glb, media_type="model/gltf-binary", headers=_meta_headers(meta))
+def _run_export(eid: str, params: dict[str, Any], body: bytes) -> tuple[bytes, dict[str, Any]]:
+    raw = rawio.validate(body)  # CPU schema/resource checks before any tensor reaches the GPU
+    if _cancelled(eid):
+        raise InterruptedError()
+    torch.cuda.reset_peak_memory_stats()
+    cuda_raw = rawio.to_cuda(raw)
+    try:
+        glb, meta = to_glb(cuda_raw, params["exporter"], params["decimation_target"], params["texture_size"],
+                           params["remesh"])
+    finally:
+        del cuda_raw
+        torch.cuda.empty_cache()
+    meta.update(licence=EXPORTER_LICENCE[params["exporter"]], limitations=LIMITATIONS,
+                peak_vram_mb=torch.cuda.max_memory_allocated() // 2**20)
+    return glb, meta
 
 
-def _export(body: bytes, exporter: str, decimation_target: int, texture_size: int, remesh: bool) -> tuple[bytes, dict]:
-    with gpu:
+def _executor() -> None:
+    """One GPU execution at a time. Activity was counted at admission and is released here when it ends."""
+    while True:
+        eid = jobs.get()
         try:
-            raw = rawio.load(body)
-        except (ValueError, KeyError, OSError) as e:
-            raise HTTPException(422, f"invalid raw intermediate: {e}") from e
-        try:
-            return to_glb(raw, exporter, decimation_target, texture_size, remesh)
+            d = _dir(eid)
+            req = json.loads((d / "request.json").read_text())
+            if _cancelled(eid):
+                _set_state(eid, state="cancelled")
+                continue
+            _set_state(eid, state="running", started_at=time.time())
+            fn = _run_generate if req["op"] == "generate" else _run_export
+            try:
+                data, meta = fn(eid, req["params"], (d / "input.bin").read_bytes())
+            except InterruptedError:
+                _set_state(eid, state="cancelled")
+                continue
+            except rawio.RawInvalid as e:
+                _set_state(eid, state="failed", error=f"invalid raw intermediate: {e}", code="input_invalid")
+                continue
+            except torch.cuda.OutOfMemoryError as e:
+                _set_state(eid, state="failed", error=f"out of GPU memory: {str(e)[:200]}", code="oom")
+                continue
+            except Exception as e:  # recorded, never swallowed; the executor keeps serving
+                _set_state(eid, state="failed", error=f"{type(e).__name__}: {str(e)[:300]}", code="internal")
+                continue
+            _write(d / "result.bin", data)
+            _write(d / "meta.json", json.dumps(meta, separators=(",", ":")).encode())
+            _set_state(eid, state="succeeded", finished_at=time.time(),
+                       result_sha256=hashlib.sha256(data).hexdigest(), result_size=len(data))
         finally:
-            del raw
-            torch.cuda.empty_cache()
+            cancel_flags.discard(eid)
+            (_dir(eid) / "input.bin").unlink(missing_ok=True)
+            lease.leave()
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    _recover_spool()
+    threading.Thread(target=_executor, name="executor", daemon=True).start()
+
+
+def _epoch(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+@app.post("/executions/{eid}", status_code=202)
+async def submit(eid: str, request: Request, op: Literal["generate", "export"],
+                 x_lease_epoch: str | None = Header(default=None),
+                 x_exec_params: str = Header(max_length=4000)) -> dict[str, Any]:
+    """Idempotent by id: the same id + request returns the current state; a different request conflicts."""
+    body = await request.body()
+    try:
+        params = _params(op, json.loads(x_exec_params))
+    except (ValueError, TypeError, KeyError) as e:
+        raise HTTPException(422, f"invalid parameters: {e}") from e
+    req_sha = hashlib.sha256(json.dumps({"op": op, "params": params}, sort_keys=True).encode() + body).hexdigest()
+    d = _dir(eid)
+    if (st := _state(eid)) is not None:
+        if st.get("request_sha256") != req_sha:
+            raise HTTPException(409, "execution id reused with a different request")
+        return st
+    _validate_input(op, params, body)
+    try:
+        lease.enter(_epoch(x_lease_epoch))
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
+    try:
+        d.mkdir(parents=True)
+        _write(d / "input.bin", body)
+        _write(d / "request.json", json.dumps({"op": op, "params": params}).encode())
+        _set_state(eid, state="queued", request_sha256=req_sha, session_id=lease.session_id,
+                   epoch=lease.epoch, submitted_at=time.time())
+    except BaseException:
+        lease.leave()
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+    jobs.put(eid)
+    return _state(eid) or {}
+
+
+def _params(op: str, p: dict[str, Any]) -> dict[str, Any]:
+    if op == "generate":
+        pt = p["pipeline_type"]
+        if pt not in ("512", "1024", "1024_cascade", "1536_cascade") or not 0 <= int(p["seed"]) < 2**31:
+            raise ValueError("pipeline_type/seed out of range")
+        return {"seed": int(p["seed"]), "pipeline_type": pt}
+    exporter = p["exporter"]
+    if exporter not in ("clean", "research"):
+        raise ValueError("unknown exporter")
+    target, size = int(p["decimation_target"]), int(p["texture_size"])
+    if not (1_000 <= target <= 2_000_000 and 256 <= size <= 8192):
+        raise ValueError("decimation_target/texture_size out of range")
+    return {"exporter": exporter, "decimation_target": target, "texture_size": size, "remesh": bool(p["remesh"])}
+
+
+def _validate_input(op: str, params: dict[str, Any], body: bytes) -> None:
+    """Reject bad inputs at admission (typed 4xx), before queueing GPU work."""
+    if op == "generate":
+        if not body or len(body) > MAX_IMAGE_BYTES:
+            raise HTTPException(413, "image missing or too large")
+        try:
+            with Image.open(io.BytesIO(body)) as im:
+                im.load()
+                if im.mode != "RGBA":
+                    raise HTTPException(422, "expected an RGBA cut-out (alpha = foreground)")
+        except (OSError, ValueError) as e:
+            raise HTTPException(422, f"not a decodable image: {e}") from e
+        return
+    if not available()[params["exporter"]]:
+        raise HTTPException(422, f"exporter {params['exporter']!r} is not installed in this worker image")
+    try:
+        rawio.validate(body)
+    except rawio.RawInvalid as e:
+        raise HTTPException(422, f"invalid raw intermediate: {e}") from e
+
+
+@app.get("/executions/{eid}")
+def execution(eid: str) -> dict[str, Any]:
+    st = _state(eid)
+    if st is None:
+        raise HTTPException(404, "unknown execution")
+    return {**st, "worker_session": lease.session_id}
+
+
+@app.get("/executions/{eid}/result")
+def execution_result(eid: str) -> Response:
+    st = _state(eid)
+    if st is None or st.get("state") != "succeeded":
+        raise HTTPException(409, "no result")
+    d = _dir(eid)
+    return Response((d / "result.bin").read_bytes(), media_type="application/octet-stream",
+                    headers={"x-worker-meta": (d / "meta.json").read_text()})
+
+
+@app.post("/executions/{eid}/cancel")
+def execution_cancel(eid: str) -> dict[str, Any]:
+    """Best effort: honoured before start and at phase boundaries; a running sample finishes (then is discarded)."""
+    st = _state(eid)
+    if st is None:
+        raise HTTPException(404, "unknown execution")
+    if st.get("state") not in TERMINAL:
+        cancel_flags.add(eid)
+    return {**st, "cancel_requested": st.get("state") not in TERMINAL}
+
+
+@app.delete("/executions/{eid}")
+def execution_ack(eid: str) -> dict[str, Any]:
+    """The Studio verified and stored the result: the spool entry can go."""
+    st = _state(eid)
+    if st is not None and st.get("state") not in TERMINAL:
+        raise HTTPException(409, "execution still active")
+    shutil.rmtree(_dir(eid), ignore_errors=True)
+    return {"acknowledged": True}
 
 
 @app.get("/health")
 def health() -> dict:
     missing = missing_models()
+    spooled = sum(1 for _ in SPOOL.iterdir()) if SPOOL.is_dir() else 0
     return {"ok": not missing and torch.cuda.is_available(), "missing_models": missing,
             "models_present": {k: k not in missing for k in ("trellis2", "trellis_image_large", "dinov3_vitl16")},
             "loaded": {"trellis2": trellis.loaded}, "loads": {"trellis2": trellis.loads}, "exporters": available(),
-            "trellis_ref": TRELLIS_REF, "cuda": torch.cuda.is_available(), "gpu": gpu_info()}
+            "trellis_ref": TRELLIS_REF, "cuda": torch.cuda.is_available(), "gpu": gpu_info(),
+            "lease": lease.info(), "queued": jobs.qsize(), "spooled": spooled}
+
+
+class LeaseRequest(BaseModel):
+    epoch: int = Field(ge=1)
+
+
+@app.post("/lease")
+def grant(req: LeaseRequest) -> dict:
+    try:
+        return lease.grant(req.epoch)
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
 
 
 class UnloadRequest(BaseModel):
     owner_token: str = Field(min_length=1, max_length=100)
+    epoch: int = Field(ge=0)
 
 
 @app.post("/unload")
 def unload(req: UnloadRequest) -> dict:
-    """Acknowledges release only once the weights are really gone (waits for the in-flight job)."""
+    """Acknowledges release only when NOTHING is queued or running (sampling, export, transfers) and the weights
+    are gone. Admission stops first, so no request can start between the check and the acknowledgement."""
+    try:
+        drained = lease.drain(req.epoch, timeout=600.0)
+    except StaleLease as e:
+        raise HTTPException(409, f"stale_lease: {e}") from e
+    if not drained:
+        raise HTTPException(409, "GPU work still active")
     if not trellis.unload():
         raise HTTPException(409, "model still in use")
-    return {"loaded": trellis.loaded, "owner_token": req.owner_token}
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return {"loaded": trellis.loaded, "owner_token": req.owner_token, **lease.info()}

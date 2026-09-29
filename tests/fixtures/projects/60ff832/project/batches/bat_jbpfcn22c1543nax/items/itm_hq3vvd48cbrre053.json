@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "id": "itm_hq3vvd48cbrre053",
+  "batch_id": "bat_jbpfcn22c1543nax",
+  "name": "Cobble",
+  "brief": "brief for Cobble",
+  "category_id": "materials",
+  "shot_id": null,
+  "target_asset_id": null,
+  "snapshot_sha": "ea47b77042dd615795b3d0625ae56a57132c94403d7be7822cbfcefe33c85c77",
+  "revision": 18,
+  "prompt_revisions": [
+    "prm_bmb1j02fjs0kqn4z"
+  ],
+  "current_prompt": "prm_bmb1j02fjs0kqn4z",
+  "prompt_confirmed": "prm_bmb1j02fjs0kqn4z",
+  "candidate_sets": [
+    "cs_dkamzte80t6z9y2a"
+  ],
+  "current_set": "cs_dkamzte80t6z9y2a",
+  "qa": {
+    "cnd_56xr16p6bhk77rte": "qa_k86t383yds1vkjf5",
+    "cnd_77serq8brnmtg48e": "qa_t0akdp1920p60axn"
+  },
+  "decisions": [
+    "dec_rx33vw5emzr0fv4x"
+  ],
+  "approval": "dec_rx33vw5emzr0fv4x",
+  "regen_requested": false,
+  "build_runs": [
+    "run_0gxbbtjaz3t2qcgx"
+  ],
+  "current_build": "run_0gxbbtjaz3t2qcgx",
+  "accepted_build": null,
+  "published": null,
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_040b7asg19yd5ec5",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_ccv7dgf5nk066sra",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_3ephwz8fajjd5c0s",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "build": {
+      "op_id": "op_520we3vgcypmejja",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:27.260Z",
+  "updated_at": "2026-09-29T12:58:27.949Z"
+}

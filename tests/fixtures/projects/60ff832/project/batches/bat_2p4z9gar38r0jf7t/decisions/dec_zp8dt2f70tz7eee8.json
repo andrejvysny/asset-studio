@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "dec_zp8dt2f70tz7eee8",
+  "gate": "final_acceptance",
+  "batch_id": "bat_2p4z9gar38r0jf7t",
+  "item_id": "itm_rqf7x2vvpcrah45e",
+  "bound": {
+    "build_run_id": "run_b2zphfkfr24sqamk",
+    "artifacts": {
+      "image": "art_35h5wf2y2a4z1hm3",
+      "preview": "art_gftfxbsn8cxbe456"
+    }
+  },
+  "qa_status": null,
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:25.732Z",
+  "actor": "operator",
+  "idempotency_key": "fx-concept-acc"
+}

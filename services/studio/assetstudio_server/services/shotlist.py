@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
-from .records import load_batch, load_items
+from .records import load_items, load_job
 
 
 class ShotInput(BaseModel):
@@ -58,7 +58,7 @@ def shot_statuses(ctx: ProjectContext) -> list[dict[str, Any]]:
     cfg, _ = ctx.config()
     membership: dict[str, dict[str, Any]] = {}
     for bid in list_batch_ids(ctx):
-        batch, _ = load_batch(ctx.store, bid)
+        batch, _ = load_job(ctx.store, bid)
         for item in load_items(ctx.store, batch):
             if not item.shot_id or item.cancelled:
                 continue

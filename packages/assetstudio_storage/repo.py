@@ -30,6 +30,16 @@ class IntegrityError(StorageError):
     code = "integrity_error"
 
 
+class CorruptBlob(IntegrityError):
+    """Stored bytes no longer match their content address. Dependent work blocks; repair is explicit."""
+
+    code = "artifact_corrupt"
+
+    def __init__(self, sha256: str, detail: str = "") -> None:
+        super().__init__(f"blob {sha256[:12]} is corrupt{': ' + detail if detail else ''}")
+        self.sha256 = sha256
+
+
 @dataclass(frozen=True)
 class ObjectData:
     data: bytes
@@ -71,5 +81,11 @@ class Repository(Protocol):
     def blob_size(self, sha256: str) -> int: ...
 
     def open_blob(self, sha256: str) -> BinaryIO: ...
+
+    def verify_blob(self, sha256: str, size: int | None = None, use_cache: bool = True) -> None: ...
+
+    def read_blob_verified(self, sha256: str, max_bytes: int | None = None) -> bytes: ...
+
+    def copy_blob_verified(self, sha256: str, dst: BinaryIO) -> int: ...
 
     def describe(self) -> dict: ...

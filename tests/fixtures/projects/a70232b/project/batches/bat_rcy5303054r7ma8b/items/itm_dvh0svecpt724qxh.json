@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "itm_dvh0svecpt724qxh",
+  "batch_id": "bat_rcy5303054r7ma8b",
+  "name": "Barrel",
+  "brief": "brief for Barrel",
+  "category_id": "props",
+  "shot_id": null,
+  "target_asset_id": null,
+  "snapshot_sha": "cc7936852e1314dfdebb8ffd7584cc9f611259e76645b63e03a6f374978b64cf",
+  "revision": 13,
+  "prompt_revisions": [
+    "prm_6k62m1pz7fcaafkv"
+  ],
+  "current_prompt": "prm_6k62m1pz7fcaafkv",
+  "prompt_confirmed": "prm_6k62m1pz7fcaafkv",
+  "candidate_sets": [
+    "cs_34wj6snjwjz1ck2k"
+  ],
+  "current_set": "cs_34wj6snjwjz1ck2k",
+  "qa": {
+    "cnd_28f3tg9w9hzkn04q": "qa_0g0vq522vm522v4h",
+    "cnd_3wsy09qvh729anm1": "qa_fxx9bfkfk2g40wxg"
+  },
+  "decisions": [],
+  "approval": null,
+  "regen_requested": false,
+  "build_runs": [],
+  "current_build": null,
+  "accepted_build": null,
+  "published": null,
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_adfnzzkqpbgem65a",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_90qr27g93fjnn2gs",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_7032wnnmxk91y8zp",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:43.903Z",
+  "updated_at": "2026-09-29T12:58:44.642Z"
+}

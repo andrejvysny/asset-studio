@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .base import AckError, EngineRejected, EngineUnavailable
+from .base import EngineRejected, EngineUnavailable, post_ack
 
 TIMEOUT = httpx.Timeout(300.0, connect=5.0)
 
@@ -19,13 +19,16 @@ class AuxClient:
         self.base_url = base_url.rstrip("/")
         self.http = client or httpx.Client(base_url=self.base_url, timeout=TIMEOUT)
 
-    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _post(self, path: str, payload: dict[str, Any], epoch: int, execution_id: str | None) -> dict[str, Any]:
+        headers = {"x-lease-epoch": str(epoch), **({"x-execution-id": execution_id} if execution_id else {})}
         try:
-            r = self.http.post(path, json=payload)
+            r = self.http.post(path, json=payload, headers=headers)
         except httpx.HTTPError as e:
             raise EngineUnavailable(f"aux {path}: {type(e).__name__}") from e
         if r.status_code in (400, 422):
             raise EngineRejected(f"aux {path}: {r.text[:300]}")
+        if r.status_code == 409:  # stale lease: this Studio no longer owns the device
+            raise EngineUnavailable(f"aux {path}: {r.text[:200]}")
         if r.status_code != 200:
             raise EngineUnavailable(f"aux {path}: HTTP {r.status_code} {r.text[:200]}")
         try:
@@ -44,34 +47,27 @@ class AuxClient:
             return {"reachable": False}
         return {"reachable": r.status_code == 200, **body}
 
-    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str) -> dict[str, Any]:
+    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
+                execution_id: str | None = None) -> dict[str, Any]:
         return self._post("/enhance", {"brief": brief, "kind": kind, "constraints": constraints,
-                                       "style_guide": style_guide})
+                                       "style_guide": style_guide}, epoch, execution_id)
 
-    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str) -> dict[str, Any]:
+    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
+           execution_id: str | None = None) -> dict[str, Any]:
         return self._post("/qa", {"image_b64": base64.b64encode(image).decode(), "context": context,
-                                  "questions": [{"id": i, "question": q} for i, q in questions]})
+                                  "questions": [{"id": i, "question": q} for i, q in questions]}, epoch, execution_id)
 
-    def cutout(self, *, image: bytes) -> dict[str, Any]:
-        body = self._post("/cutout", {"image_b64": base64.b64encode(image).decode()})
+    def cutout(self, *, image: bytes, epoch: int, execution_id: str | None = None) -> dict[str, Any]:
+        body = self._post("/cutout", {"image_b64": base64.b64encode(image).decode()}, epoch, execution_id)
         try:
             body["mask_png"] = base64.b64decode(body.pop("mask_b64"), validate=True)
         except (KeyError, ValueError) as e:
             raise EngineUnavailable("aux /cutout: malformed mask") from e
         return body
 
-    def unload(self, owner_token: str) -> dict[str, Any]:
-        """Only an explicit 200 body {loaded: false, owner_token: <ours>} counts as released."""
-        try:
-            r = self.http.post("/unload", json={"owner_token": owner_token}, timeout=60.0)
-        except httpx.HTTPError as e:
-            raise AckError(f"unload not acknowledged: {type(e).__name__}") from e
-        if r.status_code != 200:
-            raise AckError(f"unload not acknowledged: HTTP {r.status_code}")
-        try:
-            body = r.json()
-        except ValueError as e:
-            raise AckError("unload not acknowledged: malformed body") from e
-        if not isinstance(body, dict) or body.get("loaded") is not False or body.get("owner_token") != owner_token:
-            raise AckError(f"unload not acknowledged: {str(body)[:200]}")
-        return body
+    def lease(self, epoch: int) -> dict[str, Any]:
+        return post_ack(self.http, "/lease", {"epoch": epoch}, 30.0)
+
+    def unload(self, owner_token: str, epoch: int) -> dict[str, Any]:
+        """Validated by the GPU lane: {loaded: false, active: 0, admitting: false, epoch, owner_token}."""
+        return post_ack(self.http, "/unload", {"owner_token": owner_token, "epoch": epoch}, 330.0)

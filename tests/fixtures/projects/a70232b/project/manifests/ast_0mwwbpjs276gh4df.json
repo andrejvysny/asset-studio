@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_0mwwbpjs276gh4df",
+  "name_id": "rock",
+  "display_name": "Rock",
+  "kind": "concept_art",
+  "origin": "imported",
+  "category_id": null,
+  "tags": [],
+  "created_at": "2026-09-29T12:58:44.821Z",
+  "current_version_id": "ver_jnq4vq35jdfxe3a9",
+  "versions": [
+    {
+      "version_id": "ver_jnq4vq35jdfxe3a9",
+      "display_version": 1,
+      "published_at": "2026-09-29T12:58:44.821Z",
+      "publication_op": "op_8zfqhkkvdbxetg2q",
+      "preview_artifact_id": "art_njp169r36sr7ws8p",
+      "note": "Imported from rock.png"
+    }
+  ],
+  "pointer_log": [
+    {
+      "from_version": null,
+      "to_version": "ver_jnq4vq35jdfxe3a9",
+      "at": "2026-09-29T12:58:44.821Z",
+      "op": "op_8zfqhkkvdbxetg2q",
+      "reason": "publish"
+    }
+  ],
+  "revision": 1
+}

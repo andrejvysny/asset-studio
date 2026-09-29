@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .domain import BatchItem, CandidateSet, QaEvaluation
+from .domain import CandidateSet, JobItem, QaEvaluation
 from .qa import recommendation_rank
 
 
@@ -29,7 +29,7 @@ class ApprovalRequest:
     override_reason: str | None = None
 
 
-def check_binding(item: BatchItem, cset: CandidateSet | None, qa: QaEvaluation | None,
+def check_binding(item: JobItem, cset: CandidateSet | None, qa: QaEvaluation | None,
                   req: ApprovalRequest, blob_sha: str | None) -> dict[str, Any]:
     """Validates that the request names exactly the current reviewable bytes. Returns the decision payload."""
     if item.revision != req.expected_item_revision:
@@ -67,7 +67,7 @@ def check_binding(item: BatchItem, cset: CandidateSet | None, qa: QaEvaluation |
     }
 
 
-def propose_best(item: BatchItem, cset: CandidateSet | None, qas: dict[str, QaEvaluation]) -> dict[str, Any]:
+def propose_best(item: JobItem, cset: CandidateSet | None, qas: dict[str, QaEvaluation]) -> dict[str, Any]:
     """One proposal per undecided row: best recommended candidate, or a skip reason. Never approves."""
     if item.approval is not None and not item.regen_requested:
         return {"item_id": item.id, "skip": "already approved"}

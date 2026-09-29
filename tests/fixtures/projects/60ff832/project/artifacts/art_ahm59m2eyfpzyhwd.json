@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "art_ahm59m2eyfpzyhwd",
+  "role": "image",
+  "sha256": "8277fe1a61052b4d7e2e4ca707475d3898b35f35eddc1fe7c3cb94f76c52d4dd",
+  "size": 132,
+  "mime": "image/png",
+  "meta": {
+    "import": {
+      "import_id": "imp_m9ns5dtgmp87d93n",
+      "source_name": "rock.png",
+      "source_uri": null,
+      "credit": null,
+      "licence": "unknown"
+    }
+  },
+  "lineage": [],
+  "created_at": "2026-09-29T12:58:29.725Z",
+  "retention": "essential",
+  "source": {
+    "import_id": "imp_m9ns5dtgmp87d93n",
+    "source_name": "rock.png",
+    "source_uri": null,
+    "credit": null,
+    "licence": "unknown"
+  }
+}

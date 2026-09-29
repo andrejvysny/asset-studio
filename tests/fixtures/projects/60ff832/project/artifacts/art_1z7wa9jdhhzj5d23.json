@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "art_1z7wa9jdhhzj5d23",
+  "role": "candidate",
+  "sha256": "262a5ab19aec15ea17a914f4107db4f3a6fe42e7d9abf60dcd2476c80fc0f1e1",
+  "size": 5439,
+  "mime": "image/png",
+  "meta": {
+    "format": "PNG",
+    "width": 512,
+    "height": 512,
+    "mode": "RGB",
+    "has_alpha": false,
+    "seed": 929868975383742
+  },
+  "lineage": [],
+  "created_at": "2026-09-29T12:58:25.344Z",
+  "retention": "candidate",
+  "source": {
+    "engine": {
+      "engine": "fake",
+      "simulated": true,
+      "workflow": "fake.t2i",
+      "workflow_version": 0
+    },
+    "prompt_id": "ca7184b4-9201-5e88-aaa2-bc4d756dc264",
+    "prompt_revision_id": "prm_casd2v7hb9bp87fy",
+    "simulated": true
+  }
+}

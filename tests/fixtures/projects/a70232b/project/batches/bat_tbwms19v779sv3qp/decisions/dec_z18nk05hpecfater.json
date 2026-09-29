@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "dec_z18nk05hpecfater",
+  "gate": "candidate_approval",
+  "batch_id": "bat_tbwms19v779sv3qp",
+  "item_id": "itm_kkrsrdve6tytecbr",
+  "bound": {
+    "candidate_set_id": "cs_f3dtmp9m362pppe8",
+    "candidate_id": "cnd_f37m1b2dh07gahq0",
+    "image_sha256": "6cd5b1251ecd09e5dfa9c3583f4991d8f2f3d96827130950cffd01e6cd0fa257",
+    "artifact_id": "art_hhbe7wbkjcmjx9nf",
+    "prompt_revision_id": "prm_4hn15dnqt2regf2y",
+    "qa_evaluation_id": "qa_nb896q3vgwx66fj1",
+    "seed": 7788093618847452
+  },
+  "qa_status": "recommended",
+  "override_qa": false,
+  "override_reason": null,
+  "failed_checks": [],
+  "missing_checks": [],
+  "decided_at": "2026-09-29T12:58:42.649Z",
+  "actor": "operator",
+  "idempotency_key": "fx-sprite-a0"
+}

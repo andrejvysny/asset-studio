@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "art_gftfxbsn8cxbe456",
+  "role": "preview",
+  "sha256": "5f974ad88d9faa8531466567a9b60741bbb4079379996b5407a64bec86298428",
+  "size": 10992,
+  "mime": "image/png",
+  "meta": {
+    "derived": "thumbnail 384px"
+  },
+  "lineage": [
+    "art_35h5wf2y2a4z1hm3"
+  ],
+  "created_at": "2026-09-29T12:58:25.663Z",
+  "retention": "essential",
+  "source": {}
+}

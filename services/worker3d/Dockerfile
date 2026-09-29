@@ -49,10 +49,13 @@ RUN SITE=$(python -c "import site; print(site.getsitepackages()[0])") \
 
 WORKDIR /app
 COPY services/worker3d/*.py /app/
-RUN useradd --uid 1000 --create-home worker3d
+# Single source of the raw schema validator (numpy only), shared with the Studio.
+COPY packages/assetstudio_processing/raw_npz.py /app/raw_npz.py
+COPY services/worker_common/lease.py /app/lease.py
+RUN useradd --uid 1000 --create-home worker3d && mkdir -p /spool && chown worker3d /spool
 USER worker3d
 ENV PYTHONPATH=/opt/TRELLIS.2 HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 PYTHONUNBUFFERED=1 MODELS_ROOT=/models/checkpoints \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True OPENCV_IO_ENABLE_OPENEXR=1 \
-    TRITON_CACHE_DIR=/tmp/triton RESEARCH_EXPORTER=${RESEARCH_EXPORTER}
+    TRITON_CACHE_DIR=/tmp/triton RESEARCH_EXPORTER=${RESEARCH_EXPORTER} WORKER3D_SPOOL=/spool
 EXPOSE 8003
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]

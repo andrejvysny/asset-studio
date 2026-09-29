@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "bat_2p4z9gar38r0jf7t",
+  "alias": "b-0001",
+  "title": "fixture concept",
+  "kind": "concept_art",
+  "recipe_id": "concept.default",
+  "category_id": "concept",
+  "created_at": "2026-09-29T12:58:24.772Z",
+  "seed_family": 496005148194215,
+  "item_ids": [
+    "itm_rqf7x2vvpcrah45e",
+    "itm_w8erfrfpx7j23tcz"
+  ],
+  "source": "ad hoc",
+  "config_revision": 2,
+  "revision": 1
+}

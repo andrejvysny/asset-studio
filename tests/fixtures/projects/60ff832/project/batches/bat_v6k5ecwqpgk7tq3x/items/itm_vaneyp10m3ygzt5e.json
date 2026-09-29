@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "itm_vaneyp10m3ygzt5e",
+  "batch_id": "bat_v6k5ecwqpgk7tq3x",
+  "name": "Crate",
+  "brief": "brief for Crate",
+  "category_id": "props",
+  "shot_id": null,
+  "target_asset_id": "ast_4yk2fb1nm045fq4j",
+  "snapshot_sha": "d563da67c235944f0183221798732baaca7910cf5696bd19e8b3605e2cdd8861",
+  "revision": 22,
+  "prompt_revisions": [
+    "prm_1nan2yjdppb18btr"
+  ],
+  "current_prompt": "prm_1nan2yjdppb18btr",
+  "prompt_confirmed": "prm_1nan2yjdppb18btr",
+  "candidate_sets": [
+    "cs_y3j2vk7r1cbkq701"
+  ],
+  "current_set": "cs_y3j2vk7r1cbkq701",
+  "qa": {
+    "cnd_3a4hatqdsp9rg54j": "qa_93b9xp2krvq0nesy",
+    "cnd_b0k5zbfd039x3bbx": "qa_zkp6k65857yavm82"
+  },
+  "decisions": [
+    "dec_hccs9hwjs55zsz3h",
+    "dec_yfcrksknfv0ttskn"
+  ],
+  "approval": "dec_hccs9hwjs55zsz3h",
+  "regen_requested": false,
+  "build_runs": [
+    "run_anax5pgk4acjejsx"
+  ],
+  "current_build": "run_anax5pgk4acjejsx",
+  "accepted_build": "run_anax5pgk4acjejsx",
+  "published": {
+    "asset_id": "ast_4yk2fb1nm045fq4j",
+    "version_id": "ver_36a82npy55nm2g11",
+    "display_version": 1
+  },
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_rrt34m5n66hypf39",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_asxhpyahq9da3yf0",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_jbadrc7tcwm9d0ej",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "build": {
+      "op_id": "op_pjzd5nq7d4fb55j6",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "publish": {
+      "op_id": "op_07ab365m5e3v1j43",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:28.020Z",
+  "updated_at": "2026-09-29T12:58:29.653Z"
+}

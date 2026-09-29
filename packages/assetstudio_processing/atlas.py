@@ -17,6 +17,7 @@ from .raster import decode_rgba
 MAX_FRAMES = 1024
 MAX_ARCHIVE_BYTES = 512 * 2**20  # total uncompressed
 MAX_ATLAS_PX = 8192
+MAX_DECODED_BYTES = 1 << 30  # all frames decoded as RGBA at once (+ the atlas) must fit this
 IGNORED = ("__MACOSX/", ".DS_Store")
 
 
@@ -68,6 +69,7 @@ def decode_frames(files: list[tuple[str, bytes]]) -> tuple[list[str], list[np.nd
     files = sorted(files, key=lambda f: natural_key(f[0]))
     if len({n for n, _ in files}) != len(files):
         raise FrameError("duplicate frame names")
+    preflight_decoded(files)
     sizes: dict[tuple[int, int], list[str]] = {}
     for name, data in files:
         try:
@@ -79,6 +81,31 @@ def decode_frames(files: list[tuple[str, bytes]]) -> tuple[list[str], list[np.nd
         detail = "; ".join(f"{w}x{h}: {', '.join(n[:3])}" for (w, h), n in sizes.items())
         raise FrameError(f"frames differ in size ({detail})")
     return [n for n, _ in files], [decode_rgba(d) for _, d in files]
+
+
+def header_size(data: bytes) -> tuple[int, int]:
+    """Width/height from the image header only (no pixel decode)."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            return im.size
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as e:
+        raise FrameError(f"not a decodable image: {e}") from e
+
+
+def preflight_decoded(files: list[tuple[str, bytes]], budget: int | None = None) -> int:
+    """Aggregate decoded RGBA bytes (frames + a minimal atlas of the same area) checked BEFORE any decode."""
+    budget = MAX_DECODED_BYTES if budget is None else budget
+    total = 0
+    for name, data in files:
+        w, h = header_size(data)
+        total += w * h * 4
+        if total * 2 > budget:
+            raise FrameError(f"decoded frames would need more than {budget // 2**20} MiB (at {name})")
+    if total > MAX_ATLAS_PX * MAX_ATLAS_PX * 4:
+        raise FrameError(f"frames cannot fit a {MAX_ATLAS_PX}px atlas")
+    return total
 
 
 def pack_grid(frames: list[np.ndarray], cols: int = 0, padding: int = 0,

@@ -21,6 +21,40 @@ class AckError(Exception):
     """A worker did not positively acknowledge an ownership/unload request."""
 
 
+class ExecutionFailed(EngineRejected):
+    """A worker execution reached a terminal failure. `code`: input_invalid | oom | internal | cancelled."""
+
+    def __init__(self, message: str, code: str = "internal") -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class ExecutionLost(Exception):
+    """The worker restarted before the execution finished and nothing was spooled: the computation is gone.
+    A retry is an explicit new attempt (new execution id), never an implicit resubmission."""
+
+
+class ExecutionCancelled(Exception):
+    """The execution was cancelled (by request) before producing a result."""
+
+
+def post_ack(http: Any, path: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+    """Only an explicit 200 JSON object counts; anything else (timeout, reset, 409, malformed) is unknown."""
+    try:
+        r = http.post(path, json=payload, timeout=timeout)
+    except Exception as e:  # httpx errors: the outcome is unknown, never "released"
+        raise AckError(f"{path} not acknowledged: {type(e).__name__}") from e
+    if r.status_code != 200:
+        raise AckError(f"{path} not acknowledged: HTTP {r.status_code} {r.text[:120]}")
+    try:
+        body = r.json()
+    except ValueError as e:
+        raise AckError(f"{path} not acknowledged: malformed body") from e
+    if not isinstance(body, dict):
+        raise AckError(f"{path} not acknowledged: malformed body")
+    return body
+
+
 @dataclass(frozen=True)
 class LoraUse:
     file: str
@@ -71,30 +105,31 @@ class ImageEngine(Protocol):
     def describe(self) -> dict[str, Any]: ...
 
 
-class AuxService(Protocol):
+class LeasedWorker(Protocol):
     name: str
     simulated: bool
 
     def health(self) -> dict[str, Any]: ...
 
-    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str) -> dict[str, Any]: ...
+    def lease(self, epoch: int) -> dict[str, Any]: ...
 
-    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str) -> dict[str, Any]: ...
-
-    def cutout(self, *, image: bytes) -> dict[str, Any]: ...
-
-    def unload(self, owner_token: str) -> dict[str, Any]: ...
+    def unload(self, owner_token: str, epoch: int) -> dict[str, Any]: ...
 
 
-class Worker3dService(Protocol):
-    name: str
-    simulated: bool
+class AuxService(LeasedWorker, Protocol):
+    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
+                execution_id: str | None = None) -> dict[str, Any]: ...
 
-    def health(self) -> dict[str, Any]: ...
+    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
+           execution_id: str | None = None) -> dict[str, Any]: ...
 
-    def generate(self, *, image_rgba: bytes, seed: int, pipeline_type: str) -> tuple[bytes, dict[str, Any]]: ...
+    def cutout(self, *, image: bytes, epoch: int, execution_id: str | None = None) -> dict[str, Any]: ...
 
-    def export(self, *, raw: bytes, exporter: str, decimation_target: int, texture_size: int,
-               remesh: bool) -> tuple[bytes, dict[str, Any]]: ...
 
-    def unload(self, owner_token: str) -> dict[str, Any]: ...
+class Worker3dService(LeasedWorker, Protocol):
+    def status(self, execution_id: str) -> dict[str, Any] | None: ...
+
+    def execute(self, execution_id: str, op: str, params: dict[str, Any], body: bytes, *, epoch: int,
+                should_cancel: Any = None) -> tuple[bytes, dict[str, Any]]: ...
+
+    def ack(self, execution_id: str) -> None: ...

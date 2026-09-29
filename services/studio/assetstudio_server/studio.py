@@ -11,7 +11,7 @@ from .adapters.comfyui import ComfyEngine, Workflow
 from .adapters.fake import FakeAux, FakeEngine, FakeWorker3d
 from .adapters.worker3d import Worker3dClient
 from .events import EventBus
-from .gpu import GpuLane
+from .gpu import GpuLane, LaneWorker
 from .journal import Journal
 from .models import HashCache
 from .registry import Registry
@@ -53,9 +53,9 @@ def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: Aux
             worker3d = Worker3dClient(settings.worker3d_url) if settings.worker3d_url else None
         elif settings.engine == "fake":
             engine, aux, worker3d = FakeEngine(), FakeAux(), FakeWorker3d()
-    unloaders = {w.name: w.unload for w in (aux, worker3d) if w is not None}
-    lanes = {"gpu1": GpuLane("gpu1", unloaders)}
-    return Studio(settings=settings, registry=Registry(settings),
-                  journal=Journal(settings.instance_dir / "journal" / "operations.sqlite"), events=EventBus(),
+    journal = Journal(settings.instance_dir / "journal" / "operations.sqlite")
+    workers = {w.name: LaneWorker(w.lease, w.unload) for w in (aux, worker3d) if w is not None}
+    lanes = {"gpu1": GpuLane("gpu1", workers, lambda: journal.next_epoch("gpu1"))}
+    return Studio(settings=settings, registry=Registry(settings), journal=journal, events=EventBus(),
                   engine=engine, aux=aux, worker3d=worker3d, lanes=lanes,
                   hash_cache=HashCache(settings.instance_dir / "model-hashes.json"))

@@ -48,7 +48,7 @@ def test_model3d_build_stores_raw_validates_and_publishes(api: Api) -> None:
     assert checks["material_texture_present"]["ok"] and checks["uvs_present"]["ok"]
     assert checks["triangle_budget"]["ok"] and checks["triangle_budget"]["advisory"]
     meta = _meta(api, pid, b)
-    assert meta["budget"]["requested"] == 5000 and meta["budget"]["source"] == "category budget"
+    assert meta["budget"]["requested"] == 5000 and meta["budget"]["source"] == "category budget maximum"
     assert meta["budget"]["effective"] == 5000 and meta["mask"]["source"] == "qa_reused"
     assert b["inputs"]["components"][-1] == "exporter_clean"
     assert [c for c in api.studio.worker3d.calls if c != "unload"] == ["generate", "export:clean"]  # type: ignore[union-attr]

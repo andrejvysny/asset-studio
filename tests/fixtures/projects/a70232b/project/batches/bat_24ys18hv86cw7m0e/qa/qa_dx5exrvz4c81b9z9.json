@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "qa_dx5exrvz4c81b9z9",
+  "item_id": "itm_pm4k8cb9avq9z0n0",
+  "candidate_set_id": "cs_xj2k5g1aw6at2e3x",
+  "candidate_id": "cnd_98tw6qdfw8pwxs4k",
+  "image_sha256": "d094014b803bd996b7171e3b37a9cdf4e7d88454e962dbb40ffdc121fcdd1e0e",
+  "ruleset": {
+    "label": "Concept art candidates",
+    "kind": "concept_art",
+    "rules": [
+      {
+        "id": "no_text",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "The image contains no text, letters, logo or watermark.",
+        "metric": null,
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "ruleset_sha": "851acd0db265603ce3047a8e10ede837f17e668a2e792dbe03a2030627d65be9",
+  "results": [
+    {
+      "rule_id": "no_text",
+      "source": "vlm",
+      "severity": "minor",
+      "result": "pass",
+      "reason": "",
+      "observed": true,
+      "threshold": null,
+      "evaluator": "simulated"
+    }
+  ],
+  "policy": {
+    "status": "recommended",
+    "not_evaluated": false,
+    "coverage": {
+      "completed": 1,
+      "applicable": 1
+    },
+    "failed_major": [],
+    "failed_minor": [],
+    "unavailable": [],
+    "disabled": [],
+    "minor_fail_limit": 2
+  },
+  "evaluators": {
+    "mask_artifact_id": null,
+    "simulated": true
+  },
+  "evaluated_at": "2026-09-29T12:58:41.349Z",
+  "op_id": "op_7s250bg8wcaga6km"
+}

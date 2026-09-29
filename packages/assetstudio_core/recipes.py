@@ -118,7 +118,7 @@ def _atlas_params(extra: tuple[ParamSpec, ...] = ()) -> tuple[ParamSpec, ...]:
 
 RECIPES: dict[str, Recipe] = {r.id: r for r in (
     Recipe(
-        "model3d.default", Kind.model3d, 1, "3D model",
+        "model3d.default", Kind.model3d, 2, "3D model",
         (_TEXT, _CONFIRM, Stage("images", "Candidates", "ComfyUI · Qwen-Image · GPU0"), _QA, _APPROVE,
          Stage("build", "Cut-out", "BiRefNet · GPU1"), Stage("build", "Image → mesh", "TRELLIS.2 + DINOv3 · GPU1"),
          Stage("build", "Export GLB + validate", "worker3d exporter · GPU1, checks · CPU"), _PUBLISH),
@@ -220,3 +220,24 @@ def validate_parameters(recipe: Recipe, params: dict[str, Any]) -> list[tuple[st
         elif (msg := spec.validate(value)) is not None:
             errors.append((key, msg))
     return errors
+
+
+# Snapshots written by a70232b recorded model3d.default version 1 with a different parameter set (cleanup,
+# cutout_padding; no pipeline_type/exporter/triangles/remesh). 60ff832 kept version 1 but changed the meaning.
+# Old snapshots are never rewritten: they are identified by their recorded keys and require an explicit fork.
+_LEGACY_MODEL3D_KEYS = {"cleanup", "cutout_padding"}
+
+
+def legacy_variant(snapshot: dict[str, Any]) -> str | None:
+    """A recipe variant this code cannot execute faithfully, or None when the snapshot is current-compatible."""
+    recipe = snapshot.get("recipe") or {}
+    rid, params = recipe.get("id"), snapshot.get("parameters") or {}
+    current = RECIPES.get(rid or "")
+    if current is None:
+        return f"unknown recipe {rid!r}"
+    if rid == "model3d.default" and _LEGACY_MODEL3D_KEYS & params.keys():
+        return "model3d.default v1 (a70232b: cleanup/cutout_padding, no TRELLIS.2 export parameters)"
+    missing = [p.key for p in current.params if p.key not in params]
+    if missing and recipe.get("version", 1) < current.version:
+        return f"{rid} v{recipe.get('version', 1)} lacks {missing}"
+    return None

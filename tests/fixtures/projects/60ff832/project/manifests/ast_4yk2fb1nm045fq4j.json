@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_4yk2fb1nm045fq4j",
+  "name_id": "crate",
+  "display_name": "Crate",
+  "kind": "model3d",
+  "origin": "generated",
+  "category_id": "props",
+  "tags": [],
+  "created_at": "2026-09-29T12:58:29.625Z",
+  "current_version_id": "ver_36a82npy55nm2g11",
+  "versions": [
+    {
+      "version_id": "ver_36a82npy55nm2g11",
+      "display_version": 1,
+      "published_at": "2026-09-29T12:58:29.625Z",
+      "publication_op": "op_07ab365m5e3v1j43.itm_vaneyp10m3ygzt5e",
+      "preview_artifact_id": "art_1npqcjxb2mx33yt3",
+      "note": ""
+    }
+  ],
+  "pointer_log": [
+    {
+      "from_version": null,
+      "to_version": "ver_36a82npy55nm2g11",
+      "at": "2026-09-29T12:58:29.625Z",
+      "op": "op_07ab365m5e3v1j43.itm_vaneyp10m3ygzt5e",
+      "reason": "publish"
+    }
+  ],
+  "revision": 1
+}

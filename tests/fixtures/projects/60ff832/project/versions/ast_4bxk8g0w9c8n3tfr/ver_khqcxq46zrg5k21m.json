@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_4bxk8g0w9c8n3tfr",
+  "version_id": "ver_khqcxq46zrg5k21m",
+  "display_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "kind": "concept_art",
+  "origin": "generated",
+  "display_name": "Tavern",
+  "category_id": "concept",
+  "tags": [],
+  "artifacts": {
+    "image": {
+      "artifact_id": "art_35h5wf2y2a4z1hm3",
+      "sha256": "315da0c3722c831aae7fa40e81adf4674e9be6e72027fbc4a9bdde2fb80fb73e",
+      "size": 5523,
+      "mime": "image/png"
+    },
+    "preview": {
+      "artifact_id": "art_gftfxbsn8cxbe456",
+      "sha256": "5f974ad88d9faa8531466567a9b60741bbb4079379996b5407a64bec86298428",
+      "size": 10992,
+      "mime": "image/png"
+    }
+  },
+  "sources": {
+    "batch_id": "bat_2p4z9gar38r0jf7t",
+    "item_id": "itm_rqf7x2vvpcrah45e",
+    "shot_id": null,
+    "prompt_revision_id": "prm_t2987bmdadd0wmg1",
+    "candidate_set_id": "cs_5r8fyn00hasp08zv",
+    "candidate_id": "cnd_qchs5cxkkcsjaj4q",
+    "approval_id": "dec_2j9jk0c9ywv3fjgz",
+    "build_run_id": "run_b2zphfkfr24sqamk",
+    "positive": "Brief for Tavern, clearly readable form, simulated enhancement",
+    "negative": "watermark, signature, text, photo",
+    "intermediates": {}
+  },
+  "config_snapshot_sha": "044904a7f76cb6df8bada02a46dfd730bd1de890f308caf8439cd0f33a8bd220",
+  "models": [
+    {
+      "key": "qwen_image_2512",
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "files": {
+        "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors": {
+          "size": 20430679144,
+          "sha256": "5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b"
+        },
+        "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+          "size": 9384670680,
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        "split_files/vae/qwen_image_vae.safetensors": {
+          "size": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        }
+      }
+    }
+  ],
+  "engine": {
+    "engine": "fake",
+    "simulated": true,
+    "workflow": "fake.t2i",
+    "workflow_version": 0,
+    "params": {
+      "width": 1328,
+      "height": 1328,
+      "steps": 50,
+      "cfg": 4.0,
+      "speed_preset": "quality"
+    },
+    "style_lora": null,
+    "speed_lora": null
+  },
+  "parameters": {
+    "seed": 3722799915383376,
+    "width": 1328,
+    "height": 1328,
+    "steps": 50,
+    "cfg": 4.0,
+    "speed_preset": "quality"
+  },
+  "qa": {
+    "evaluation_id": "qa_hrmjred400g664xe",
+    "status": "recommended",
+    "coverage": {
+      "completed": 1,
+      "applicable": 1
+    },
+    "override": false,
+    "override_reason": null,
+    "failed": [],
+    "missing": []
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode"
+    ]
+  },
+  "licence": {
+    "status": "not_cleared",
+    "components": [
+      {
+        "id": "qwen_image_2512",
+        "name": "Qwen-Image-2512 (fp8, Comfy-Org repack)",
+        "scope": "weights",
+        "licence": "Apache-2.0",
+        "status": "cleared"
+      },
+      {
+        "id": "simulation",
+        "name": "SIMULATED engine output",
+        "licence": "n/a",
+        "status": "not_cleared",
+        "note": "test/demo output, not a real generation"
+      }
+    ],
+    "note": "Captured at creation. Traceability only; not a legal guarantee of rights or non-infringement."
+  },
+  "publication": {
+    "op_id": "op_b4pf9tmfva1z63fp.itm_rqf7x2vvpcrah45e",
+    "idempotency_key": "fx-concept-p",
+    "published_at": "2026-09-29T12:58:25.836Z",
+    "expected_previous_version": null
+  },
+  "note": ""
+}

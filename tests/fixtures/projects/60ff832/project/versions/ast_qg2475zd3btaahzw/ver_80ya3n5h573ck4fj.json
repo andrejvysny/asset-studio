@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_qg2475zd3btaahzw",
+  "version_id": "ver_80ya3n5h573ck4fj",
+  "display_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "kind": "sprite",
+  "origin": "generated",
+  "display_name": "Knight",
+  "category_id": "sprites",
+  "tags": [],
+  "artifacts": {
+    "image": {
+      "artifact_id": "art_93wk3n0tjgdbjqcx",
+      "sha256": "86ee266d18fd84d5a249ac97a90afb8ce18859a483388b9caac9d9cab12a76c9",
+      "size": 46142,
+      "mime": "image/png"
+    },
+    "preview": {
+      "artifact_id": "art_gvtdxsa6xbeeptka",
+      "sha256": "8550f225a8984107278b216e78367e7c8c5d25d1a61291134dcf4160db1a86dc",
+      "size": 32318,
+      "mime": "image/png"
+    },
+    "meta": {
+      "artifact_id": "art_aamzdabn0j9n6dzs",
+      "sha256": "1a641b0467fdcf66a425a21a09a17b10d2c31e6dcada3cb2efc65c1b779594dc",
+      "size": 184,
+      "mime": "application/json"
+    }
+  },
+  "sources": {
+    "batch_id": "bat_18pd2v3eycjyj91t",
+    "item_id": "itm_2bp4nvrpwm2aamyr",
+    "shot_id": null,
+    "prompt_revision_id": "prm_5w46g6h4zd72jx3w",
+    "candidate_set_id": "cs_kdwk9mavc1xpd506",
+    "candidate_id": "cnd_j5nzd3gbb8z9pa2f",
+    "approval_id": "dec_6szxgnk2gmc514z7",
+    "build_run_id": "run_8n1k32hrn8y19mtj",
+    "positive": "Brief for Knight, clearly readable form, simulated enhancement, single subject, plain background, full figure visible",
+    "negative": "multiple subjects, scene, text, watermark, cropped, photo",
+    "intermediates": {}
+  },
+  "config_snapshot_sha": "b2e62cd5c2ddaef82ba8ff7764506461d42dcb9fc2be1fecf5c086ae72682331",
+  "models": [
+    {
+      "key": "qwen_image_2512",
+      "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+      "revision": "1f12b17be14c89b026c51a91d67c32f84bb047bc",
+      "files": {
+        "split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors": {
+          "size": 20430679144,
+          "sha256": "5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b"
+        },
+        "split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors": {
+          "size": 9384670680,
+          "sha256": "cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4"
+        },
+        "split_files/vae/qwen_image_vae.safetensors": {
+          "size": 253806246,
+          "sha256": "a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f"
+        }
+      }
+    }
+  ],
+  "engine": {
+    "engine": "fake",
+    "simulated": true,
+    "workflow": "fake.t2i",
+    "workflow_version": 0,
+    "params": {
+      "width": 1328,
+      "height": 1328,
+      "steps": 50,
+      "cfg": 4.0,
+      "speed_preset": "quality"
+    },
+    "style_lora": null,
+    "speed_lora": null
+  },
+  "parameters": {
+    "seed": 3667560215457244,
+    "width": 1328,
+    "height": 1328,
+    "steps": 50,
+    "cfg": 4.0,
+    "speed_preset": "quality"
+  },
+  "qa": {
+    "evaluation_id": "qa_jghh8c3acmzngqq1",
+    "status": "recommended",
+    "coverage": {
+      "completed": 5,
+      "applicable": 5
+    },
+    "override": false,
+    "override_reason": null,
+    "failed": [],
+    "missing": []
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "canvas_size",
+        "ok": true,
+        "detail": "512x512"
+      },
+      {
+        "id": "sprite_has_transparency",
+        "ok": true,
+        "detail": "some pixels fully transparent"
+      },
+      {
+        "id": "sprite_coverage",
+        "ok": true,
+        "detail": "66.7% of pixels opaque"
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "canvas_size",
+      "sprite_has_transparency",
+      "sprite_coverage"
+    ]
+  },
+  "licence": {
+    "status": "not_cleared",
+    "components": [
+      {
+        "id": "qwen_image_2512",
+        "name": "Qwen-Image-2512 (fp8, Comfy-Org repack)",
+        "scope": "weights",
+        "licence": "Apache-2.0",
+        "status": "cleared"
+      },
+      {
+        "id": "simulation",
+        "name": "SIMULATED engine output",
+        "licence": "n/a",
+        "status": "not_cleared",
+        "note": "test/demo output, not a real generation"
+      }
+    ],
+    "note": "Captured at creation. Traceability only; not a legal guarantee of rights or non-infringement."
+  },
+  "publication": {
+    "op_id": "op_zyzwq7naq413g6t6.itm_2bp4nvrpwm2aamyr",
+    "idempotency_key": "fx-sprite-p",
+    "published_at": "2026-09-29T12:58:27.168Z",
+    "expected_previous_version": null
+  },
+  "note": ""
+}

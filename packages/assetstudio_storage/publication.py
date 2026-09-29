@@ -5,10 +5,12 @@ reproduces the same asset/version identities instead of duplicating them.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
+from assetstudio_core.contracts import check_roles
 from assetstudio_core.domain import AssetManifest, AssetVersion, PointerChange, VersionRef
 from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import Kind, Origin
@@ -19,6 +21,47 @@ from .repo import Conflict, IntegrityError, NotFound, StorageError
 
 class StalePointer(Conflict):
     code = "stale_pointer"
+
+
+class KindMismatch(Conflict):
+    code = "kind_mismatch"
+
+
+class NameTaken(Conflict):
+    code = "name_taken"
+
+
+class RoleContractViolation(StorageError):
+    code = "role_contract"
+
+
+def name_key(name_id: str) -> str:
+    return f"names/{name_id}.json"
+
+
+def receipt_key(op_id: str) -> str:
+    return f"publications/{op_id}.json"
+
+
+def reserve_name(store: ProjectStore, name_id: str, asset_id: str) -> None:
+    """Authoritative readable-name uniqueness: an atomic create-if-absent per name (the index is only a cache)."""
+    try:
+        store.create(name_key(name_id), {"name_id": name_id, "asset_id": asset_id, "at": now_iso()})
+    except Conflict as e:
+        held = store.repo.read_object(name_key(name_id))
+        if json.loads(held.data).get("asset_id") != asset_id:
+            raise NameTaken(f"name {name_id!r} belongs to another asset") from e
+
+
+def backfill_names(store: ProjectStore) -> int:
+    """Projects written before name records existed: reserve every manifest's name (idempotent)."""
+    n = 0
+    for asset_id in store.list_ids("manifests"):
+        m, _ = store.get(manifest_key(asset_id), AssetManifest)
+        if store.repo.stat_object(name_key(m.name_id)) is None:
+            reserve_name(store, m.name_id, m.asset_id)
+            n += 1
+    return n
 
 
 @dataclass
@@ -44,6 +87,7 @@ class PublishRequest:
     make_current: bool = True
     details: dict[str, Any] = field(default_factory=dict)  # sources/config/models/engine/qa/validation/licence
     note: str = ""
+    kind: Kind | None = None  # the produced kind: must equal the target asset's kind (checked at commit)
 
 
 @dataclass
@@ -58,10 +102,10 @@ def _verified_artifacts(store: ProjectStore, roles: dict[str, str]) -> dict[str,
     out: dict[str, dict[str, Any]] = {}
     for role, art_id in roles.items():
         art = store.artifact(art_id)
-        if not store.repo.blob_exists(art.sha256):
-            raise IntegrityError(f"blob for {role} ({art.sha256[:12]}) is missing")
-        if store.repo.blob_size(art.sha256) != art.size:
-            raise IntegrityError(f"blob for {role} has the wrong size")
+        try:
+            store.repo.verify_blob(art.sha256, art.size)  # full hash (identity-cached), not existence/size
+        except NotFound as e:
+            raise IntegrityError(f"blob for {role} ({art.sha256[:12]}) is missing") from e
         out[role] = {"artifact_id": art.id, "sha256": art.sha256, "size": art.size, "mime": art.mime}
     return out
 
@@ -76,6 +120,9 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
         if manifest is not None:
             done = next((v for v in manifest.versions if v.publication_op == req.op_id), None)
             if done is not None:
+                store.create_or_same(receipt_key(req.op_id), {
+                    "op_id": req.op_id, "asset_id": asset_id, "version_id": done.version_id,
+                    "display_version": done.display_version})
                 return PublishResult(asset_id, done.version_id, done.display_version, False)
             if req.new_asset is not None:
                 raise Conflict(f"asset {asset_id} already exists")
@@ -84,6 +131,13 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
                     f"current version is {manifest.current_version_id}, expected {req.expected_current_version}")
         elif req.asset_id is not None:
             raise NotFound(f"asset {req.asset_id}")
+        kind = req.new_asset.kind if req.new_asset else manifest.kind  # type: ignore[union-attr]
+        if req.kind is not None and req.kind != kind:
+            raise KindMismatch(f"a {req.kind.value} result cannot become a version of a {kind.value} asset")
+        if problems := check_roles(kind, set(req.artifacts)):
+            raise RoleContractViolation("; ".join(problems))
+        if req.new_asset is not None:
+            reserve_name(store, req.new_asset.name_id, asset_id)
 
         artifacts = _verified_artifacts(store, req.artifacts)
         display_version = 1 + max((v.display_version for v in manifest.versions), default=0) if manifest else 1
@@ -135,6 +189,9 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
                 manifest.origin = Origin.mixed
             manifest.revision += 1
             store.replace(manifest_key(asset_id), manifest, token)
+        # Durable receipt after the publication point: replay finds the same result without guessing.
+        store.create_or_same(receipt_key(req.op_id), {"op_id": req.op_id, "asset_id": asset_id,
+                                                      "version_id": version_id, "display_version": display_version})
         return PublishResult(asset_id, version_id, display_version, True)
 
 

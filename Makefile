@@ -39,3 +39,7 @@ acceptance-offline: ; ./scripts/offline-check.sh
 lock-comfyui:
 	$(COMPOSE) run --rm --no-deps comfyui pip freeze --exclude-editable \
 	  | grep -v -E '^(torch|torchvision|torchaudio|nvidia-|triton)' > comfyui/constraints.txt
+# worker3d unit tests (raw schema, UV rasterizer) inside the worker image, CPU tensors, no network.
+test-worker3d: ; podman run --rm --network none -v "$$PWD":/src:ro,Z -w /src \
+	-e PYTHONPATH=/src/services/worker3d:/src/packages/assetstudio_processing \
+	localhost/assetstudio-worker3d:dev python tests/worker3d/test_raw_raster.py

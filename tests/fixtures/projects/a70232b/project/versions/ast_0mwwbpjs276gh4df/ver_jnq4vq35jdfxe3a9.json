@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "asset_id": "ast_0mwwbpjs276gh4df",
+  "version_id": "ver_jnq4vq35jdfxe3a9",
+  "display_version": 1,
+  "project_id": "prj_zrce9bd698s4ay7d",
+  "kind": "concept_art",
+  "origin": "imported",
+  "display_name": "Rock",
+  "category_id": null,
+  "tags": [],
+  "artifacts": {
+    "image": {
+      "artifact_id": "art_s7hmreabea2pkzk9",
+      "sha256": "8277fe1a61052b4d7e2e4ca707475d3898b35f35eddc1fe7c3cb94f76c52d4dd",
+      "size": 132,
+      "mime": "image/png"
+    },
+    "preview": {
+      "artifact_id": "art_njp169r36sr7ws8p",
+      "sha256": "2aab181d0958c8410af3bed76b51b17f5addcaffcfb2bc0a22b44ac00a31384d",
+      "size": 117,
+      "mime": "image/png"
+    }
+  },
+  "sources": {
+    "import_id": "imp_60qpy3bz6m2v8y9f",
+    "source_name": "rock.png",
+    "source_uri": null,
+    "credit": null,
+    "licence": "unknown"
+  },
+  "config_snapshot_sha": null,
+  "models": [],
+  "engine": {},
+  "parameters": {},
+  "qa": null,
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "decode",
+        "ok": true,
+        "required": true
+      }
+    ]
+  },
+  "licence": {
+    "status": "unknown",
+    "components": [
+      {
+        "id": "import",
+        "name": "rock.png",
+        "licence": "unknown",
+        "status": "unknown"
+      }
+    ],
+    "note": "Imported content: rights are as declared by the operator, not verified."
+  },
+  "publication": {
+    "op_id": "op_8zfqhkkvdbxetg2q",
+    "idempotency_key": "fx-import-1",
+    "published_at": "2026-09-29T12:58:44.821Z",
+    "expected_previous_version": null
+  },
+  "note": "Imported from rock.png"
+}

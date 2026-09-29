@@ -108,10 +108,10 @@ def artifact_content(artifact_id: str, request: Request, ctx: ProjectContext = D
     if download:
         headers["Content-Disposition"] = f'attachment; filename="{art.role}-{art.sha256[:12]}"'
     backend = ctx.store.repo
+    backend.verify_blob(art.sha256, art.size)  # cached per file identity; corrupt bytes are never served
     if isinstance(backend, LocalBackend) and (path := backend.blob_path(art.sha256)) is not None:
         return FileResponse(path, media_type=art.mime, headers=headers)  # supports Range requests
-    with backend.open_blob(art.sha256) as f:
-        return Response(f.read(), media_type=art.mime, headers=headers)
+    return Response(backend.read_blob_verified(art.sha256), media_type=art.mime, headers=headers)
 
 
 @router.post("/imports:preview")

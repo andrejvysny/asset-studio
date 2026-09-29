@@ -16,6 +16,7 @@ from assetstudio_core.ids import new_id, validate_id
 from assetstudio_storage.index import AssetIndex
 from assetstudio_storage.local import LocalBackend, WriterLock
 from assetstudio_storage.project import ProjectStore
+from assetstudio_storage.publication import backfill_names
 from assetstudio_storage.repo import NotFound
 
 from .errors import ApiError
@@ -110,6 +111,8 @@ class Registry:
         cfg, _ = store.read_config()
         if cfg.project.id != project_id:
             raise ApiError(422, "project_mismatch", f"{root} contains project {cfg.project.id}, not {project_id}")
+        if owned:
+            backfill_names(store)  # projects from before authoritative name records
         index = AssetIndex(self.settings.instance_dir / "index" / f"{project_id}.sqlite")
         if index.count() == 0 and store.list_ids("manifests"):
             index.rebuild(store)

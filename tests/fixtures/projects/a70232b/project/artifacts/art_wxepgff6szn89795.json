@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "art_wxepgff6szn89795",
+  "role": "candidate_mask",
+  "sha256": "1f45423dc277bb9e0fe36c96fe8963301bc2aa5eb36803e9bcd8b719f9cdd367",
+  "size": 1872,
+  "mime": "image/png",
+  "meta": {},
+  "lineage": [
+    "art_0465yb3pr5byymj4"
+  ],
+  "created_at": "2026-09-29T12:58:44.600Z",
+  "retention": "candidate",
+  "source": {
+    "model": {
+      "model": "simulated"
+    }
+  }
+}

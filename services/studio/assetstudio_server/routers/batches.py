@@ -46,7 +46,7 @@ def create(req: bsvc.CreateBatch, ctx: ProjectContext = Depends(project), s: Stu
 
 @router.get("/{batch_id}")
 def detail(batch_id: str, ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
-    batch, _ = bsvc.load_batch(ctx.store, batch_id)
+    batch, _ = bsvc.load_job(ctx.store, batch_id)
     return bsvc.batch_detail(ctx, batch_id, runtime_svc.build_readiness(s, batch.recipe_id))
 
 

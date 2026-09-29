@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "run_0gxbbtjaz3t2qcgx",
+  "item_id": "itm_hq3vvd48cbrre053",
+  "batch_id": "bat_jbpfcn22c1543nax",
+  "build": "material",
+  "inputs": {
+    "approval_id": "dec_rx33vw5emzr0fv4x",
+    "candidate_artifact_id": "art_6ga3pgzktfqvepdf",
+    "image_sha256": "31d7709c08a0c8ae8ae0eed5c3f8b2339f211658d568694717c2ba4bb400a4b9"
+  },
+  "status": "succeeded",
+  "result": "valid",
+  "artifacts": {
+    "base_color": "art_6ga3pgzktfqvepdf",
+    "preview": "art_njqh0czar5qe86k4",
+    "meta": "art_mv1fggexgsanjtp8"
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "square",
+        "ok": true,
+        "detail": "512x512"
+      },
+      {
+        "id": "seamless",
+        "ok": true,
+        "detail": "seam ratio 0.00 (limit 2)"
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "square",
+      "seamless"
+    ]
+  },
+  "created_at": "2026-09-29T12:58:27.798Z",
+  "updated_at": "2026-09-29T12:58:27.938Z",
+  "op_id": "op_520we3vgcypmejja",
+  "error": null
+}

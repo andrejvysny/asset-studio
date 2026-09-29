@@ -78,10 +78,12 @@ services:
       IDLE_UNLOAD_S: "300"
     volumes:
       - ${MODELS_DIR:-./models}:/models:ro
+      - worker3d-spool:/spool                        # finished results until the Studio acknowledges ingestion
     networks: [internal]                             # no egress, no host port
 
 volumes:
   studio-instance: {}
+  worker3d-spool: {}
   comfy-user: {}
   comfy-output: {}
 

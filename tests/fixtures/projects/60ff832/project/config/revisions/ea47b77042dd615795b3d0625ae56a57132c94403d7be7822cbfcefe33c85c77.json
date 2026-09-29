@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "project_id": "prj_q2jdyachcbj720zc",
+  "config_revision": 2,
+  "category_id": "materials",
+  "category_chain": [
+    "materials"
+  ],
+  "values": {
+    "kind": "material",
+    "recipe_id": "material.default",
+    "naming": "{name}",
+    "budget": null,
+    "build_profile": null,
+    "qa_ruleset": "material",
+    "reference_set": null,
+    "style": "house",
+    "style_lora": null,
+    "export_presets": null,
+    "candidate_count": 2
+  },
+  "sources": {
+    "kind": "category:materials",
+    "recipe_id": "recipe",
+    "naming": "recipe",
+    "budget": "unset",
+    "build_profile": "unset",
+    "qa_ruleset": "qa:material",
+    "reference_set": "unset",
+    "style": "project",
+    "style_lora": "unset",
+    "export_presets": "unset",
+    "candidate_count": "item"
+  },
+  "recipe": {
+    "id": "material.default",
+    "version": 1,
+    "kind": "material"
+  },
+  "parameters": {
+    "candidate_count": 2,
+    "steps": 50,
+    "cfg": 4.0,
+    "width": 1328,
+    "height": 1328,
+    "speed_preset": "quality",
+    "seam_max_ratio": 2.0,
+    "require_square": true
+  },
+  "template": "seamless tileable surface texture, orthographic top-down, even diffuse lighting, no objects",
+  "negative": "objects, perspective, directional shadows, text",
+  "qa_ruleset": {
+    "label": "Material candidates",
+    "kind": "material",
+    "rules": [
+      {
+        "id": "surface_only",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "major",
+        "question": "The image shows only a surface texture, with no distinct objects.",
+        "metric": null,
+        "params": {}
+      },
+      {
+        "id": "even_light",
+        "source": "vlm",
+        "stage": "candidate",
+        "enabled": true,
+        "severity": "minor",
+        "question": "Lighting is even, with no strong directional shadows.",
+        "metric": null,
+        "params": {}
+      }
+    ],
+    "policy": {
+      "minor_fail_limit": 2
+    }
+  },
+  "style": {
+    "label": "House",
+    "guide": "painterly, warm light",
+    "negative": "photo",
+    "palette": []
+  },
+  "reference_set": null,
+  "sha256": "ea47b77042dd615795b3d0625ae56a57132c94403d7be7822cbfcefe33c85c77"
+}

@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from assetstudio_core.canonical import now_iso
+from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.domain import AssetManifest
 from assetstudio_core.ids import derived_id, is_id, new_id
 from assetstudio_core.kinds import Kind, Origin
@@ -17,13 +17,15 @@ from assetstudio_processing import atlas
 from assetstudio_processing.glb import validate_glb_bytes
 from assetstudio_processing.images import ImageRejected, inspect_image, thumbnail_png
 from assetstudio_storage.project import manifest_key
-from assetstudio_storage.publication import NewAsset, PublishRequest, publish
+from assetstudio_storage.publication import NewAsset, PublishRequest, StalePointer, name_key, publish
+from assetstudio_storage.repo import Conflict, StorageError
 from pydantic import BaseModel, Field
 
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
 from . import imports_sets as sets
+from .records import cmd_payload
 
 IMAGE_KINDS = (Kind.concept_art, Kind.sprite, Kind.icon, Kind.material)
 
@@ -104,6 +106,7 @@ def preview_set(studio: Studio, ctx: ProjectContext, mode: str, files: list[tupl
     if sum(len(b) for _, b in files) > studio.settings.max_upload_bytes:
         raise ApiError(413, "too_large", "files exceed the upload limit")
     files = [(_safe_name(n), b) for n, b in files]
+    sets.reject_duplicate_names(files)
     if mode == "frames":
         try:
             staged = sets.expand(files)
@@ -116,16 +119,59 @@ def preview_set(studio: Studio, ctx: ProjectContext, mode: str, files: list[tupl
         raise ApiError(400, "invalid_mode", "mode must be frames or material")
     import_id, d = _new_staging(studio)
     result["staged"] = sets.stage(d, staged)
+    result["upload_ids"] = [derived_id("upl", import_id, str(i)) for i in range(len(staged))]
+    for m in result.get("maps", []):
+        m["upload_id"] = result["upload_ids"][result["staged"].index(m["filename"])]
     first = files[0][0]
     result.update(size=sum(len(b) for _, b in files), filename=first if len(files) == 1 else f"{len(files)} files")
     return _stage_meta(d, import_id, ctx, result, first)
 
 
+def _receipt_key(import_id: str) -> str:
+    return f"imports/{import_id}.json"
+
+
 def commit(studio: Studio, ctx: ProjectContext, req: CommitImport) -> dict[str, Any]:
+    """Replay-safe: every identity derives from the import id, the durable receipt is written before staging is
+    cleaned up, and a retry after cleanup finds that receipt instead of reporting an expired upload."""
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+    payload = cmd_payload(req)
+    prior = studio.journal.command_result(ctx.id, "import_commit", req.idempotency_key, payload)
+    if prior is not None:
         return prior
     d = _staging(studio, req.import_id)
+    receipt, _ = ctx.store.get_opt(_receipt_key(req.import_id), _Receipt)
+    if receipt is not None:
+        if receipt.request_sha256 != sha256_json(_import_request(req)):
+            raise ApiError(409, "already_committed", "this upload was already committed with other settings")
+        response = receipt.response()
+    else:
+        response = _commit_staged(ctx, d, req)
+    studio.journal.record_command(ctx.id, "import_commit", req.idempotency_key, payload, response)
+    shutil.rmtree(d, ignore_errors=True)  # deferred, idempotent: only after the receipt is durable
+    studio.events.publish("library", project_id=ctx.id)
+    return response
+
+
+class _Receipt(BaseModel):
+    import_id: str
+    request_sha256: str
+    asset_id: str
+    version_id: str
+    display_version: int
+    roles: dict[str, str]
+    provenance: dict[str, Any]
+
+    def response(self) -> dict[str, Any]:
+        return {"asset_id": self.asset_id, "version_id": self.version_id, "display_version": self.display_version}
+
+
+def _import_request(req: CommitImport) -> dict[str, Any]:
+    """What an import commit is bound to (the client key may differ between a lost response and its retry)."""
+    return req.model_dump(mode="json", exclude={"idempotency_key"})
+
+
+def _commit_staged(ctx: ProjectContext, d: Path, req: CommitImport) -> dict[str, Any]:
     if not (d / "meta.json").is_file():
         raise ApiError(404, "unknown_import", "import preview expired; upload again")
     meta = json.loads((d / "meta.json").read_text())
@@ -138,52 +184,62 @@ def commit(studio: Studio, ctx: ProjectContext, req: CommitImport) -> dict[str, 
     cfg, _ = ctx.config()
     if req.category_id is not None and cfg.category(req.category_id) is None:
         raise ApiError(422, "unknown_category", f"unknown category {req.category_id}")
-    provenance = {"import_id": req.import_id, "source_name": meta["filename"], "source_uri": req.source_uri,
-                  "credit": req.credit, "licence": req.licence}
-    roles, validation = _roles(ctx, d, meta, req, provenance)
-    taken = ctx.index.name_ids()
-    name_id = slug(req.name)
-    n = 2
-    while req.target_asset_id is None and name_id in taken:
-        name_id, n = f"{slug(req.name)}_{n}", n + 1
     if req.target_asset_id:
         manifest, _ = ctx.store.get(manifest_key(req.target_asset_id), AssetManifest)
         if manifest.kind != req.kind:
             raise ApiError(422, "kind_mismatch", f"target asset is {manifest.kind.value}")
-    res = publish(ctx.store, PublishRequest(
-        op_id=derived_id("op", req.idempotency_key), idempotency_key=req.idempotency_key, artifacts=roles,
-        preview_role="preview" if "preview" in roles else None, origin=Origin.imported,
-        asset_id=req.target_asset_id, expected_current_version=req.expected_current_version,
-        new_asset=None if req.target_asset_id else NewAsset(name_id, req.name, req.kind, Origin.imported,
-                                                            req.category_id, sorted(set(req.tags))),
-        details={"sources": provenance, "validation": validation,
-                 "licence": {"status": "unknown" if req.licence == "unknown" else "review",
-                             "components": [{"id": "import", "name": meta["filename"], "licence": req.licence,
-                                             "status": "unknown" if req.licence == "unknown" else "review"}],
-                             "note": "Imported content: rights are as declared by the operator, not verified."}},
-        note=f"Imported from {meta['filename']}"))
+    provenance = {"import_id": req.import_id, "source_name": meta["filename"], "source_uri": req.source_uri,
+                  "credit": req.credit, "licence": req.licence}
+    roles, validation = _roles(ctx, d, meta, req, provenance,
+                               lambda role: derived_id("art", ctx.id, req.import_id, role))
+    op_id = derived_id("op", ctx.id, "import", req.import_id)
+    name_id = _free_name(ctx, req.name) if req.target_asset_id is None else ""
+    try:
+        res = publish(ctx.store, PublishRequest(
+            op_id=op_id, idempotency_key=req.import_id, artifacts=roles,
+            preview_role="preview" if "preview" in roles else None, origin=Origin.imported, kind=req.kind,
+            asset_id=req.target_asset_id, expected_current_version=req.expected_current_version,
+            new_asset=None if req.target_asset_id else NewAsset(name_id, req.name, req.kind, Origin.imported,
+                                                                req.category_id, sorted(set(req.tags))),
+            details={"sources": provenance, "validation": validation,
+                     "licence": {"status": "unknown" if req.licence == "unknown" else "review",
+                                 "components": [{"id": "import", "name": meta["filename"], "licence": req.licence,
+                                                 "status": "unknown" if req.licence == "unknown" else "review"}],
+                                 "note": "Imported content: rights are as declared by the operator, not verified."}},
+            note=f"Imported from {meta['filename']}"))
+    except StalePointer as e:
+        raise ApiError(409, "stale_pointer", str(e)) from e
+    except (Conflict, StorageError) as e:
+        raise ApiError(409, getattr(e, "code", "conflict"), str(e)) from e
     ctx.index.upsert(ctx.store.get(manifest_key(res.asset_id), AssetManifest)[0])
-    ctx.store.create_or_same(f"imports/{req.import_id}.json", {**provenance, "asset_id": res.asset_id,
-                                                                "version_id": res.version_id, "roles": roles})
-    shutil.rmtree(d, ignore_errors=True)
-    response = {"asset_id": res.asset_id, "version_id": res.version_id, "display_version": res.display_version}
-    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
-    studio.events.publish("library", project_id=ctx.id)
-    return response
+    receipt = _Receipt(import_id=req.import_id, request_sha256=sha256_json(_import_request(req)),
+                       asset_id=res.asset_id, version_id=res.version_id, display_version=res.display_version,
+                       roles=roles, provenance=provenance)
+    ctx.store.create_or_same(_receipt_key(req.import_id), receipt)
+    return receipt.response()
 
 
-def _roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], req: CommitImport,
-           provenance: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
+def _free_name(ctx: ProjectContext, name: str) -> str:
+    """First free readable id by the authoritative name records (the index is only a cache)."""
+    base, n = slug(name), 2
+    name_id = base
+    while ctx.store.repo.stat_object(name_key(name_id)) is not None:
+        name_id, n = f"{base}_{n}", n + 1
+    return name_id
+
+
+def _roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], req: CommitImport, provenance: dict[str, Any],
+           aid: sets.ArtifactIds) -> tuple[dict[str, str], dict[str, Any]]:
     if meta["format"] == "frames":
-        return sets.frame_roles(ctx, d, meta, req.kind, req.parameters, provenance)
+        return sets.frame_roles(ctx, d, meta, req.kind, req.parameters, provenance, aid)
     if meta["format"] == "material_bundle":
-        return sets.material_roles(ctx, d, meta, req.map_roles, provenance)
+        return sets.material_roles(ctx, d, meta, req.map_roles, provenance, aid)
     data = (d / "content").read_bytes()
-    role = "model" if meta["format"] == "glb" else "image"
+    role = "model" if meta["format"] == "glb" else ("base_color" if req.kind == Kind.material else "image")
     art = ctx.store.register_artifact(data, role, meta["mime"], meta={"import": provenance}, source=provenance,
-                                      expected_sha256=meta["sha256"])
+                                      expected_sha256=meta["sha256"], artifact_id=aid(role))
     roles = {role: art.id}
-    if role == "image":
+    if role != "model":
         roles["preview"] = ctx.store.register_artifact(thumbnail_png(data), "preview", "image/png",
-                                                       lineage=[art.id]).id
+                                                       lineage=[art.id], artifact_id=aid("preview")).id
     return roles, meta["validation"]

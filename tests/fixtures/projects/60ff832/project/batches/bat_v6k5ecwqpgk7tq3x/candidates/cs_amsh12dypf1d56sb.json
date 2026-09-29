@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "cs_amsh12dypf1d56sb",
+  "item_id": "itm_cxgswcb379r9xjn7",
+  "number": 1,
+  "prompt_revision_id": "prm_dsctp0pw70f9fdzx",
+  "created_at": "2026-09-29T12:58:28.639Z",
+  "op_id": "op_asxhpyahq9da3yf0",
+  "requested": 2,
+  "candidates": [
+    {
+      "id": "cnd_jx2xz2qxafcnbfvr",
+      "index": 0,
+      "artifact_id": "art_gk2zatmbvjgphvt7",
+      "sha256": "8285f4b8612da152882036c8cc6a3f3a2a56540af1c47a0b20bc4da49870537a",
+      "seed": 7658777991163783,
+      "width": 512,
+      "height": 512,
+      "engine": {
+        "prompt_id": "ea7343f8-59fd-5089-b299-613b85c9292b"
+      }
+    },
+    {
+      "id": "cnd_5x8e8prrpxf2fht3",
+      "index": 1,
+      "artifact_id": "art_kkp86tdxwcb43y0h",
+      "sha256": "755a55c5dac764132e4560ddf103c2eaa3c7d532ba156750e7a309c2273efbc9",
+      "seed": 3395719547590602,
+      "width": 512,
+      "height": 512,
+      "engine": {
+        "prompt_id": "0e9b52ec-6ddb-5356-8c2d-8202bb862120"
+      }
+    }
+  ],
+  "generation": {
+    "engine": "fake",
+    "simulated": true,
+    "workflow": "fake.t2i",
+    "workflow_version": 0,
+    "params": {
+      "width": 1328,
+      "height": 1328,
+      "steps": 50,
+      "cfg": 4.0,
+      "speed_preset": "quality"
+    },
+    "style_lora": null,
+    "speed_lora": null,
+    "models": [
+      "qwen_image_2512"
+    ]
+  }
+}

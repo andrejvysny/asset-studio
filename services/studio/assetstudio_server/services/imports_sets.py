@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +48,26 @@ def preview_frames(files: list[tuple[str, bytes]]) -> dict[str, Any]:
                                                    "detail": f"{len(names)} frames, {w}x{h}"}]}}
 
 
+ArtifactIds = Callable[[str], str]  # role -> derived artifact id (replay-safe registration)
+
+
+def reject_duplicate_names(files: list[tuple[str, bytes]]) -> None:
+    """After normalization two uploads may share a name; a dict keyed by name would silently drop one."""
+    seen: dict[str, int] = {}
+    for n, _ in files:
+        seen[n.lower()] = seen.get(n.lower(), 0) + 1
+    if dup := sorted(n for n, c in seen.items() if c > 1):
+        raise ApiError(422, "duplicate_names", f"several files share the (normalized) name {dup[:5]}; rename them",
+                       dup)
+
+
 def preview_material(files: list[tuple[str, bytes]]) -> dict[str, Any]:
     maps, checks = [], []
+    try:
+        atlas.preflight_decoded(files)
+    except atlas.FrameError as e:
+        return {"format": "material_bundle", "ok": False, "allowed_kinds": [Kind.material.value],
+                "validation": {"ok": False, "checks": [{"id": "budget", "ok": False, "detail": str(e)}]}}
     for name, data in files:
         try:
             info = inspect_image(data)
@@ -75,8 +94,8 @@ def _staged(d: Path, names: list[str]) -> list[tuple[str, bytes]]:
     return [(n, (d / "files" / f"{i:04d}").read_bytes()) for i, n in enumerate(names)]
 
 
-def frame_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], kind: Kind,
-                overrides: dict[str, Any], provenance: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
+def frame_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], kind: Kind, overrides: dict[str, Any],
+                provenance: dict[str, Any], aid: ArtifactIds) -> tuple[dict[str, str], dict[str, Any]]:
     recipe = RECIPES[DEFAULT_RECIPE_FOR_KIND[kind]]
     cfg, _ = ctx.config()
     pipe = cfg.pipelines.get(recipe.id)
@@ -95,12 +114,15 @@ def frame_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], kind: Kind,
     doc = atlas.atlas_meta(names, rects, (img.shape[1], img.shape[0]), grid=[cols, rows], **fields)
     png = to_png(img)
     store = ctx.store
-    src = [store.register_artifact(data, "frame", "image/png", meta={"index": i, "source": n}, source=provenance).id
+    src = [store.register_artifact(data, "frame", "image/png", meta={"index": i, "source": n}, source=provenance,
+                                   artifact_id=aid(f"frame_{i:04d}")).id
            for i, (n, data) in enumerate((n, by_name[n]) for n in names)]
-    roles = {"atlas": store.register_artifact(png, "atlas", "image/png", lineage=src,
+    roles = {"atlas": store.register_artifact(png, "atlas", "image/png", lineage=src, artifact_id=aid("atlas"),
                                               meta={"width": img.shape[1], "height": img.shape[0]}).id}
-    roles["meta"] = store.register_artifact(pretty_json(doc), "meta", "application/json", lineage=src).id
-    roles["preview"] = store.register_artifact(thumbnail_png(png), "preview", "image/png", lineage=[roles["atlas"]]).id
+    roles["meta"] = store.register_artifact(pretty_json(doc), "meta", "application/json", lineage=src,
+                                            artifact_id=aid("meta")).id
+    roles["preview"] = store.register_artifact(thumbnail_png(png), "preview", "image/png", lineage=[roles["atlas"]],
+                                               artifact_id=aid("preview")).id
     for i, art_id in enumerate(src):
         roles[f"frame_{i:04d}"] = art_id
     checks = [{"id": "frames", "ok": True, "detail": f"{len(names)} frames {frames[0].shape[1]}x{frames[0].shape[0]}"},
@@ -109,9 +131,14 @@ def frame_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], kind: Kind,
 
 
 def material_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], mapping: dict[str, str],
-                   provenance: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
-    """Every staged file must be mapped explicitly; base_color is required; roles are unique."""
+                   provenance: dict[str, Any], aid: ArtifactIds) -> tuple[dict[str, str], dict[str, Any]]:
+    """Every staged file must be mapped explicitly (by upload id or its unique name); base_color is required;
+    roles are unique."""
     names = meta["staged"]
+    by_upload = dict(zip(meta.get("upload_ids", []), names, strict=False))
+    mapping = {by_upload.get(k, k): v for k, v in mapping.items()}
+    if len(set(names)) != len(names):
+        raise ApiError(422, "duplicate_names", "the staged files have colliding names; upload again")
     if set(mapping) != set(names):
         raise ApiError(422, "unmapped_files", f"map every file to a role: {sorted(set(names) - set(mapping))}")
     roles_used = list(mapping.values())
@@ -132,10 +159,10 @@ def material_roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], mapping: 
         role = mapping[name]
         roles[role] = ctx.store.register_artifact(data, role, sizes[name].mime, meta={"map": role, "source": name,
                                                                                     **sizes[name].as_meta()},
-                                                  source=provenance).id
+                                                  source=provenance, artifact_id=aid(role)).id
     base = ctx.store.artifact_bytes(roles["base_color"])
     roles["preview"] = ctx.store.register_artifact(thumbnail_png(base), "preview", "image/png",
-                                                   lineage=[roles["base_color"]]).id
+                                                   lineage=[roles["base_color"]], artifact_id=aid("preview")).id
     (w, h), = dims
     return roles, {"ok": True, "checks": [{"id": "decode", "ok": True}, {"id": "uniform_size", "ok": True,
                                                                           "detail": f"{w}x{h}"}]}

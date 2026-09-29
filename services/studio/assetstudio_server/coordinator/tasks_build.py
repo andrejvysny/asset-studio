@@ -3,21 +3,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.domain import AssetManifest, BatchItem, BuildRun, Published
+from assetstudio_core.domain import AssetManifest, BuildRun, JobItem, Published
 from assetstudio_core.kinds import Kind, Origin
 from assetstudio_core.recipes import RECIPES
 from assetstudio_storage.project import manifest_key
 from assetstudio_storage.publication import NewAsset, PublishRequest, StalePointer, publish
-from assetstudio_storage.repo import Conflict, IntegrityError
+from assetstudio_storage.repo import Conflict, IntegrityError, StorageError
 
 from ..models import load_lock
 from ..provenance import licence_summary
 from ..services.records import (
-    load_batch,
     load_build,
     load_cset,
     load_decision,
     load_item,
+    load_job,
     load_prompt,
     load_qa,
     mutate_item,
@@ -33,7 +33,7 @@ INTERMEDIATE_ROLES = ("raw", "cutout", "mask")
 
 def build(env: TaskEnv) -> dict[str, Any]:
     batch_id = env.op.payload["batch_id"]
-    batch, _ = load_batch(env.ctx.store, batch_id)
+    batch, _ = load_job(env.ctx.store, batch_id)
     recipe = RECIPES[batch.recipe_id]
     out = {}
     for entry in env.op.payload["items"]:
@@ -56,7 +56,7 @@ def build(env: TaskEnv) -> dict[str, Any]:
             out[item.id] = "failed"
             continue
 
-        def apply(x: BatchItem, run: BuildRun = run) -> None:
+        def apply(x: JobItem, run: BuildRun = run) -> None:
             if run.id not in x.build_runs:
                 x.build_runs.append(run.id)
             x.current_build = run.id
@@ -71,7 +71,7 @@ def build_error(env: TaskEnv, state: str, message: str) -> None:
     _items_error(env, "build", state, message, [e["item_id"] for e in env.op.payload["items"]])
 
 
-def _details(env: TaskEnv, batch_id: str, item: BatchItem, run: BuildRun) -> dict[str, Any]:
+def _details(env: TaskEnv, batch_id: str, item: JobItem, run: BuildRun) -> dict[str, Any]:
     store = env.ctx.store
     decision = load_decision(store, batch_id, run.inputs["approval_id"])
     b = decision.bound
@@ -118,17 +118,17 @@ def publish_pass(env: TaskEnv) -> dict[str, Any]:
             new_asset=None if entry["asset_id"] else NewAsset(entry["name_id"], item.name, Kind(snap["recipe"]["kind"]),
                                                              Origin.generated, item.category_id),
             expected_current_version=entry.get("expected_current_version"), make_current=entry["make_current"],
-            details=_details(env, batch_id, item, run))
+            details=_details(env, batch_id, item, run), kind=Kind(snap["recipe"]["kind"]))
         try:
             res = publish(store, req)
-        except (StalePointer, Conflict, IntegrityError) as e:
+        except (StalePointer, Conflict, IntegrityError, StorageError) as e:
             mutate_item(env.studio, env.ctx, batch_id, item.id,
                         lambda x, e=e: set_task(x, "publish", env.op.id, "failed", str(e)[:300]))
             out[item.id] = {"ok": False, "error": str(e)[:300]}
             continue
         env.ctx.index.upsert(store.get(manifest_key(res.asset_id), AssetManifest)[0])
 
-        def apply(x: BatchItem, res: Any = res) -> None:
+        def apply(x: JobItem, res: Any = res) -> None:
             x.published = Published(asset_id=res.asset_id, version_id=res.version_id,
                                     display_version=res.display_version)
             if x.target_asset_id is None:

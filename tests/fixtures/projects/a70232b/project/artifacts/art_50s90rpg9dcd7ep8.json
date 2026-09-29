@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "art_50s90rpg9dcd7ep8",
+  "role": "meta",
+  "sha256": "41e0521a01683cd2592553affc0666bc58f6821bc199864d4063048c011398b9",
+  "size": 184,
+  "mime": "application/json",
+  "meta": {},
+  "lineage": [
+    "art_hhbe7wbkjcmjx9nf"
+  ],
+  "created_at": "2026-09-29T12:58:42.894Z",
+  "retention": "essential",
+  "source": {}
+}

@@ -4,20 +4,30 @@ from __future__ import annotations
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.domain import Batch, BatchItem, BuildRun, ShotItem
+from assetstudio_core.domain import BuildRun, Job, JobItem, ShotItem
 from assetstudio_core.ids import new_id
 from assetstudio_core.inheritance import ResolutionError, build_snapshot
 from assetstudio_core.kinds import KINDS, Kind
 from assetstudio_core.lifecycle import ACTIVE, aggregate, item_stage, next_action
 from assetstudio_core.recipes import RECIPES
 from assetstudio_core.seeds import new_seed_family
-from assetstudio_storage.project import batch_key
+from assetstudio_storage.project import job_descriptor_key
 from pydantic import BaseModel, Field
 
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
-from .records import item_key, load_batch, load_build, load_cset, load_decision, load_items, load_prompt, load_qa
+from .records import (
+    cmd_payload,
+    item_key,
+    load_build,
+    load_cset,
+    load_decision,
+    load_items,
+    load_job,
+    load_prompt,
+    load_qa,
+)
 
 
 class NewItem(BaseModel):
@@ -45,7 +55,7 @@ def active_shot_claims(ctx: ProjectContext) -> dict[str, tuple[str, str]]:
     """shot id -> (batch id, item id) for unpublished, uncancelled items."""
     claims: dict[str, tuple[str, str]] = {}
     for batch_id in _batch_ids(ctx):
-        batch, _ = load_batch(ctx.store, batch_id)
+        batch, _ = load_job(ctx.store, batch_id)
         for item in load_items(ctx.store, batch):
             if item.shot_id and not item.cancelled and item.published is None:
                 claims[item.shot_id] = (batch.id, item.id)
@@ -53,23 +63,28 @@ def active_shot_claims(ctx: ProjectContext) -> dict[str, tuple[str, str]]:
 
 
 def _batch_ids(ctx: ProjectContext) -> list[str]:
+    """All Job ids: legacy `bat_` Jobs under batches/, new `job_` Jobs under jobs/."""
     ids: list[str] = []
-    cursor: str | None = None
-    while True:
-        keys, cursor = ctx.store.repo.list_keys("batches", cursor)
-        ids += [k.split("/")[1] for k in keys if k.endswith("/batch.json")]
-        if cursor is None:
-            return ids
+    for prefix, descriptor in (("batches", "batch.json"), ("jobs", "job.json")):
+        cursor: str | None = None
+        while True:
+            keys, cursor = ctx.store.repo.list_keys(prefix, cursor)
+            ids += [k.split("/")[1] for k in keys if k.endswith(f"/{descriptor}") and k.count("/") == 2]
+            if cursor is None:
+                break
+    return ids
 
 
 def list_batch_ids(ctx: ProjectContext) -> list[str]:
     return _batch_ids(ctx)
 
 
-def create_batch(studio: Studio, ctx: ProjectContext, req: CreateBatch) -> tuple[Batch, bool]:
+def create_batch(studio: Studio, ctx: ProjectContext, req: CreateBatch) -> tuple[Job, bool]:
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
-        return load_batch(ctx.store, prior["batch_id"])[0], False
+    prior = studio.journal.command_result(ctx.id, "create_batch", req.idempotency_key,
+                                                 cmd_payload(req))
+    if prior is not None:
+        return load_job(ctx.store, prior["batch_id"])[0], False
     cfg, _ = ctx.config()
     shots = {s.id: s for s in ctx.store.read_shotlist()[0].items}
     snapshots: list[dict[str, Any]] = []
@@ -100,30 +115,31 @@ def create_batch(studio: Studio, ctx: ProjectContext, req: CreateBatch) -> tuple
         if taken:
             raise ApiError(409, "shot_claimed", "some shot-list rows are already in an active batch", taken)
         now = now_iso()
-        batch_id = new_id("bat")
+        batch_id = new_id("job")
         alias = f"b-{len(_batch_ids(ctx)) + 1:04d}"
-        items: list[BatchItem] = []
+        items: list[JobItem] = []
         for it, snap in zip(req.items, snapshots, strict=True):
             ctx.store.save_snapshot(snap)
             shot: ShotItem | None = shots.get(it.shot_id or "")
-            items.append(BatchItem(
-                id=new_id("itm"), batch_id=batch_id, name=it.name, brief=it.brief or (shot.brief if shot else ""),
+            items.append(JobItem(
+                id=new_id("itm"), job_id=batch_id, name=it.name, brief=it.brief or (shot.brief if shot else ""),
                 category_id=snap["category_id"], shot_id=it.shot_id,
                 target_asset_id=it.target_asset_id or (shot.target_asset_id if shot else None),
                 snapshot_sha=snap["sha256"], created_at=now, updated_at=now))
-        batch = Batch(id=batch_id, alias=alias, title=req.title, kind=recipe.kind, recipe_id=recipe.id,
+        batch = Job(id=batch_id, alias=alias, title=req.title, kind=recipe.kind, recipe_id=recipe.id,
                       category_id=req.category_id, created_at=now,
                       seed_family=req.seed_family if req.seed_family is not None else new_seed_family(),
                       item_ids=[i.id for i in items], source=req.source, config_revision=cfg.revision)
         for item in items:
             ctx.store.create(item_key(batch_id, item.id), item)
-        ctx.store.create(batch_key(batch_id, "batch.json"), batch)
-        studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), {"batch_id": batch_id})
+        ctx.store.create(job_descriptor_key(batch_id), batch)
+        studio.journal.record_command(ctx.id, "create_batch", req.idempotency_key, cmd_payload(req),
+                                      {"batch_id": batch_id})
     studio.events.publish("batch", project_id=ctx.id, batch_id=batch_id)
     return batch, True
 
 
-def _builds(ctx: ProjectContext, batch: Batch, items: list[BatchItem]) -> dict[str, BuildRun]:
+def _builds(ctx: ProjectContext, batch: Job, items: list[JobItem]) -> dict[str, BuildRun]:
     out = {}
     for it in items:
         if it.current_build:
@@ -131,7 +147,7 @@ def _builds(ctx: ProjectContext, batch: Batch, items: list[BatchItem]) -> dict[s
     return out
 
 
-def batch_summary(ctx: ProjectContext, batch: Batch) -> dict[str, Any]:
+def batch_summary(ctx: ProjectContext, batch: Job) -> dict[str, Any]:
     items = load_items(ctx.store, batch)
     agg = aggregate(items, _builds(ctx, batch, items))
     cat = ctx.config()[0].category(batch.category_id) if batch.category_id else None
@@ -143,11 +159,11 @@ def batch_summary(ctx: ProjectContext, batch: Batch) -> dict[str, Any]:
 
 
 def list_batches(ctx: ProjectContext) -> list[dict[str, Any]]:
-    out = [batch_summary(ctx, load_batch(ctx.store, b)[0]) for b in _batch_ids(ctx)]
+    out = [batch_summary(ctx, load_job(ctx.store, b)[0]) for b in _batch_ids(ctx)]
     return sorted(out, key=lambda b: b["created_at"], reverse=True)
 
 
-def _legal(item: BatchItem, stage_busy: bool, build: BuildRun | None, build_available: bool) -> dict[str, bool]:
+def _legal(item: JobItem, stage_busy: bool, build: BuildRun | None, build_available: bool) -> dict[str, bool]:
     gen_busy = item.tasks.get("generate") is not None and item.tasks["generate"].state in ACTIVE
     open_prompt = item.current_set is None or item.regen_requested
     build_active = build is not None and build.status in ACTIVE
@@ -166,7 +182,7 @@ def _legal(item: BatchItem, stage_busy: bool, build: BuildRun | None, build_avai
     }
 
 
-def item_view(ctx: ProjectContext, batch: Batch, item: BatchItem, build_available: bool) -> dict[str, Any]:
+def item_view(ctx: ProjectContext, batch: Job, item: JobItem, build_available: bool) -> dict[str, Any]:
     store = ctx.store
     build = load_build(store, batch.id, item.current_build)[0] if item.current_build else None
     st = item_stage(item, build)
@@ -196,7 +212,7 @@ def item_view(ctx: ProjectContext, batch: Batch, item: BatchItem, build_availabl
 
 def batch_detail(ctx: ProjectContext, batch_id: str, build: dict[str, Any]) -> dict[str, Any]:
     """`build` is the live readiness of the recipe's build step (services.runtime.build_readiness)."""
-    batch, _ = load_batch(ctx.store, batch_id)
+    batch, _ = load_job(ctx.store, batch_id)
     recipe = RECIPES[batch.recipe_id]
     available = build["state"] == "ready"
     items = load_items(ctx.store, batch)

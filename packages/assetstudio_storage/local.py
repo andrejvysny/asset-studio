@@ -9,9 +9,20 @@ import threading
 from pathlib import Path
 from typing import BinaryIO
 
-from .repo import BlobRef, Conflict, IntegrityError, NotFound, ObjectData, ReadOnly, StorageError, validate_key
+from .repo import (
+    BlobRef,
+    Conflict,
+    CorruptBlob,
+    IntegrityError,
+    NotFound,
+    ObjectData,
+    ReadOnly,
+    StorageError,
+    validate_key,
+)
 
 _SHA_CHARS = set("0123456789abcdef")
+_CHUNK = 1 << 20
 
 
 def _fsync_dir(path: Path) -> None:
@@ -34,6 +45,9 @@ class LocalBackend:
         self.read_only = read_only
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
+        # Blobs are write-once (0444, never replaced): a verification stays valid while the file identity
+        # (inode, size, mtime, ctime) is unchanged. Any rewrite/chmod/replace changes ctime and invalidates it.
+        self._verified: dict[str, tuple[int, int, int, int]] = {}
         if not self.root.is_dir():
             raise StorageError(f"project root does not exist: {self.root}")
 
@@ -129,9 +143,80 @@ class LocalBackend:
 
     # --- blobs -------------------------------------------------------------------------------------------------
     def _blob_path(self, sha256: str) -> Path:
+        """Content path, refusing symlinked components: a blob must never resolve outside the project root."""
         if len(sha256) != 64 or not set(sha256) <= _SHA_CHARS:
             raise StorageError(f"invalid sha256 {sha256!r}")
-        return self.root / "blobs" / "sha256" / sha256[:2] / sha256[2:4] / sha256
+        p = self.root / "blobs" / "sha256" / sha256[:2] / sha256[2:4] / sha256
+        cur = self.root
+        for part in p.relative_to(self.root).parts:
+            cur = cur / part
+            if cur.is_symlink():
+                raise IntegrityError(f"blob path component is a symlink: {cur.relative_to(self.root)}")
+        return p
+
+    @staticmethod
+    def _identity(p: Path) -> tuple[int, int, int, int]:
+        st = p.stat()
+        return st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+    def _hash_file(self, p: Path) -> tuple[str, int]:
+        h, n = hashlib.sha256(), 0
+        with p.open("rb") as f:
+            for chunk in iter(lambda: f.read(_CHUNK), b""):
+                h.update(chunk)
+                n += len(chunk)
+        return h.hexdigest(), n
+
+    def verify_blob(self, sha256: str, size: int | None = None, use_cache: bool = True) -> None:
+        """Raise NotFound / CorruptBlob unless the stored bytes hash to `sha256` (and have `size`)."""
+        p = self._blob_path(sha256)
+        if not p.is_file():
+            raise NotFound(f"blob {sha256}")
+        ident = self._identity(p)
+        if use_cache and self._verified.get(sha256) == ident and (size is None or ident[1] == size):
+            return
+        digest, n = self._hash_file(p)
+        if digest != sha256 or (size is not None and n != size):
+            self._verified.pop(sha256, None)
+            raise CorruptBlob(sha256, f"stored bytes hash to {digest[:12]} ({n} B)")
+        self._verified[sha256] = ident
+
+    def read_blob_verified(self, sha256: str, max_bytes: int | None = None) -> bytes:
+        """Read + hash in one pass. Altered bytes are never returned under the original digest."""
+        p = self._blob_path(sha256)
+        try:
+            f = p.open("rb")
+        except FileNotFoundError as e:
+            raise NotFound(f"blob {sha256}") from e
+        h, parts, n = hashlib.sha256(), [], 0
+        with f:
+            for chunk in iter(lambda: f.read(_CHUNK), b""):
+                n += len(chunk)
+                if max_bytes is not None and n > max_bytes:
+                    raise StorageError(f"blob {sha256[:12]} exceeds the {max_bytes} B read limit")
+                h.update(chunk)
+                parts.append(chunk)
+        if h.hexdigest() != sha256:
+            self._verified.pop(sha256, None)
+            raise CorruptBlob(sha256, f"stored bytes hash to {h.hexdigest()[:12]}")
+        return b"".join(parts)
+
+    def copy_blob_verified(self, sha256: str, dst: BinaryIO) -> int:
+        """Stream a blob into `dst`; raises CorruptBlob at the end if the bytes did not match (caller discards dst)."""
+        p = self._blob_path(sha256)
+        h, n = hashlib.sha256(), 0
+        try:
+            f = p.open("rb")
+        except FileNotFoundError as e:
+            raise NotFound(f"blob {sha256}") from e
+        with f:
+            for chunk in iter(lambda: f.read(_CHUNK), b""):
+                h.update(chunk)
+                dst.write(chunk)
+                n += len(chunk)
+        if h.hexdigest() != sha256:
+            raise CorruptBlob(sha256, f"stored bytes hash to {h.hexdigest()[:12]}")
+        return n
 
     def write_blob(self, stream: BinaryIO, expected_sha256: str | None = None) -> BlobRef:
         self._check_writable()
@@ -159,7 +244,11 @@ class LocalBackend:
                 os.link(tmp, final)
                 created = True
                 _fsync_dir(final.parent)
+                self._verified[sha] = self._identity(final)
             except FileExistsError:
+                # Dedup reuse: existence (or size) is not proof. A damaged existing blob is reported, never
+                # silently reused and never overwritten (other records may reference it; repair is explicit).
+                self.verify_blob(sha, size)
                 created = False
             return BlobRef(sha, size, created)
         finally:

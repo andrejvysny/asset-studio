@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "id": "prm_1nan2yjdppb18btr",
+  "item_id": "itm_vaneyp10m3ygzt5e",
+  "number": 1,
+  "parent_id": null,
+  "created_at": "2026-09-29T12:58:28.138Z",
+  "origin": "enhanced",
+  "original_brief": "brief for Crate",
+  "enhancer": {
+    "raw": "simulated",
+    "model": "simulated",
+    "seconds": 0.0,
+    "short_title": "brief for Crate",
+    "tags": [
+      "3D model"
+    ],
+    "simulated": true
+  },
+  "description": "Brief for Crate, clearly readable form, simulated enhancement.",
+  "template": "single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+  "positive": "Brief for Crate, clearly readable form, simulated enhancement, single isolated object, centred with margin, plain light grey background, no floor, no cast shadow, three-quarter view, even studio lighting",
+  "negative": "multiple objects, scene, floor, pedestal, cast shadow, text, watermark, cropped, photo",
+  "style_sha": "e777af0add7dd56bc07d7914956a7a1b4c8418a74eec13e6d22acf45bcc029b1",
+  "snapshot_sha": "d563da67c235944f0183221798732baaca7910cf5696bd19e8b3605e2cdd8861"
+}

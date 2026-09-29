@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .domain import BatchItem, BuildRun
+from .domain import BuildRun, JobItem
 
 StageName = Literal["prompts", "candidates", "approve", "build", "publish", "done", "cancelled"]
 TAB_ORDER: tuple[StageName, ...] = ("prompts", "candidates", "approve", "build", "publish")
@@ -20,12 +20,12 @@ class ItemStage:
     failed: bool = False
 
 
-def _task(item: BatchItem, name: str) -> str | None:
+def _task(item: JobItem, name: str) -> str | None:
     t = item.tasks.get(name)
     return t.state if t else None
 
 
-def item_stage(item: BatchItem, build: BuildRun | None) -> ItemStage:
+def item_stage(item: JobItem, build: BuildRun | None) -> ItemStage:
     if item.cancelled:
         return ItemStage("cancelled", "cancelled", False, False)
     if item.published is not None and item.accepted_build is None:
@@ -66,7 +66,7 @@ def item_stage(item: BatchItem, build: BuildRun | None) -> ItemStage:
     return ItemStage("prompts", "edited" if item.prompt_confirmed is None else "confirmed", True, False)
 
 
-def aggregate(items: list[BatchItem], builds: dict[str, BuildRun]) -> dict:
+def aggregate(items: list[JobItem], builds: dict[str, BuildRun]) -> dict:
     stages = {i.id: item_stage(i, builds.get(i.current_build or "")) for i in items}
     live = [i for i in items if not i.cancelled]
     n = len(live)

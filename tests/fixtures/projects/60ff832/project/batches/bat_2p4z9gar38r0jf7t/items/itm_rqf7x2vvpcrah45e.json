@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "id": "itm_rqf7x2vvpcrah45e",
+  "batch_id": "bat_2p4z9gar38r0jf7t",
+  "name": "Tavern",
+  "brief": "brief for Tavern",
+  "category_id": "concept",
+  "shot_id": null,
+  "target_asset_id": "ast_4bxk8g0w9c8n3tfr",
+  "snapshot_sha": "044904a7f76cb6df8bada02a46dfd730bd1de890f308caf8439cd0f33a8bd220",
+  "revision": 22,
+  "prompt_revisions": [
+    "prm_t2987bmdadd0wmg1"
+  ],
+  "current_prompt": "prm_t2987bmdadd0wmg1",
+  "prompt_confirmed": "prm_t2987bmdadd0wmg1",
+  "candidate_sets": [
+    "cs_5r8fyn00hasp08zv"
+  ],
+  "current_set": "cs_5r8fyn00hasp08zv",
+  "qa": {
+    "cnd_qchs5cxkkcsjaj4q": "qa_hrmjred400g664xe",
+    "cnd_yf3cs89q1g5d4cjr": "qa_97enm0dca6w8jw64"
+  },
+  "decisions": [
+    "dec_2j9jk0c9ywv3fjgz",
+    "dec_zp8dt2f70tz7eee8"
+  ],
+  "approval": "dec_2j9jk0c9ywv3fjgz",
+  "regen_requested": false,
+  "build_runs": [
+    "run_b2zphfkfr24sqamk"
+  ],
+  "current_build": "run_b2zphfkfr24sqamk",
+  "accepted_build": "run_b2zphfkfr24sqamk",
+  "published": {
+    "asset_id": "ast_4bxk8g0w9c8n3tfr",
+    "version_id": "ver_khqcxq46zrg5k21m",
+    "display_version": 1
+  },
+  "cancelled": false,
+  "tasks": {
+    "enhance": {
+      "op_id": "op_jqacv42f0ydferm6",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "generate": {
+      "op_id": "op_jjrfd0cdqjxa206d",
+      "state": "succeeded",
+      "error": null,
+      "progress": {
+        "done": 2,
+        "total": 2
+      }
+    },
+    "qa": {
+      "op_id": "op_r7nrgbm2k8xrpsza",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "build": {
+      "op_id": "op_838jn0z2kxteqm3m",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    },
+    "publish": {
+      "op_id": "op_b4pf9tmfva1z63fp",
+      "state": "succeeded",
+      "error": null,
+      "progress": {}
+    }
+  },
+  "created_at": "2026-09-29T12:58:24.772Z",
+  "updated_at": "2026-09-29T12:58:25.861Z"
+}

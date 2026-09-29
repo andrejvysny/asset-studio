@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "art_93wk3n0tjgdbjqcx",
+  "role": "image",
+  "sha256": "86ee266d18fd84d5a249ac97a90afb8ce18859a483388b9caac9d9cab12a76c9",
+  "size": 46142,
+  "mime": "image/png",
+  "meta": {
+    "width": 512,
+    "height": 512,
+    "pivot": [
+      256,
+      492
+    ]
+  },
+  "lineage": [
+    "art_tx6nead793ysw1qr"
+  ],
+  "created_at": "2026-09-29T12:58:26.914Z",
+  "retention": "essential",
+  "source": {}
+}

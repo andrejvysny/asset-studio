@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import threading
 from typing import Any
 
 from PIL import Image, ImageDraw
 
-from .base import EngineRejected, EngineUnavailable, JobStatus, T2IRequest
+from .base import AckError, EngineUnavailable, ExecutionFailed, ExecutionLost, JobStatus, T2IRequest
 
 
 def _png(seed: int, w: int, h: int, label: str) -> bytes:
@@ -78,39 +79,96 @@ class FakeEngine:
         return {"engine": "fake", "simulated": True, "workflow": "fake.t2i", "workflow_version": 0}
 
 
+class _FakeLease:
+    """In-process mirror of services/worker_common/lease.py semantics (epoch fencing + drain on unload)."""
+
+    def __init__(self) -> None:
+        self.session_id = f"fake-{id(self):x}"
+        self.epoch, self.admitting, self.active = 0, False, 0
+        self.unload_response: dict[str, Any] | Exception | None = None
+        self.lease_error: Exception | None = None
+
+    def lease(self, epoch: int) -> dict[str, Any]:
+        if self.lease_error is not None:
+            raise self.lease_error
+        if epoch < self.epoch:
+            raise AckError(f"stale lease {epoch} < {self.epoch}")
+        self.epoch, self.admitting = epoch, True
+        return self.info()
+
+    def info(self) -> dict[str, Any]:
+        return {"session_id": self.session_id, "epoch": self.epoch, "admitting": self.admitting,
+                "active": self.active}
+
+    def check(self, epoch: int) -> None:
+        if epoch != self.epoch or not self.admitting:
+            raise EngineUnavailable(f"stale_lease: epoch {epoch} is not admitted ({self.epoch})")
+
+    def drain(self, owner_token: str, epoch: int) -> dict[str, Any]:
+        if isinstance(self.unload_response, Exception):
+            raise self.unload_response
+        if self.unload_response is not None:
+            return self.unload_response
+        self.epoch, self.admitting = max(self.epoch, epoch), False
+        if self.active:
+            raise AckError("GPU work still active")
+        return {**self.info(), "loaded": False, "owner_token": owner_token}
+
+
 class FakeAux:
     name = "aux"
     simulated = True
 
     def __init__(self) -> None:
-        self.loaded = False
+        self.loaded: dict[str, bool] = {"vlm": False, "birefnet": False}
+        self.loads: dict[str, int] = {"vlm": 0, "birefnet": 0}
         self.calls: list[str] = []
-        self.unload_response: dict[str, Any] | Exception | None = None
         self.vlm_answers: dict[str, Any] | None = None
+        self.gpu = _FakeLease()
+
+    @property
+    def unload_response(self) -> dict[str, Any] | Exception | None:
+        return self.gpu.unload_response
+
+    @unload_response.setter
+    def unload_response(self, value: dict[str, Any] | Exception | None) -> None:
+        self.gpu.unload_response = value
+
+    def _use(self, component: str, epoch: int) -> None:
+        self.gpu.check(epoch)
+        if not self.loaded[component]:
+            self.loaded[component] = True
+            self.loads[component] += 1
 
     def health(self) -> dict[str, Any]:
-        return {"reachable": True, "simulated": True, "loaded": {"vlm": self.loaded, "birefnet": self.loaded}}
+        return {"reachable": True, "simulated": True, "loaded": dict(self.loaded), "loads": dict(self.loads),
+                "lease": self.gpu.info()}
 
-    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str) -> dict[str, Any]:
+    def lease(self, epoch: int) -> dict[str, Any]:
+        return self.gpu.lease(epoch)
+
+    def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
+                execution_id: str | None = None) -> dict[str, Any]:
+        self._use("vlm", epoch)
         self.calls.append("enhance")
-        self.loaded = True
         text = brief.strip().rstrip(".")
         return {"description": f"{text[:1].upper()}{text[1:]}, clearly readable form, simulated enhancement.",
                 "short_title": text[:30], "tags": [kind], "meta": {"model": "simulated", "seconds": 0.0,
-                                                                   "raw": "simulated"}}
+                                                                   "raw": "simulated", "execution_id": execution_id}}
 
-    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str) -> dict[str, Any]:
+    def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
+           execution_id: str | None = None) -> dict[str, Any]:
+        self._use("vlm", epoch)
         self.calls.append("qa")
-        self.loaded = True
         if self.vlm_answers is not None:
             return {"checks": self.vlm_answers, "reasons": [], "summary": "simulated", "meta": {"model": "simulated"}}
         h = hashlib.sha256(image).digest()
         return {"checks": {qid: h[i % len(h)] > 30 for i, (qid, _) in enumerate(questions)},
                 "reasons": [], "summary": "simulated answers", "meta": {"model": "simulated"}}
 
-    def cutout(self, *, image: bytes) -> dict[str, Any]:
+    def cutout(self, *, image: bytes, epoch: int, execution_id: str | None = None) -> dict[str, Any]:
+        self._use("birefnet", epoch)
         self.calls.append("cutout")
-        self.loaded = True
         with Image.open(io.BytesIO(image)) as im:
             w, h = im.size
         mask = Image.new("L", (w, h), 0)
@@ -119,16 +177,17 @@ class FakeAux:
         mask.save(out, "PNG")
         return {"mask_png": out.getvalue(), "meta": {"model": "simulated"}}
 
-    def unload(self, owner_token: str) -> dict[str, Any]:
+    def unload(self, owner_token: str, epoch: int) -> dict[str, Any]:
         self.calls.append("unload")
-        if isinstance(self.unload_response, Exception):
-            raise self.unload_response
-        self.loaded = False
-        return self.unload_response or {"loaded": False, "owner_token": owner_token}
+        body = self.gpu.drain(owner_token, epoch)
+        if body.get("loaded") is False:
+            self.loaded = {k: False for k in self.loaded}
+        return body
 
 
 class FakeWorker3d:
-    """SIMULATED 3D worker: a textured sphere, never a reconstruction. Same byte contract as the real worker."""
+    """SIMULATED 3D worker: a textured sphere, never a reconstruction. Same execution protocol as the real one:
+    ids chosen by the caller, idempotent submit, status/result/ack, `lost` after a simulated restart."""
 
     name = "worker3d"
     simulated = True
@@ -136,26 +195,108 @@ class FakeWorker3d:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self.loaded = False
-        self.unload_response: dict[str, Any] | Exception | None = None
+        self.loads = 0
+        self.gpu = _FakeLease()
+        self.executions: dict[str, dict[str, Any]] = {}
+        self.fail_ops: dict[str, str] = {}  # op -> failure code for the next execution of that op
+        self.lose_submit_response = 0  # admitted, but the HTTP response is "lost"
+        self.hold = False  # keep new executions "running" until release_held()
+
+    @property
+    def unload_response(self) -> dict[str, Any] | Exception | None:
+        return self.gpu.unload_response
+
+    @unload_response.setter
+    def unload_response(self, value: dict[str, Any] | Exception | None) -> None:
+        self.gpu.unload_response = value
 
     def health(self) -> dict[str, Any]:
         return {"reachable": True, "ok": True, "missing_models": [], "exporters": {"clean": True, "research": False},
-                "loaded": {"trellis2": self.loaded}, "simulated": True}
+                "loaded": {"trellis2": self.loaded}, "loads": {"trellis2": self.loads}, "simulated": True,
+                "lease": self.gpu.info(), "spooled": len(self.executions)}
 
-    def generate(self, *, image_rgba: bytes, seed: int, pipeline_type: str) -> tuple[bytes, dict[str, Any]]:
-        self.calls.append("generate")
-        self.loaded = True
-        raw = b"SIMULATED-RAW:" + hashlib.sha256(image_rgba + seed.to_bytes(8, "big")).digest()
-        return raw, {"engine": "simulated", "seed": seed, "pipeline_type": pipeline_type, "raw_faces": 0}
+    def lease(self, epoch: int) -> dict[str, Any]:
+        return self.gpu.lease(epoch)
 
-    def export(self, *, raw: bytes, exporter: str, decimation_target: int, texture_size: int,
-               remesh: bool) -> tuple[bytes, dict[str, Any]]:
+    def unload(self, owner_token: str, epoch: int) -> dict[str, Any]:
+        self.calls.append("unload")
+        body = self.gpu.drain(owner_token, epoch)
+        if body.get("loaded") is False:
+            self.loaded = False
+        return body
+
+    def restart(self) -> None:
+        """Simulated worker process restart: unfinished executions become `lost`; spooled results survive."""
+        for e in self.executions.values():
+            if e["state"] in ("queued", "running"):
+                e["state"], e["error"] = "lost", "worker restarted before this execution finished"
+        self.gpu = _FakeLease()
+        self.gpu.session_id = f"fake-restarted-{len(self.calls)}"
+        self.loaded = False
+
+    def release_held(self) -> None:
+        for eid, e in self.executions.items():
+            if e["state"] == "running":
+                self._finish(eid)
+
+    def status(self, execution_id: str) -> dict[str, Any] | None:
+        e = self.executions.get(execution_id)
+        return None if e is None else {k: v for k, v in e.items() if k not in ("result", "body")}
+
+    def ack(self, execution_id: str) -> None:
+        e = self.executions.get(execution_id)
+        if e is not None and e["state"] in ("succeeded", "failed", "cancelled", "lost"):
+            del self.executions[execution_id]
+
+    def execute(self, execution_id: str, op: str, params: dict[str, Any], body: bytes, *, epoch: int,
+                should_cancel: Any = None) -> tuple[bytes, dict[str, Any]]:
+        req = hashlib.sha256(json.dumps({"op": op, "params": params}, sort_keys=True).encode() + body).hexdigest()
+        e = self.executions.get(execution_id)
+        if e is None:
+            self.gpu.check(epoch)
+            if op == "export" and not body.startswith(b"SIMULATED-RAW:"):
+                raise ExecutionFailed("invalid raw intermediate", "input_invalid")
+            self.calls.append(op if op == "generate" else f"export:{params['exporter']}")
+            self.executions[execution_id] = e = {"state": "running", "op": op, "params": params, "body": body,
+                                                 "request_sha256": req, "session_id": self.gpu.session_id}
+            if not self.hold:
+                self._finish(execution_id)
+            if self.lose_submit_response > 0:
+                self.lose_submit_response -= 1
+                raise EngineUnavailable("simulated lost submit response")
+        elif e["request_sha256"] != req:
+            raise EngineUnavailable("execution id reused with a different request")
+        if e["state"] == "running":
+            raise EngineUnavailable("simulated: still running")
+        if e["state"] == "failed":
+            raise ExecutionFailed(e["error"], e["code"])
+        if e["state"] == "lost":
+            raise ExecutionLost(e["error"])
+        return e["result"], {**e["meta"], "execution_id": execution_id, "worker_session": e["session_id"]}
+
+    def _finish(self, eid: str) -> None:
+        e = self.executions[eid]
+        if (code := self.fail_ops.pop(e["op"], None)) is not None:
+            e.update(state="failed", error=f"simulated {code}", code=code)
+            return
+        if e["op"] == "generate":
+            if not self.loaded:
+                self.loaded, self.loads = True, self.loads + 1
+            p = e["params"]
+            raw = b"SIMULATED-RAW:" + hashlib.sha256(e["body"] + int(p["seed"]).to_bytes(8, "big")).digest()
+            meta = {"engine": "simulated", "seed": p["seed"], "pipeline_type": p["pipeline_type"], "raw_faces": 0,
+                    "raw_format": "simulated"}
+            e.update(state="succeeded", result=raw, meta=meta)
+            return
+        glb, meta = self._export(e["body"], **e["params"])
+        e.update(state="succeeded", result=glb, meta=meta)
+
+    @staticmethod
+    def _export(raw: bytes, exporter: str, decimation_target: int, texture_size: int,
+                remesh: bool) -> tuple[bytes, dict[str, Any]]:
         import numpy as np
         import trimesh
 
-        self.calls.append(f"export:{exporter}")
-        if not raw.startswith(b"SIMULATED-RAW:"):
-            raise EngineRejected("invalid raw intermediate")
         sphere = trimesh.creation.icosphere(subdivisions=2 if decimation_target < 1000 else 3)
         uv = np.stack([np.arctan2(sphere.vertices[:, 1], sphere.vertices[:, 0]) / (2 * np.pi) + 0.5,
                        sphere.vertices[:, 2] * 0.5 + 0.5], -1)
@@ -167,10 +308,3 @@ class FakeWorker3d:
                                                 "decimation_target": decimation_target, "texture_size": 64,
                                                 "remesh": remesh, "simulated": True,
                                                 "licence": "SIMULATED", "limitations": []}
-
-    def unload(self, owner_token: str) -> dict[str, Any]:
-        self.calls.append("unload")
-        if isinstance(self.unload_response, Exception):
-            raise self.unload_response
-        self.loaded = False
-        return self.unload_response or {"loaded": False, "owner_token": owner_token}

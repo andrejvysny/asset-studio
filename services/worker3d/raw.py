@@ -1,7 +1,5 @@
-"""Raw TRELLIS.2 output <-> .npz bytes. Pickle-free, so re-export can load stored intermediates safely.
-
-vertices (N, 3) f32 · faces (M, 3) i32 · attrs (L, C) f32 · coords (L, 3) i32 · voxel_size () f32 ·
-layout: JSON {name: [start, stop]} over attrs channels.
+"""Raw TRELLIS.2 output <-> .npz bytes. Pickle-free; loading validates schema and limits on CPU (raw_npz) BEFORE
+any tensor reaches the GPU.
 """
 from __future__ import annotations
 
@@ -10,9 +8,11 @@ import json
 from typing import Any
 
 import numpy as np
+import raw_npz
 import torch
 
-FORMAT = "assetstudio.trellis2-raw/1"
+FORMAT = raw_npz.FORMAT
+RawInvalid = raw_npz.RawInvalid
 
 
 def dump(mesh: Any) -> bytes:
@@ -28,14 +28,12 @@ def dump(mesh: Any) -> bytes:
     return buf.getvalue()
 
 
-def load(data: bytes) -> dict[str, Any]:
-    with np.load(io.BytesIO(data), allow_pickle=False) as z:
-        if str(z["format"]) != FORMAT:
-            raise ValueError(f"unsupported raw format {z['format']}")
-        layout = {k: slice(a, b) for k, (a, b) in json.loads(str(z["layout"])).items()}
-        out = {k: torch.from_numpy(z[k]).cuda() for k in ("vertices", "attrs", "coords")}
-        out["faces"] = torch.from_numpy(z["faces"]).cuda()
-        out.update(voxel_size=float(z["voxel_size"]), layout=layout)
-    if out["faces"].ndim != 2 or out["faces"].shape[1] != 3 or int(out["faces"].max()) >= out["vertices"].shape[0]:
-        raise ValueError("raw mesh indices out of range")
+def validate(data: bytes) -> dict[str, Any]:
+    """CPU only. Raises RawInvalid."""
+    return raw_npz.load(data)
+
+
+def to_cuda(raw: dict[str, Any]) -> dict[str, Any]:
+    out = {k: torch.from_numpy(raw[k]).cuda() for k in ("vertices", "attrs", "coords", "faces")}
+    out.update(voxel_size=raw["voxel_size"], layout=raw["layout"])
     return out

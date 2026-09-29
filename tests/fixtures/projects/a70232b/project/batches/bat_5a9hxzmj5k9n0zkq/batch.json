@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "id": "bat_5a9hxzmj5k9n0zkq",
+  "alias": "b-0003",
+  "title": "fixture materials",
+  "kind": "material",
+  "recipe_id": "material.default",
+  "category_id": "materials",
+  "created_at": "2026-09-29T12:58:43.140Z",
+  "seed_family": 4146341878348574,
+  "item_ids": [
+    "itm_2edy4hmw0qthetdd"
+  ],
+  "source": "ad hoc",
+  "config_revision": 2,
+  "revision": 1
+}

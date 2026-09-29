@@ -1,0 +1,418 @@
+schema_version: 1
+project:
+  id: prj_q2jdyachcbj720zc
+  name: Fixture
+revision: 2
+defaults:
+  kind:
+    mode: inherit
+    value: null
+  recipe_id:
+    mode: inherit
+    value: null
+  naming:
+    mode: inherit
+    value: null
+  budget:
+    mode: inherit
+    value: null
+  build_profile:
+    mode: inherit
+    value: null
+  qa_ruleset:
+    mode: inherit
+    value: null
+  reference_set:
+    mode: inherit
+    value: null
+  style:
+    mode: value
+    value: house
+  style_lora:
+    mode: inherit
+    value: null
+  export_presets:
+    mode: inherit
+    value: null
+  candidate_count:
+    mode: inherit
+    value: null
+categories:
+- id: concept
+  parent_id: null
+  slug: concept
+  label: Concept
+  archived: false
+  defaults:
+    kind:
+      mode: value
+      value: concept_art
+    recipe_id:
+      mode: inherit
+      value: null
+    naming:
+      mode: inherit
+      value: null
+    budget:
+      mode: inherit
+      value: null
+    build_profile:
+      mode: inherit
+      value: null
+    qa_ruleset:
+      mode: inherit
+      value: null
+    reference_set:
+      mode: inherit
+      value: null
+    style:
+      mode: inherit
+      value: null
+    style_lora:
+      mode: inherit
+      value: null
+    export_presets:
+      mode: inherit
+      value: null
+    candidate_count:
+      mode: inherit
+      value: null
+  metadata: {}
+- id: props
+  parent_id: null
+  slug: props
+  label: Props
+  archived: false
+  defaults:
+    kind:
+      mode: value
+      value: model3d
+    recipe_id:
+      mode: inherit
+      value: null
+    naming:
+      mode: inherit
+      value: null
+    budget:
+      mode: inherit
+      value: null
+    build_profile:
+      mode: inherit
+      value: null
+    qa_ruleset:
+      mode: inherit
+      value: null
+    reference_set:
+      mode: inherit
+      value: null
+    style:
+      mode: inherit
+      value: null
+    style_lora:
+      mode: inherit
+      value: null
+    export_presets:
+      mode: inherit
+      value: null
+    candidate_count:
+      mode: inherit
+      value: null
+  metadata: {}
+- id: sprites
+  parent_id: null
+  slug: sprites
+  label: Sprites
+  archived: false
+  defaults:
+    kind:
+      mode: value
+      value: sprite
+    recipe_id:
+      mode: inherit
+      value: null
+    naming:
+      mode: inherit
+      value: null
+    budget:
+      mode: inherit
+      value: null
+    build_profile:
+      mode: inherit
+      value: null
+    qa_ruleset:
+      mode: inherit
+      value: null
+    reference_set:
+      mode: inherit
+      value: null
+    style:
+      mode: inherit
+      value: null
+    style_lora:
+      mode: inherit
+      value: null
+    export_presets:
+      mode: inherit
+      value: null
+    candidate_count:
+      mode: inherit
+      value: null
+  metadata: {}
+- id: materials
+  parent_id: null
+  slug: materials
+  label: Materials
+  archived: false
+  defaults:
+    kind:
+      mode: value
+      value: material
+    recipe_id:
+      mode: inherit
+      value: null
+    naming:
+      mode: inherit
+      value: null
+    budget:
+      mode: inherit
+      value: null
+    build_profile:
+      mode: inherit
+      value: null
+    qa_ruleset:
+      mode: inherit
+      value: null
+    reference_set:
+      mode: inherit
+      value: null
+    style:
+      mode: inherit
+      value: null
+    style_lora:
+      mode: inherit
+      value: null
+    export_presets:
+      mode: inherit
+      value: null
+    candidate_count:
+      mode: inherit
+      value: null
+  metadata: {}
+pipelines: {}
+qa_rulesets:
+  model3d:
+    label: 3D model candidates
+    kind: model3d
+    rules:
+    - id: single_object
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: Exactly one object is depicted.
+      metric: null
+      params: {}
+    - id: fully_visible
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The whole object is visible; nothing is cut off by the frame.
+      metric: null
+      params: {}
+    - id: no_environment
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The background is plain, with no scene or environment.
+      metric: null
+      params: {}
+    - id: no_floor
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: There is no floor, ground plane or pedestal.
+      metric: null
+      params: {}
+    - id: no_shadow
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: There is no cast shadow.
+      metric: null
+      params: {}
+    - id: no_text
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The image contains no text, letters, logo or watermark.
+      metric: null
+      params: {}
+    - id: suitable_3d
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The object is suitable for single-image 3D reconstruction.
+      metric: null
+      params: {}
+    - id: mask_margin
+      source: mask_metric
+      stage: candidate
+      enabled: true
+      severity: major
+      question: null
+      metric: mask_margin
+      params: {}
+    - id: mask_fill
+      source: mask_metric
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: null
+      metric: mask_fill
+      params: {}
+    - id: mask_single_blob
+      source: mask_metric
+      stage: candidate
+      enabled: true
+      severity: major
+      question: null
+      metric: mask_single_blob
+      params: {}
+    policy:
+      minor_fail_limit: 2
+  sprite:
+    label: Sprite candidates
+    kind: sprite
+    rules:
+    - id: single_subject
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: Exactly one subject is depicted.
+      metric: null
+      params: {}
+    - id: fully_visible
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The whole subject is visible; nothing is cut off.
+      metric: null
+      params: {}
+    - id: no_text
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The image contains no text, letters, logo or watermark.
+      metric: null
+      params: {}
+    - id: mask_margin
+      source: mask_metric
+      stage: candidate
+      enabled: true
+      severity: major
+      question: null
+      metric: mask_margin
+      params: {}
+    - id: mask_single_blob
+      source: mask_metric
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: null
+      metric: mask_single_blob
+      params: {}
+    policy:
+      minor_fail_limit: 2
+  icon:
+    label: Icon candidates
+    kind: icon
+    rules:
+    - id: centred
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The subject is centred and fits inside the square.
+      metric: null
+      params: {}
+    - id: single_shape
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: The icon shows one clear, readable shape.
+      metric: null
+      params: {}
+    - id: no_text
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The image contains no text, letters, logo or watermark.
+      metric: null
+      params: {}
+    policy:
+      minor_fail_limit: 2
+  concept_art:
+    label: Concept art candidates
+    kind: concept_art
+    rules:
+    - id: no_text
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: The image contains no text, letters, logo or watermark.
+      metric: null
+      params: {}
+    policy:
+      minor_fail_limit: 2
+  material:
+    label: Material candidates
+    kind: material
+    rules:
+    - id: surface_only
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: major
+      question: The image shows only a surface texture, with no distinct objects.
+      metric: null
+      params: {}
+    - id: even_light
+      source: vlm
+      stage: candidate
+      enabled: true
+      severity: minor
+      question: Lighting is even, with no strong directional shadows.
+      metric: null
+      params: {}
+    policy:
+      minor_fail_limit: 2
+styles:
+  house:
+    label: House
+    guide: painterly, warm light
+    negative: photo
+    palette: []
+reference_sets: {}
+export_presets: {}
+retention:
+  rejected_candidates:
+    keep: true
+    expire_after_days: null
+  raw_intermediates:
+    keep: true
+    expire_after_days: null
+  full_logs:
+    keep: true
+    expire_after_days: null

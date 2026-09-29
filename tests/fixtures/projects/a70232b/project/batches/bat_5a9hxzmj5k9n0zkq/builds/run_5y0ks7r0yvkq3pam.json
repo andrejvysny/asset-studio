@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "run_5y0ks7r0yvkq3pam",
+  "item_id": "itm_2edy4hmw0qthetdd",
+  "batch_id": "bat_5a9hxzmj5k9n0zkq",
+  "build": "material",
+  "inputs": {
+    "approval_id": "dec_fxdbwredfn8p3k4n",
+    "candidate_artifact_id": "art_ab67bdx3pb86yxpc",
+    "image_sha256": "76edcb5b0a8d7e5e830593121ab308400a168a4901715d29734e7b089a99fc25"
+  },
+  "status": "succeeded",
+  "result": "valid",
+  "artifacts": {
+    "base_color": "art_ab67bdx3pb86yxpc",
+    "preview": "art_6tcxy357twavaadr",
+    "meta": "art_k0j3g7j1pq95axck"
+  },
+  "validation": {
+    "ok": true,
+    "checks": [
+      {
+        "id": "hash_matches_approval",
+        "ok": true
+      },
+      {
+        "id": "decode",
+        "ok": true,
+        "detail": "PNG 512x512"
+      },
+      {
+        "id": "square",
+        "ok": true,
+        "detail": "512x512"
+      },
+      {
+        "id": "seamless",
+        "ok": true,
+        "detail": "seam ratio 0.00 (limit 2)"
+      }
+    ],
+    "required": [
+      "hash_matches_approval",
+      "decode",
+      "square",
+      "seamless"
+    ]
+  },
+  "created_at": "2026-09-29T12:58:43.683Z",
+  "updated_at": "2026-09-29T12:58:43.823Z",
+  "op_id": "op_p0z6ny5rej74kcb2",
+  "error": null
+}

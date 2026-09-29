@@ -7,6 +7,7 @@ RUN uv pip install --system --no-cache torch==2.8.0 torchvision==0.23.0 --index-
 COPY services/prompt_service/requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 COPY services/prompt_service/ /app/
+COPY services/worker_common/lease.py /app/lease.py
 COPY config/prompts/ /config/prompts/
 RUN useradd --uid 1000 --create-home aux
 USER aux

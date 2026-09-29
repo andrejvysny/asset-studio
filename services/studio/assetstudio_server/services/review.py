@@ -1,20 +1,20 @@
 """Review gates: exact candidate approval, deliberate bulk proposals, final acceptance."""
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.domain import BatchItem, ReviewDecision
+from assetstudio_core.domain import JobItem, ReviewDecision
 from assetstudio_core.ids import derived_id
 from assetstudio_core.review import ApprovalRequest, ReviewError, check_binding, propose_best
+from assetstudio_storage.repo import CorruptBlob
 from pydantic import BaseModel, Field
 
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
 from .prompts import ItemRef, _outcome
-from .records import decision_key, load_build, load_cset, load_qa
+from .records import cmd_payload, decision_key, load_build, load_cset, load_qa
 
 
 class ApproveItem(ItemRef):
@@ -51,22 +51,24 @@ class AcceptBuilds(BaseModel):
 
 
 def _blob_sha(ctx: ProjectContext, artifact_id: str) -> str | None:
-    """Re-hash the stored bytes: the approval binds content, not a filename or a cached claim."""
+    """Re-hash the stored bytes (no cache): the approval binds content, not a filename or a cached claim."""
     art = ctx.store.artifact(artifact_id)
-    with ctx.store.repo.open_blob(art.sha256) as f:
-        h = hashlib.sha256()
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    try:
+        ctx.store.repo.verify_blob(art.sha256, art.size, use_cache=False)
+    except CorruptBlob:
+        return None
+    return art.sha256
 
 
 def approve(studio: Studio, ctx: ProjectContext, batch_id: str, req: Approve) -> dict[str, Any]:
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+    prior = studio.journal.command_result(ctx.id, "approve", req.idempotency_key,
+                                                 cmd_payload(req, batch_id))
+    if prior is not None:
         return prior
     results = []
     for a in req.items:
-        def apply(item: BatchItem, a: ApproveItem = a) -> None:
+        def apply(item: JobItem, a: ApproveItem = a) -> None:
             cset = load_cset(ctx.store, batch_id, a.candidate_set_id) if item.current_set == a.candidate_set_id \
                 else None
             qa = load_qa(ctx.store, batch_id, a.qa_evaluation_id) if a.qa_evaluation_id else None
@@ -80,7 +82,7 @@ def approve(studio: Studio, ctx: ProjectContext, batch_id: str, req: Approve) ->
             did = derived_id("dec", req.idempotency_key, item.id)
             if ctx.store.repo.stat_object(decision_key(batch_id, did)) is None:
                 ctx.store.create(decision_key(batch_id, did), ReviewDecision(
-                    id=did, gate="candidate_approval", batch_id=batch_id, item_id=item.id, decided_at=now_iso(),
+                    id=did, gate="candidate_approval", job_id=batch_id, item_id=item.id, decided_at=now_iso(),
                     idempotency_key=req.idempotency_key, **payload))
             item.decisions.append(did)
             item.approval = did
@@ -90,14 +92,15 @@ def approve(studio: Studio, ctx: ProjectContext, batch_id: str, req: Approve) ->
         except ReviewError as e:
             results.append({"item_id": a.item_id, "ok": False, "code": e.code, "message": str(e), "detail": e.detail})
     response = {"results": results}
-    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
+    studio.journal.record_command(ctx.id, "approve", req.idempotency_key, cmd_payload(req, batch_id),
+                                  response)
     return response
 
 
 def clear_approval(studio: Studio, ctx: ProjectContext, batch_id: str, req: ClearApproval) -> list[dict[str, Any]]:
     out = []
     for r in req.items:
-        def apply(item: BatchItem) -> None:
+        def apply(item: JobItem) -> None:
             if item.current_build is not None and item.tasks.get("build") and \
                     item.tasks["build"].state in ("queued", "running"):
                 raise ApiError(409, "build_in_progress", "cancel the running build first")
@@ -110,9 +113,9 @@ def clear_approval(studio: Studio, ctx: ProjectContext, batch_id: str, req: Clea
 
 
 def preview_best(ctx: ProjectContext, batch_id: str, req: PreviewBest) -> dict[str, Any]:
-    from .records import load_batch, load_items
+    from .records import load_items, load_job
 
-    batch, _ = load_batch(ctx.store, batch_id)
+    batch, _ = load_job(ctx.store, batch_id)
     items = [i for i in load_items(ctx.store, batch) if req.item_ids is None or i.id in req.item_ids]
     proposals = []
     for item in items:
@@ -127,11 +130,13 @@ def preview_best(ctx: ProjectContext, batch_id: str, req: PreviewBest) -> dict[s
 def accept_builds(studio: Studio, ctx: ProjectContext, batch_id: str, req: AcceptBuilds) -> dict[str, Any]:
     """Final human acceptance of an actual built result. Structural validity is mandatory, never overridable."""
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+    prior = studio.journal.command_result(ctx.id, "accept_builds", req.idempotency_key,
+                                                 cmd_payload(req, batch_id))
+    if prior is not None:
         return prior
     results = []
     for a in req.items:
-        def apply(item: BatchItem, a: AcceptItem = a) -> None:
+        def apply(item: JobItem, a: AcceptItem = a) -> None:
             if item.current_build != a.build_run_id:
                 raise ApiError(409, "stale_build", "the build result changed; reload")
             run, _ = load_build(ctx.store, batch_id, a.build_run_id)
@@ -146,13 +151,14 @@ def accept_builds(studio: Studio, ctx: ProjectContext, batch_id: str, req: Accep
             did = derived_id("dec", req.idempotency_key, item.id)
             if ctx.store.repo.stat_object(decision_key(batch_id, did)) is None:
                 ctx.store.create(decision_key(batch_id, did), ReviewDecision(
-                    id=did, gate="final_acceptance", batch_id=batch_id, item_id=item.id,
+                    id=did, gate="final_acceptance", job_id=batch_id, item_id=item.id,
                     bound={"build_run_id": run.id, "artifacts": run.artifacts}, decided_at=now_iso(),
                     idempotency_key=req.idempotency_key))
             item.decisions.append(did)
             item.accepted_build = run.id
         results.append(_outcome(studio, ctx, batch_id, a.item_id, apply, a.expected_item_revision))
     response = {"results": results}
-    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
+    studio.journal.record_command(ctx.id, "accept_builds", req.idempotency_key, cmd_payload(req, batch_id),
+                                  response)
     return response
 

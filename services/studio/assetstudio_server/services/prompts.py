@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from assetstudio_core.canonical import now_iso, sha256_json
-from assetstudio_core.domain import BatchItem, PromptRevision
+from assetstudio_core.domain import JobItem, PromptRevision
 from assetstudio_core.ids import new_id
 from assetstudio_core.lifecycle import ACTIVE
 from assetstudio_core.recipes import RECIPES
@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
-from .records import load_batch, load_item, mutate_item, prompt_key, set_task
+from .records import cmd_payload, load_item, load_job, mutate_item, prompt_key, set_task
 
 
 class ItemRef(BaseModel):
@@ -63,10 +63,10 @@ def compose(description: str, suffix: str) -> str:
     return f"{desc}, {suffix}" if suffix.strip() else desc
 
 
-def make_revision(store: ProjectStore, item: BatchItem, *, rid: str, origin: str, description: str,
+def make_revision(store: ProjectStore, item: JobItem, *, rid: str, origin: str, description: str,
                   enhancer: dict[str, Any] | None = None) -> PromptRevision:
     """Immutable prompt revision. Existing id (retry) returns the stored record unchanged."""
-    key = prompt_key(item.batch_id, rid)
+    key = prompt_key(item.job_id, rid)
     existing, _ = store.get_opt(key, PromptRevision)
     if existing is not None:
         return existing
@@ -82,18 +82,18 @@ def make_revision(store: ProjectStore, item: BatchItem, *, rid: str, origin: str
     return rev
 
 
-def _prompt_open(item: BatchItem) -> bool:
+def _prompt_open(item: JobItem) -> bool:
     return item.current_set is None or item.regen_requested
 
 
-def _busy(item: BatchItem, *stages: str) -> bool:
+def _busy(item: JobItem, *stages: str) -> bool:
     return any(item.tasks.get(s) is not None and item.tasks[s].state in ACTIVE for s in stages)
 
 
 def edit_prompts(studio: Studio, ctx: ProjectContext, batch_id: str, req: EditPrompts) -> list[dict[str, Any]]:
     results = []
     for e in req.items:
-        def apply(item: BatchItem, e: EditPrompt = e) -> None:
+        def apply(item: JobItem, e: EditPrompt = e) -> None:
             if not _prompt_open(item):
                 raise ApiError(409, "prompts_locked", "candidates exist: use Regenerate to change this prompt")
             if _busy(item, "enhance", "generate"):
@@ -117,7 +117,7 @@ def _outcome(studio: Studio, ctx: ProjectContext, batch_id: str, item_id: str, f
 
 def enqueue_enhance(studio: Studio, ctx: ProjectContext, batch_id: str, req: EnhanceRequest) -> dict[str, Any]:
     ctx.require_writable()
-    load_batch(ctx.store, batch_id)
+    load_job(ctx.store, batch_id)
     eligible, skipped = [], []
     for iid in req.item_ids:
         item, _ = load_item(ctx.store, batch_id, iid)
@@ -137,7 +137,7 @@ def enqueue_enhance(studio: Studio, ctx: ProjectContext, batch_id: str, req: Enh
     return {"operation": op.public(), "skipped": skipped}
 
 
-def _generation_affinity(studio: Studio, ctx: ProjectContext, item: BatchItem) -> tuple[str, dict[str, Any]]:
+def _generation_affinity(studio: Studio, ctx: ProjectContext, item: JobItem) -> tuple[str, dict[str, Any]]:
     snap = ctx.store.read_snapshot(item.snapshot_sha)
     recipe = RECIPES[snap["recipe"]["id"]]
     if recipe.generation is None:
@@ -160,11 +160,13 @@ def confirm_and_generate(studio: Studio, ctx: ProjectContext, batch_id: str,
                          req: ConfirmAndGenerate) -> dict[str, Any]:
     """Human gate: binds the exact prompt revision per item, then durably queues candidate generation."""
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+    prior = studio.journal.command_result(ctx.id, "confirm_and_generate", req.idempotency_key,
+                                                 cmd_payload(req, batch_id))
+    if prior is not None:
         return prior
     results, groups = [], {}
     for c in req.items:
-        def apply(item: BatchItem, c: ConfirmItem = c) -> None:
+        def apply(item: JobItem, c: ConfirmItem = c) -> None:
             if not _prompt_open(item):
                 raise ApiError(409, "prompts_locked", "candidates exist for this prompt")
             if _busy(item, "enhance", "generate"):
@@ -185,7 +187,8 @@ def confirm_and_generate(studio: Studio, ctx: ProjectContext, batch_id: str,
     ops = [_enqueue_generate(studio, ctx, batch_id, aff, items, f"{req.idempotency_key}:{i}")
            for i, (aff, items) in enumerate(sorted(groups.items()))]
     response = {"results": results, "operations": ops}
-    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
+    studio.journal.record_command(ctx.id, "confirm_and_generate", req.idempotency_key, cmd_payload(req, batch_id),
+                                  response)
     return response
 
 
@@ -204,7 +207,7 @@ def _enqueue_generate(studio: Studio, ctx: ProjectContext, batch_id: str, affini
 def mark_regenerate(studio: Studio, ctx: ProjectContext, batch_id: str, req: MarkRegenerate) -> list[dict[str, Any]]:
     out = []
     for r in req.items:
-        def apply(item: BatchItem) -> None:
+        def apply(item: JobItem) -> None:
             if item.current_set is None:
                 raise ApiError(409, "no_candidates", "nothing to regenerate yet")
             if item.accepted_build is not None or _busy(item, "build", "generate"):
@@ -219,13 +222,15 @@ def mark_regenerate(studio: Studio, ctx: ProjectContext, batch_id: str, req: Mar
 def regenerate(studio: Studio, ctx: ProjectContext, batch_id: str, req: Regenerate) -> dict[str, Any]:
     """New prompt revision (confirmed by this submission) + new candidate set for the selected rows only."""
     ctx.require_writable()
-    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+    prior = studio.journal.command_result(ctx.id, "regenerate", req.idempotency_key,
+                                                 cmd_payload(req, batch_id))
+    if prior is not None:
         return prior
     results, groups = [], {}
     for r in req.items:
         holder: dict[str, str] = {}
 
-        def apply(item: BatchItem, r: RegenItem = r, holder: dict[str, str] = holder) -> None:
+        def apply(item: JobItem, r: RegenItem = r, holder: dict[str, str] = holder) -> None:
             if item.current_set is None:
                 raise ApiError(409, "no_candidates", "nothing to regenerate yet")
             if item.accepted_build is not None or _busy(item, "build", "generate", "enhance"):
@@ -252,5 +257,6 @@ def regenerate(studio: Studio, ctx: ProjectContext, batch_id: str, req: Regenera
     ops = [_enqueue_generate(studio, ctx, batch_id, aff, items, f"{req.idempotency_key}:{i}")
            for i, (aff, items) in enumerate(sorted(groups.items()))]
     response = {"results": results, "operations": ops}
-    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
+    studio.journal.record_command(ctx.id, "regenerate", req.idempotency_key, cmd_payload(req, batch_id),
+                                  response)
     return response

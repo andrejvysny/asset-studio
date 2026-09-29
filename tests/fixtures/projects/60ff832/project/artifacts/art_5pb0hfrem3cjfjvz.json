@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "art_5pb0hfrem3cjfjvz",
+  "role": "model",
+  "sha256": "f8434c1f88d735420dc026679d17f73f9af6665e3304113f7682057ebcac4324",
+  "size": 29504,
+  "mime": "model/gltf-binary",
+  "meta": {
+    "exporter": "clean"
+  },
+  "lineage": [
+    "art_qkxsgwca7k4svd5v"
+  ],
+  "created_at": "2026-09-29T12:58:29.014Z",
+  "retention": "essential",
+  "source": {
+    "export": {
+      "exporter": "clean",
+      "faces_out": 1280,
+      "decimation_target": 100000,
+      "texture_size": 64,
+      "remesh": false,
+      "simulated": true,
+      "licence": "SIMULATED",
+      "limitations": []
+    }
+  }
+}

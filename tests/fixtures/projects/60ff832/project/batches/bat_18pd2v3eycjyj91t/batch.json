@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "bat_18pd2v3eycjyj91t",
+  "alias": "b-0002",
+  "title": "fixture sprites",
+  "kind": "sprite",
+  "recipe_id": "sprite.default",
+  "category_id": "sprites",
+  "created_at": "2026-09-29T12:58:25.929Z",
+  "seed_family": 3205956142413614,
+  "item_ids": [
+    "itm_2bp4nvrpwm2aamyr",
+    "itm_tgmdjg2m62pd5eeg"
+  ],
+  "source": "ad hoc",
+  "config_revision": 2,
+  "revision": 1
+}
