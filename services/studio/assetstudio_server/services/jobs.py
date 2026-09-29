@@ -9,7 +9,7 @@ from assetstudio_core.domain import AssetFamily, BuildRun, Job, JobItem, ShotIte
 from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import ResolutionError, build_snapshot
 from assetstudio_core.kinds import KINDS, Kind
-from assetstudio_core.lifecycle import aggregate, next_action
+from assetstudio_core.lifecycle import aggregate, next_action, progress
 from assetstudio_core.recipes import RECIPES, legacy_variant
 from assetstudio_storage.families import family_key
 from assetstudio_storage.project import job_descriptor_key
@@ -202,7 +202,8 @@ def job_summary(studio: Studio, ctx: ProjectContext, job: Job,
     cat = ctx.config()[0].category(job.category_id) if job.category_id else None
     snap = ctx.store.read_snapshot(items[0].snapshot_sha) if items else None
     return {"id": job.id, "alias": job.alias, "title": job.title, "kind": job.kind.value,
-            "kind_label": KINDS[job.kind].label, "recipe_id": job.recipe_id, "category_id": job.category_id,
+            "kind_label": KINDS[job.kind].label, "build_label": KINDS[job.kind].build_label,
+            "recipe_id": job.recipe_id, "category_id": job.category_id,
             "category_label": cat.label if cat else None, "created_at": job.created_at, "source": job.source,
             "counts": agg["counts"], "by_stage": agg["by_stage"], "current_tab": agg["current_tab"],
             "waiting_on_user": agg["waiting_on_user"], "next_action": next_action(agg),
@@ -210,7 +211,8 @@ def job_summary(studio: Studio, ctx: ProjectContext, job: Job,
             "legacy_recipe": legacy_variant(snap) if snap else None, "archived_at": job.archived_at,
             "variant": job.variant, "direct": job.direct, "family": _family_ref(ctx, job),
             "batch": (batches if batches is not None else batch_index(ctx)).get(job.id),
-            "rounds": len(items[0].candidate_sets) if len(items) == 1 else 0}
+            "rounds": len(items[0].candidate_sets) if len(items) == 1 else 0,
+            "progress": progress(agg, len(items[0].candidate_sets) if items else 0, KINDS[job.kind].build_label)}
 
 
 def list_jobs(studio: Studio, ctx: ProjectContext) -> list[dict[str, Any]]:

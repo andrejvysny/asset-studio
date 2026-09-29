@@ -123,3 +123,41 @@ def next_action(agg: dict) -> str:
     if s["publish"]:
         return f"publish {s['publish']}"
     return "done"
+
+
+_STAGE_INDEX = {"prompts": 0, "candidates": 1, "approve": 2, "build": 3, "publish": 4, "done": 5, "cancelled": 5}
+_TAB = {"prompts": 0, "candidates": 0, "approve": 0, "build": 1, "publish": 2, "done": 2, "cancelled": 0}
+
+
+def _progress_label(s: dict, rounds: int, build_label: str) -> tuple[str, str]:
+    """(label, state) in the design's words. state: wait | run | bad | draft | done."""
+    st = s["state"]
+    table = {
+        "published": ("Published", "done"), "cancelled": ("Cancelled", "done"),
+        "publishing": ("Publishing…", "run"), "ready to publish": ("Publish", "wait"),
+        "building": (f"Building {build_label}…", "run"), "ready for final review": (f"Accept {build_label}", "wait"),
+        "approved": (f"Build {build_label}", "wait"), "ready to transform": ("Run transform", "wait"),
+        "generating": (f"Generating R{rounds + 1}…", "run"), "not generated": ("Generate candidates", "wait"),
+        "generation failed": ("Retry generation", "bad"), "QA running": ("QA running…", "run"),
+        "undecided": ("Approve a candidate", "wait"), "marked for regeneration": ("Regenerate", "wait"),
+        "enhancing": ("Enhancing prompt…", "run"), "brief only": ("Draft · not run", "draft"),
+        "enhance failed": ("Retry enhance", "bad"), "edited": ("Confirm prompt", "wait"),
+        "confirmed": ("Confirm prompt", "wait"),
+    }
+    if st in table:
+        return table[st]
+    if s.get("failed"):
+        return (f"Retry {build_label}", "bad")
+    return (st, "wait" if s.get("waiting_on_user") else "run" if s.get("busy") else "draft")
+
+
+def progress(agg: dict, rounds: int, build_label: str) -> dict:
+    """Design pills: 5 stages (prompt, cands, approve, build, publish) + the next action of the least advanced
+    live item. A one-item Job (design: one Job = one asset) shows exactly its item."""
+    stages = [s for s in agg["item_stages"].values() if s["stage"] != "cancelled"] or list(
+        agg["item_stages"].values())
+    if not stages:
+        return {"stage": 0, "state": "draft", "label": "Empty", "tab": 0}
+    s = min(stages, key=lambda x: _STAGE_INDEX[x["stage"]])
+    label, state = _progress_label(s, rounds, build_label)
+    return {"stage": _STAGE_INDEX[s["stage"]], "state": state, "label": label, "tab": _TAB[s["stage"]]}

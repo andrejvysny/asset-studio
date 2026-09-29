@@ -143,7 +143,7 @@ export interface Counts { items: number; prompts: number; confirmed: number; can
   to_transform: number }
 /** A Job: a configured production workflow of one or more items (formerly called a batch). */
 export interface JobSummary {
-  id: string; alias: string; title: string; kind: Kind; kind_label: string; recipe_id: string;
+  id: string; alias: string; title: string; kind: Kind; kind_label: string; build_label: string; recipe_id: string;
   category_id: string | null; category_label: string | null; created_at: string; source: string; counts: Counts;
   by_stage: Record<string, number>; current_tab: string; waiting_on_user: boolean; next_action: string;
   active_run: string | null; legacy: boolean; legacy_recipe: string | null;
@@ -159,7 +159,11 @@ export interface JobSummary {
   /** Number of candidate rounds; only computed for single-item Jobs (0 otherwise, including variant Jobs before
    *  their first generation). */
   rounds: number;
+  /** Design pills: stage 0..5 (prompt, cands, approve, build, publish, done) of the least advanced live item. */
+  progress: JobProgress;
 }
+export type ProgressState = "wait" | "run" | "bad" | "draft" | "done";
+export interface JobProgress { stage: number; state: ProgressState; label: string; tab: number }
 export interface Stage { tag: string; name: string; backend: string }
 export interface JobDetail extends JobSummary {
   seed_family: number; config_revision: number; locked_template: string; items: ItemView[];
