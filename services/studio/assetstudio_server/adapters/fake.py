@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from assetstudio_core.canonical import sha256_json
@@ -132,13 +134,18 @@ class FakeEngine:
 
 
 class _FakeLease:
-    """In-process mirror of services/worker_common/lease.py semantics (epoch fencing + drain on unload)."""
+    """In-process mirror of services/worker_common/lease.py semantics (epoch fencing + drain on unload).
+
+    `activity()` counts in-flight GPU work; `drain` stops admitting and waits up to `drain_timeout` seconds for
+    it to finish before acknowledging (0 = refuse immediately while work is active)."""
 
     def __init__(self) -> None:
         self.session_id = f"fake-{id(self):x}"
         self.epoch, self.admitting, self.active = 0, False, 0
         self.unload_response: dict[str, Any] | Exception | None = None
         self.lease_error: Exception | None = None
+        self.drain_timeout = 0.0
+        self._cond = threading.Condition(threading.RLock())
 
     def lease(self, epoch: int) -> dict[str, Any]:
         if self.lease_error is not None:
@@ -156,15 +163,28 @@ class _FakeLease:
         if epoch != self.epoch or not self.admitting:
             raise EngineUnavailable(f"stale_lease: epoch {epoch} is not admitted ({self.epoch})")
 
+    @contextmanager
+    def activity(self, epoch: int) -> Iterator[None]:
+        with self._cond:
+            self.check(epoch)
+            self.active += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self.active -= 1
+                self._cond.notify_all()
+
     def drain(self, owner_token: str, epoch: int) -> dict[str, Any]:
         if isinstance(self.unload_response, Exception):
             raise self.unload_response
         if self.unload_response is not None:
             return self.unload_response
-        self.epoch, self.admitting = max(self.epoch, epoch), False
-        if self.active:
-            raise AckError("GPU work still active")
-        return {**self.info(), "loaded": False, "owner_token": owner_token}
+        with self._cond:
+            self.epoch, self.admitting = max(self.epoch, epoch), False
+            if not self._cond.wait_for(lambda: self.active == 0, timeout=self.drain_timeout):
+                raise AckError("GPU work still active")
+            return {**self.info(), "loaded": False, "owner_token": owner_token}
 
 
 _FAKE_VARIANTS = [
@@ -186,6 +206,7 @@ class FakeAux:
         self.loads: dict[str, int] = {"vlm": 0, "birefnet": 0}
         self.calls: list[str] = []
         self.vlm_answers: dict[str, Any] | None = None
+        self.during_compare: Callable[[int], None] | None = None  # test hook: called with the compare ordinal
         self.gpu = _FakeLease()
 
     @property
@@ -234,6 +255,13 @@ class FakeAux:
                 epoch: int, execution_id: str | None = None) -> dict[str, Any]:
         self._use("vlm", epoch)
         self.calls.append("compare")
+        with self.gpu.activity(epoch):
+            if self.during_compare is not None:
+                self.during_compare(len([c for c in self.calls if c == "compare"]))
+            return self._compare(images, questions, execution_id)
+
+    def _compare(self, images: list[tuple[bytes, str, str]], questions: list[tuple[str, str]],
+                 execution_id: str | None) -> dict[str, Any]:
         src = next((b for b, label, _ in images if label == "source"), None)
         cand = next((b for b, label, _ in images if label == "candidate"), None)
         checks: dict[str, bool | str] = {}

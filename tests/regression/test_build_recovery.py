@@ -114,6 +114,23 @@ def test_lost_execution_is_labelled_not_silently_rerun(make_api, tmp_path) -> No
     assert w.calls.count("generate") == 1  # the explicit next step is a new build, not an automatic resubmit
 
 
+def test_retry_issued_between_block_and_backoff_registration_is_not_delayed(make_api, tmp_path, monkeypatch) -> None:
+    """Flake root cause: an explicit retry landing after the block committed but before the lane recorded its
+    backoff was treated as "before the block" and sat out RETRY_BLOCKED_S. Widen that window deterministically."""
+    import time
+
+    from assetstudio_server.coordinator import runner
+
+    orig = runner.Coordinator._run_task
+
+    def slow(self, t):  # noqa: ANN001, ANN202
+        out = orig(self, t)
+        time.sleep(0.3)
+        return out
+    monkeypatch.setattr(runner.Coordinator, "_run_task", slow)
+    test_lost_execution_is_labelled_not_silently_rerun(make_api, tmp_path)
+
+
 def test_reexport_target_beats_category_max(make_api, tmp_path) -> None:
     """RI18 (H12): an explicit re-export target overrides the category-derived default; min/max stay advisory."""
     api, w = _api(make_api, tmp_path)

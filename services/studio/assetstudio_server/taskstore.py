@@ -278,9 +278,10 @@ class TaskStore:
             self._set(task_id, ("running",), state, result=result, error=error)
             return state
 
-    def complete(self, task_id: str, result: dict[str, Any], downstream: list[NewTask]) -> str:
+    def complete(self, task_id: str, result: dict[str, Any], downstream: list[NewTask] | None) -> str:
         """running -> succeeded AND its downstream tasks, in ONE transaction: there is never a moment where the
-        upstream is done but its required follow-up does not exist. A pending cancel wins (nothing downstream)."""
+        upstream is done but its required follow-up does not exist. A pending cancel wins (nothing downstream).
+        `downstream=None` means the follow-up could not be planned: the task is left for reconciliation."""
         with self.txn() as db:
             row = db.execute("SELECT state, control, command_id FROM stage_tasks WHERE id=?", (task_id,)).fetchone()
             if row is None or row["state"] != "running":
@@ -290,7 +291,7 @@ class TaskStore:
                            (json.dumps({"code": "cancelled", "message": "cancelled by operator"}), now_iso(),
                             task_id))
                 return "cancelled"
-            ok = 1
+            ok = 0 if downstream is None else 1
             if downstream:
                 try:
                     self.create(downstream, row["command_id"], db)
@@ -348,6 +349,12 @@ class TaskStore:
         """Never assume work stopped or finished because this process restarted: running tasks are requeued
         (handlers reconcile engine work by deterministic ids); pending cancellations complete as cancelled."""
         with self._lock:
+            # Engine work a crashed process had in flight for a task whose cancel was pending: the caller asks the
+            # engine to stop exactly these prompts (never a global interrupt).
+            orphans = [{"id": r["id"], "stage": r["stage"], "progress": json.loads(r["progress"] or "{}")}
+                       for r in self._db.execute(
+                           "SELECT id, stage, progress FROM stage_tasks WHERE state IN ('running','reconciling') "
+                           "AND control='cancel_requested'").fetchall()]
             c = self._db.execute(
                 "UPDATE stage_tasks SET state='cancelled', error=?, updated_at=? WHERE state IN "
                 "('running','reconciling','queued','blocked') AND control='cancel_requested'",
@@ -357,7 +364,7 @@ class TaskStore:
                 "UPDATE stage_tasks SET state='queued', progress=json_set(progress, '$.reconciled_after_restart', 1), "
                 "updated_at=? WHERE state IN ('running','reconciling')", (now_iso(),)).rowcount
             self.changed.notify_all()
-        return {"cancelled": c, "requeued": r}
+        return {"cancelled": c, "requeued": r, "orphans": orphans}
 
     def pending_downstream(self) -> list[StageTask]:
         with self._lock:

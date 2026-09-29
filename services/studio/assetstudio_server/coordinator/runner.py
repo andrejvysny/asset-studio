@@ -25,6 +25,7 @@ from .errors import Blocked, Cancelled, ItemFailed, classify
 log = logging.getLogger("assetstudio.coordinator")
 LANES = ("gpu0", "gpu1", "cpu")
 RETRY_BLOCKED_S = 20.0
+BACKOFF_SLACK_S = 0.01  # wall-clock ms truncation + wall/monotonic conversion jitter
 # Automatic retries of transiently blocked work are bounded (no hidden infinite retry).
 MAX_AUTO_ATTEMPTS = 6
 MAX_AUTO_RETRY_S = 2 * 3600.0
@@ -96,10 +97,28 @@ class Coordinator:
         self._pick_lock = threading.Lock()
 
     # --- lifecycle ------------------------------------------------------------------------------------------
+    def _cancel_orphaned_prompts(self, orphans: list[dict[str, Any]]) -> None:
+        """Cancelled-while-down generation tasks: stop their own unfinished engine prompts by exact id."""
+        engine = self.studio.engine
+        if engine is None:
+            return
+        for t in orphans:
+            if t["stage"] != "generate":
+                continue
+            for slot in (t["progress"].get("engine") or {}).values():
+                if isinstance(slot, dict) and slot.get("prompt_id") and "artifact_id" not in slot:
+                    try:
+                        engine.cancel(slot["prompt_id"])
+                    except Exception as e:  # noqa: BLE001 - unknown outcome: logged, the prompt id stays recorded
+                        log.warning("cancel of orphaned prompt %s (task %s) not confirmed: %s",
+                                    slot["prompt_id"], t["id"], e)
+
     def start(self) -> None:
         rec = self.studio.journal.tasks.recover_after_restart()
+        orphans = rec.pop("orphans", [])
         if rec["requeued"] or rec["cancelled"]:
             log.warning("restart reconciliation: %s", rec)
+        self._cancel_orphaned_prompts(orphans)
         from .reconcile import reconcile_on_start
 
         reconcile_on_start(self.studio)
@@ -145,7 +164,7 @@ class Coordinator:
         until = self._blocked_until.get(residency)
         if until is None or until <= time.monotonic():
             return False
-        since = until - RETRY_BLOCKED_S
+        since = until - RETRY_BLOCKED_S - BACKOFF_SLACK_S
         return all(time.monotonic() - _age_s(t.updated_at) <= since for t in group)
 
     def _eligible(self, residency: str, group: list[StageTask]) -> bool:
@@ -217,12 +236,15 @@ class Coordinator:
             if not tasks.claim(t.id, pid):
                 continue
             self._current[lane]["task"] = t.id
+            task_started = time.monotonic()  # the block began no earlier than this (see _backing_off)
             _, resource_blocked = self._run_task(t)
             done.append(t.id)
             if t.job_id not in jobs and not is_id(t.job_id, "vdr"):  # variant drafts are not Jobs
                 jobs.append(t.job_id)
             if resource_blocked:
-                self._blocked_until[residency] = time.monotonic() + RETRY_BLOCKED_S
+                # Anchored at the task start, not at now: a retry queued right after the block is committed but
+                # before this line runs must still count as "after the block" and bypass the backoff.
+                self._blocked_until[residency] = task_started + RETRY_BLOCKED_S
                 reason = "resource_unavailable"
                 break
             if time.monotonic() - started > self.limits.max_pass_wall_s:
@@ -273,11 +295,12 @@ class Coordinator:
             return final, resource
         from .reconcile import downstream_for
 
+        follow: list[Any] | None
         try:
             follow = downstream_for(self.studio, ctx, t, result)
-        except Exception:  # the result stays; startup reconciliation creates the follow-up later
+        except Exception:  # the result stays; None leaves downstream_ok=0 so startup reconciliation creates it
             log.exception("planning downstream of %s failed", t.id)
-            follow = []
+            follow = None
         final = tasks.complete(t.id, result, follow)
         self._publish(t)
         return final, False

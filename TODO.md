@@ -36,13 +36,13 @@ Baseline: lint clean, 130 tests pass.
 - [x] generate stage edit mode (source-conditioned, never sibling), rounds (approve from any set)
 - [x] variant QA dims (resemblance/change/style), diversity report on selection, final sizing after rebuild
 - [x] build modes retry/resample/rebuild; final sizing after rebuild
-- [ ] recovery tests VR01–VR08, scheduling VS01–VS04 (after UI; GPU run)
+- [x] recovery VR01–VR08 (+VR06b orphan prompt cancel), scheduling VS01–VS04, migration VM01–VM03; fixes: lost QA downstream, cancelled generate re-run, backoff race (flaky test), orphaned prompt cancel
 - [x] 2026-09-29 owner request: consolidated all projects into Demo 3D (6 assets republished w/ provenance; 4 projects removed; backups ~/assetstudio-backups/2026-09-29-consolidate)
 ## Phase F — UI to design v2 + delivery
-- [ ] Assets group-by-family + family filter; Asset detail family/derivation + New variant/Create variants
-- [ ] Create variants wizard; Job detail (3 tabs, rounds, refs, variant card, direct card, retry menu, stepper)
-- [ ] Jobs list (group-by, pills, batch/rnd, run standalone); Batches (new, gates, 3-tab detail inline review)
-- [ ] New Job single asset; Shot list one Job per row + Batch toggle
+- [x] Assets group-by-family + family filter; Asset detail family/derivation + New variant/Create variants
+- [x] Create variants wizard; Job detail (3 tabs, rounds, refs, variant card, direct card, retry menu, stepper)
+- [x] Jobs list (group-by, pills, batch/rnd, run standalone); Batches (new, gates, 3-tab detail inline review)
+- [x] New Job single asset; Shot list one Job per row + Batch toggle
 - [ ] e2e, docs (SPEC, README, architecture, acceptance), real GPU acceptance (pine + non-plant + icon + direct)
 
 ---

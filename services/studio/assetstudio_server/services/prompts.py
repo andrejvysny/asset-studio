@@ -235,6 +235,18 @@ def _confirm_units(studio: Studio, ctx: ProjectContext, job_id: str | None, item
     return {"units": units, "results": results}
 
 
+def _generate_task(studio: Studio, ctx: ProjectContext, u: dict[str, Any], wave_id: str | None, cid: str) -> Any:
+    """Generation for a confirmed prompt. A cancelled attempt is never resurrected (its engine prompt ids belong to
+    it), so re-confirming after a cancel starts a NEW task keyed by this command; replays stay idempotent."""
+    def make(key: str) -> Any:
+        return new_task(studio, STAGES["generate"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
+                        input_key=key, inputs={"prompt_revision_id": u["prompt_revision_id"]},
+                        run_id=u["run_id"], wave_id=wave_id, resident=u["residency"])
+    first = make(u["prompt_revision_id"])
+    prior = studio.journal.tasks.get(first.id)
+    return make(f"{u['prompt_revision_id']}|{cid}") if prior is not None and prior.state == "cancelled" else first
+
+
 @commands.replayable("confirm_and_generate")
 def _confirm_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
     """Bind each exact prompt revision (idempotent), then create its generation task (idempotent by key)."""
@@ -249,9 +261,7 @@ def _confirm_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], 
         if not r["ok"]:
             results[(u["job_id"], u["item_id"])] = r
             continue
-        t = new_task(studio, STAGES["generate"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
-                     input_key=u["prompt_revision_id"], inputs={"prompt_revision_id": u["prompt_revision_id"]},
-                     run_id=u["run_id"], wave_id=plan.get("wave_id"), resident=u["residency"])
+        t = _generate_task(studio, ctx, u, plan.get("wave_id"), cid)
         try:
             tasks += studio.journal.tasks.create([t], cid)
         except Busy as e:
