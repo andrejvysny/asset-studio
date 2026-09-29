@@ -114,12 +114,31 @@ Mapping to the spec's acceptance IDs (test names are in `tests/`):
 Defects found and fixed by the recovery/scheduling/migration tests: lost QA downstream planning, cancelled generation
 re-run, backoff race (flaky test), orphaned engine prompt on cancel (see TODO.md Phase E).
 
-### GPU acceptance (variants) — results pending
+### GPU acceptance (variants) — 2026-09-29, 2x RTX 4090, project Demo 3D
 
-**Placeholder: being run now; nothing below is a result.** Planned scenarios: pine (3D reconstruction), non-plant 3D
-asset, icon, direct transform; conditioning canary, VRAM/RAM, offline, T2I↔edit switch (VG01–VG12). Until this section
-holds recorded results, generative variants stay labelled "experimental". Only the pre-acceptance spike is recorded
-(SPEC.md decision record): conditioning verified, ~130 s/edit at 1024², GPU0 peak ~24.07 of 24.56 GB.
+`tests/gpu/test_variants.py`: **5 passed in 5067 s** (real engines; evidence in `tests/gpu/artifacts/variants/`, git-ignored:
+per-candidate PNGs, contact sheets, QA summaries, final previews, diversity reports, `evidence.json`, `passes.json`,
+1 s GPU/RAM samples).
+
+| Scenario | Result |
+|---|---|
+| Pine: VLM-suggested plan, 6 rows x 4 candidates (24 edits), 6 TRELLIS.2 builds, publish | pass: 6 derived assets in the pine family, derivation.source = exact pine version, pine versions unchanged |
+| Crate (non-plant): 2 manual rows x 2 candidates, build, publish | pass (functional); one approved candidate was a near-copy of the source — see finding |
+| Icon (2D): 2 rows x 2 candidates, cut-out + sizes, publish | pass: icon_32/64/128/256 + image published |
+| Direct transform (Treasure chest): 1.2 m bottom_center + 0.5x | pass: cpu lane only, 0 ComfyUI prompts, 0 worker3d executions, preservation checks ok, 6.9 s |
+| T2I after edit passes (switch edit→T2I→edit) | pass: T2I workflow unaffected; 2 gpu0 model switches total |
+| `make acceptance-offline` | pass (simulated Studio: browser makes no off-host requests; NOT an egress-blocked run of the edit model) |
+
+Numbers: edit ≈123 s/candidate (1024², 40 steps); TRELLIS.2 sample ≈74 s + bake ≈14 s per build in grouped passes;
+GPU0 peak 24072/24564 MiB (98 %, no headroom); GPU1 peak 20153 MiB; host RAM peak 104 GB (ComfyUI container 31 → 52 GB
+with both GPU0 models cached); ComfyUI model loads: unavailable (engine reports none). Conditioning: every candidate's
+recorded conditioning sha256 = the plan's frozen primary reference, output differs from it.
+
+Finding fixed after the run: a candidate failing `variant_change` could still be "recommended" (the check was minor), so
+first-recommended selection published a source clone. `variant_change` is now a major advisory check (not recommended,
+still overridable). Remaining: diversity flagged 5 of 6 pine picks as near-duplicates (advisory, selection is manual);
+subtle rows (compact/narrow/tall) vary modestly. Generative variants stay **experimental** until an egress-blocked run
+of the edit model (spec §8.5) is recorded.
 
 ## Known limitations (this release)
 

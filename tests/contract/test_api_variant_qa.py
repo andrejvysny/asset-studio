@@ -73,7 +73,7 @@ def test_vq01_variant_candidates_get_comparison_checks(make_api) -> None:
         res = _results(cand)
         for rid in ("variant_resemblance", "variant_change", "variant_single_object"):
             assert res[rid]["result"] == "pass" and res[rid]["reason"] and res[rid]["source"] == "vlm_compare"
-            assert res[rid]["severity"] == "minor" and res[rid]["evaluator"] == "simulated"
+            assert res[rid]["severity"] == ("major" if rid == "variant_change" else "minor") and res[rid]["evaluator"] == "simulated"
         assert res["variant_style"]["result"] == "not_applicable"  # no project style guide text
         assert cand["qa"]["status"] == "recommended"
     ctx = api.studio.registry.get(pid)

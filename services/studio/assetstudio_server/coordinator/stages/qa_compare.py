@@ -70,14 +70,24 @@ def compare_needed(job: Job, item: JobItem) -> bool:
     return is_generative_variant(job) or bool(item.references)
 
 
+# A variant that does not show its requested change is not a verified variant (GPU acceptance published a source
+# clone as "recommended" when this was minor). Major = not recommended; still overridable, never a hard block.
+MAJOR_CHECKS = frozenset({"variant_change"})
+
+
+def _severity(check_id: str) -> str:
+    return "major" if check_id in MAJOR_CHECKS else "minor"
+
+
 def compare_rules(checks: list[Check]) -> list[QaRule]:
-    """Synthetic advisory rules (minor: a failed comparison can lower the recommendation, never block approval)."""
-    return [QaRule(id=c.id, source="vlm", severity="minor", question=c.question[:500])
+    """Synthetic advisory rules: a failed comparison lowers the recommendation, never blocks approval."""
+    return [QaRule(id=c.id, source="vlm", severity=_severity(c.id), question=c.question[:500])  # type: ignore[arg-type]
             for c in checks]
 
 
 def _result(c: Check, result: str, reason: str, model: str, observed: Any = None) -> CheckResult:
-    return CheckResult(rule_id=c.id, source="vlm_compare", severity="minor", result=result,  # type: ignore[arg-type]
+    return CheckResult(rule_id=c.id, source="vlm_compare", severity=_severity(c.id),  # type: ignore[arg-type]
+                       result=result,  # type: ignore[arg-type]
                        reason=reason[:300], observed=observed, evaluator=model)
 
 
