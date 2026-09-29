@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.domain import BuildRun, Job, JobItem, ShotItem
+from assetstudio_core.domain import AssetFamily, BuildRun, Job, JobItem, ShotItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import ResolutionError, build_snapshot
 from assetstudio_core.kinds import KINDS, Kind
 from assetstudio_core.lifecycle import aggregate, item_stage, next_action
 from assetstudio_core.recipes import RECIPES, legacy_variant
+from assetstudio_storage.families import family_key
 from assetstudio_storage.project import job_descriptor_key
 from pydantic import BaseModel, Field
 
@@ -113,28 +114,37 @@ def _seed() -> int:
     return new_seed_family()
 
 
+def write_job(ctx: ProjectContext, plan: dict[str, Any]) -> None:
+    """Idempotent save of one Job + its items + snapshots from a frozen plan (no events, nothing queued).
+    Optional plan keys: `variant` (Job.variant dict) and `direct` (bool)."""
+    job_id = plan["job_id"]
+    if ctx.store.repo.stat_object(job_descriptor_key(job_id)) is not None:
+        return
+    now = now_iso()
+    with ctx.store.lock:
+        for it in plan["items"]:
+            snap = it["snapshot"]
+            ctx.store.save_snapshot(snap)
+            item = JobItem(id=it["id"], job_id=job_id, name=it["name"], brief=it["brief"],
+                           category_id=it["category_id"], shot_id=it["shot_id"],
+                           target_asset_id=it["target_asset_id"], snapshot_sha=snap["sha256"], created_at=now,
+                           updated_at=now)
+            if ctx.store.repo.stat_object(item_key(job_id, item.id)) is None:
+                ctx.store.create(item_key(job_id, item.id), item)
+        recipe = RECIPES[plan["recipe_id"]]
+        job = Job(id=job_id, alias=f"J-{len(job_ids(ctx)) + 1:04d}", title=plan["title"], kind=recipe.kind,
+                  recipe_id=recipe.id, category_id=plan["category_id"], created_at=now,
+                  seed_family=plan["seed_family"], item_ids=[i["id"] for i in plan["items"]],
+                  source=plan["source"], config_revision=plan["config_revision"],
+                  variant=plan.get("variant"), direct=plan.get("direct", False))
+        ctx.store.create(job_descriptor_key(job_id), job)
+
+
 @commands.replayable("job_create")
 def _create_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
     """Save only. Every id is derived from the command: a replay writes the same Job, never a second one."""
     job_id = plan["job_id"]
-    if ctx.store.repo.stat_object(job_descriptor_key(job_id)) is None:
-        now = now_iso()
-        with ctx.store.lock:
-            for it in plan["items"]:
-                snap = it["snapshot"]
-                ctx.store.save_snapshot(snap)
-                item = JobItem(id=it["id"], job_id=job_id, name=it["name"], brief=it["brief"],
-                               category_id=it["category_id"], shot_id=it["shot_id"],
-                               target_asset_id=it["target_asset_id"], snapshot_sha=snap["sha256"], created_at=now,
-                               updated_at=now)
-                if ctx.store.repo.stat_object(item_key(job_id, item.id)) is None:
-                    ctx.store.create(item_key(job_id, item.id), item)
-            recipe = RECIPES[plan["recipe_id"]]
-            job = Job(id=job_id, alias=f"J-{len(job_ids(ctx)) + 1:04d}", title=plan["title"], kind=recipe.kind,
-                      recipe_id=recipe.id, category_id=plan["category_id"], created_at=now,
-                      seed_family=plan["seed_family"], item_ids=[i["id"] for i in plan["items"]],
-                      source=plan["source"], config_revision=plan["config_revision"])
-            ctx.store.create(job_descriptor_key(job_id), job)
+    write_job(ctx, plan)
     studio.events.publish("job", project_id=ctx.id, job_id=job_id)
     return {"job_id": job_id, "batch_id": job_id}
 
@@ -153,12 +163,33 @@ def _builds(ctx: ProjectContext, job: Job, items: list[JobItem]) -> dict[str, Bu
     return {it.current_build: load_build(ctx.store, job.id, it.current_build)[0] for it in items if it.current_build}
 
 
-def job_summary(studio: Studio, ctx: ProjectContext, job: Job) -> dict[str, Any]:
+def batch_index(ctx: ProjectContext) -> dict[str, dict[str, str]]:
+    """job id -> grouping Batch {id, title} (first Batch that lists it)."""
+    from .runs import batch_ids, load_batch_group
+
+    out: dict[str, dict[str, str]] = {}
+    for bid in batch_ids(ctx):
+        batch = load_batch_group(ctx, bid)[0]
+        for jid in batch.job_ids:
+            out.setdefault(jid, {"id": batch.id, "title": batch.title})
+    return out
+
+
+def _family_ref(ctx: ProjectContext, job: Job) -> dict[str, str] | None:
+    fid = (job.variant or {}).get("family_id")
+    if not fid:
+        return None
+    fam = ctx.store.get_opt(family_key(fid), AssetFamily)[0]
+    return {"id": fid, "name": fam.name if fam else ""}
+
+
+def job_summary(studio: Studio, ctx: ProjectContext, job: Job,
+                batches: dict[str, dict[str, str]] | None = None) -> dict[str, Any]:
     from .runs import active_run_for
 
     items = load_items(ctx.store, job)
     tasks = {i.id: item_tasks(studio, ctx.id, i) for i in items}
-    agg = aggregate(items, _builds(ctx, job, items), tasks)
+    agg = aggregate(items, _builds(ctx, job, items), tasks, job.direct)
     cat = ctx.config()[0].category(job.category_id) if job.category_id else None
     snap = ctx.store.read_snapshot(items[0].snapshot_sha) if items else None
     return {"id": job.id, "alias": job.alias, "title": job.title, "kind": job.kind.value,
@@ -167,20 +198,34 @@ def job_summary(studio: Studio, ctx: ProjectContext, job: Job) -> dict[str, Any]
             "counts": agg["counts"], "by_stage": agg["by_stage"], "current_tab": agg["current_tab"],
             "waiting_on_user": agg["waiting_on_user"], "next_action": next_action(agg),
             "active_run": active_run_for(studio, ctx, job.id), "legacy": job.id.startswith("bat_"),
-            "legacy_recipe": legacy_variant(snap) if snap else None, "archived_at": job.archived_at}
+            "legacy_recipe": legacy_variant(snap) if snap else None, "archived_at": job.archived_at,
+            "variant": job.variant, "direct": job.direct, "family": _family_ref(ctx, job),
+            "batch": (batches if batches is not None else batch_index(ctx)).get(job.id),
+            "rounds": len(items[0].candidate_sets) if len(items) == 1 else 0}
 
 
 def list_jobs(studio: Studio, ctx: ProjectContext) -> list[dict[str, Any]]:
-    out = [job_summary(studio, ctx, load_job(ctx.store, j)[0]) for j in job_ids(ctx)]
+    batches = batch_index(ctx)
+    out = [job_summary(studio, ctx, load_job(ctx.store, j)[0], batches) for j in job_ids(ctx)]
     return sorted(out, key=lambda b: b["created_at"], reverse=True)
 
 
 def _legal(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build: BuildRun | None,
-           build_available: bool) -> dict[str, bool]:
+           build_available: bool, direct: bool = False) -> dict[str, bool]:
     gen_busy = busy(tasks, "generate")
     open_prompt = item.current_set is None or item.regen_requested
     build_active = busy(tasks, "build")
+    if direct:  # no prompt, candidates or approval: one confirmed deterministic transform
+        rerunnable = build is None or build.status in ("failed", "blocked", "cancelled")
+        no = dict.fromkeys(("edit_prompt", "enhance", "confirm", "approve", "mark_regenerate", "build"), False)
+        return {**no, "run_transform": rerunnable and not build_active and item.accepted_build is None
+                and not stage_busy,
+                "accept": build is not None and build.result == "valid" and item.accepted_build is None,
+                "publish": item.accepted_build is not None and not stage_busy,
+                "retry_preview": build is not None and build.result == "valid" and build.preview == "failed"
+                and not build_active}
     return {
+        "run_transform": False,
         "edit_prompt": open_prompt and not stage_busy and item.current_prompt is not None,
         "enhance": open_prompt and not stage_busy,
         "confirm": open_prompt and not stage_busy and item.current_prompt is not None and not gen_busy,
@@ -201,7 +246,7 @@ def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, buil
     store = ctx.store
     build = load_build(store, job.id, item.current_build)[0] if item.current_build else None
     tasks = item_tasks(studio, ctx.id, item)
-    st = item_stage(item, build, tasks)
+    st = item_stage(item, build, tasks, job.direct)
     prompt = load_prompt(store, job.id, item.current_prompt) if item.current_prompt else None
     cset = load_cset(store, job.id, item.current_set) if item.current_set else None
     candidates = []
@@ -231,7 +276,7 @@ def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, buil
         "approval_detail": approval.model_dump(mode="json") if approval else None,
         "build": build.model_dump(mode="json") if build else None,
         "build_history": history,
-        "legal": _legal(item, tasks, st.busy, build, build_available),
+        "legal": _legal(item, tasks, st.busy, build, build_available, job.direct),
     }
 
 

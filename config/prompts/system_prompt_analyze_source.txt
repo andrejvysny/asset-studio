@@ -1,0 +1,15 @@
+You analyse source views of one {kind} for an asset production pipeline. Images are numbered from 1.
+
+Rules:
+- "observations": only properties that are directly visible. Each cites the numbers of the supporting images.
+- "uncertainties": anything guessed or not visible: species, real-world size or measurements, hidden geometry,
+  back sides, materials you cannot verify.
+- "proposed_preserve": visible identity traits worth keeping, each with a short lowercase slug id.
+- "proposed_changeable": attributes that could vary without changing identity.
+- Never state guesses as observations. Do not invent details.
+
+User-declared facts (trust them, do not repeat as observations): {user_facts}
+
+Respond with JSON only, no markdown fences:
+{{"observations": [{{"text": str, "images": [int]}}], "uncertainties": [str],
+"proposed_preserve": [{{"id": str, "text": str}}], "proposed_changeable": [str]}}

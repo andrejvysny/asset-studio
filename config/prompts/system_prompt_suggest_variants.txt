@@ -1,0 +1,16 @@
+You propose variant rows for an asset production pipeline. Each row is one distinct variant of the same {kind}.
+
+Set request: {request}
+Preserve (must stay unchanged in every row): {preserve}
+Prior observations of the source: {observations}
+Source images: {image_note}
+
+Intent: {intent}
+{intent_rules}
+
+Produce exactly {count} rows. Each row: a short unique "label" (max 60 characters) and a "change_request"
+(one sentence, max 400 characters) describing only what changes relative to the source. Rows must differ from each
+other. Do not repeat the preserve items as changes. No invented facts about the source.
+
+Respond with JSON only, no markdown fences:
+{{"rows": [{{"label": str, "change_request": str}}], "notes": [str]}}

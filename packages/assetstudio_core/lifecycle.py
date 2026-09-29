@@ -8,6 +8,7 @@ from .domain import BuildRun, JobItem, TaskRef
 
 StageName = Literal["prompts", "candidates", "approve", "build", "publish", "done", "cancelled"]
 TAB_ORDER: tuple[StageName, ...] = ("prompts", "candidates", "approve", "build", "publish")
+READY_TO_TRANSFORM = "ready to transform"
 ACTIVE = ("queued", "running", "cancel_requested", "reconciling")
 
 
@@ -25,8 +26,10 @@ def _task(tasks: dict[str, TaskRef], name: str) -> str | None:
     return t.state if t else None
 
 
-def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] | None = None) -> ItemStage:
-    """`tasks`: per-family task view from the journal (legacy items fall back to their recorded refs)."""
+def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] | None = None,
+               direct: bool = False) -> ItemStage:
+    """`tasks`: per-family task view from the journal (legacy items fall back to their recorded refs).
+    `direct`: deterministic transform Job: no prompt/candidate stages, the human gate is "run transform"."""
     tasks = item.tasks if tasks is None else tasks
     if item.cancelled:
         return ItemStage("cancelled", "cancelled", False, False)
@@ -47,6 +50,8 @@ def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] 
         if build.status == "succeeded" and build.result == "valid":
             return ItemStage("build", "ready for final review", True, False)
         return ItemStage("build", f"build {build.status}", True, False, failed=True)
+    if direct and item.approval is None:
+        return ItemStage("build", READY_TO_TRANSFORM, True, False)
     if item.approval is not None and not item.regen_requested:
         return ItemStage("build", "approved", True, False)
     gen = _task(tasks, "generate")
@@ -71,8 +76,9 @@ def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] 
 
 
 def aggregate(items: list[JobItem], builds: dict[str, BuildRun],
-              tasks: dict[str, dict[str, TaskRef]] | None = None) -> dict:
-    stages = {i.id: item_stage(i, builds.get(i.current_build or ""), (tasks or {}).get(i.id)) for i in items}
+              tasks: dict[str, dict[str, TaskRef]] | None = None, direct: bool = False) -> dict:
+    stages = {i.id: item_stage(i, builds.get(i.current_build or ""), (tasks or {}).get(i.id), direct)
+              for i in items}
     live = [i for i in items if not i.cancelled]
     n = len(live)
     count = {
@@ -88,6 +94,7 @@ def aggregate(items: list[JobItem], builds: dict[str, BuildRun],
         "busy": sum(1 for s in stages.values() if s.busy),
         "failed": sum(1 for s in stages.values() if s.failed),
         "cancelled": len(items) - n,
+        "to_transform": sum(1 for i in live if stages[i.id].state == READY_TO_TRANSFORM),
     }
     by_stage = {t: sum(1 for i in live if stages[i.id].stage == t) for t in (*TAB_ORDER, "done")}
     waiting = [s for i, s in stages.items() if s.waiting_on_user and not s.failed]
@@ -103,6 +110,8 @@ def next_action(agg: dict) -> str:
         return "empty"
     if c["busy"]:
         return "running…"
+    if c.get("to_transform"):
+        return "run transform"
     if s["prompts"]:
         return f"review {s['prompts']} prompts"
     if s["candidates"]:

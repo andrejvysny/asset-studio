@@ -7,7 +7,7 @@ from typing import Any
 
 from .adapters.aux import AuxClient
 from .adapters.base import AuxService, ImageEngine, Worker3dService
-from .adapters.comfyui import ComfyEngine, Workflow
+from .adapters.comfyui import ComfyEngine, WorkflowRegistry
 from .adapters.fake import FakeAux, FakeEngine, FakeWorker3d
 from .adapters.worker3d import Worker3dClient
 from .events import EventBus
@@ -47,7 +47,7 @@ def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: Aux
     settings.ensure()
     if engine is None and aux is None:
         if settings.engine == "comfyui":
-            engine = ComfyEngine(settings.comfy_url, Workflow(settings.workflows_dir, "image.t2i.qwen.bindings.yaml"))
+            engine = ComfyEngine(settings.comfy_url, WorkflowRegistry(settings.workflows_dir))
             aux = AuxClient(settings.aux_url)
             # An empty WORKER3D_URL disables 3D; otherwise its GPU1 release must be acknowledged like aux.
             worker3d = Worker3dClient(settings.worker3d_url) if settings.worker3d_url else None

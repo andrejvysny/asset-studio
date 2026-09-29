@@ -3,13 +3,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.domain import AssetManifest, BuildRun, JobItem
+from assetstudio_core.canonical import now_iso
+from assetstudio_core.domain import AssetFamily, AssetManifest, BuildRun, Job, JobItem, ReviewDecision
 from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import name_parts
+from assetstudio_core.kinds import Kind
 from assetstudio_core.naming import render_name, variant_letters
 from assetstudio_core.recipes import RECIPES, legacy_variant, validate_parameters
+from assetstudio_storage.families import family_key
 from assetstudio_storage.project import manifest_key
 from assetstudio_storage.publication import name_key
+from assetstudio_storage.repo import IntegrityError, NotFound
 from pydantic import BaseModel, Field
 
 from ..coordinator.builds.common import create_run, reusable_qa_mask
@@ -20,7 +24,7 @@ from ..studio import Studio
 from ..taskstore import Busy
 from . import commands
 from .prompts import ItemRef, job_of
-from .records import load_build, load_decision, load_item, load_job
+from .records import decision_key, load_build, load_decision, load_item, load_job, mutate_item
 from .runs import active_run_for, record_wave
 from .runtime import build_readiness
 from .taskview import busy, item_tasks
@@ -59,9 +63,20 @@ class Publish(BaseModel):
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
+class RunTransform(BaseModel):
+    items: list[ItemRef] = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
 class RetryPreview(BaseModel):
     items: list[ItemRef] = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+def refuse_direct(ctx: ProjectContext, job_id: str) -> None:
+    """Direct-transform Jobs have no candidates or approvals: their only build path is run_transform."""
+    if load_job(ctx.store, job_id)[0].direct:
+        raise ApiError(422, "not_applicable", "direct transforms have no candidates; use run-transform")
 
 
 def _fail(results: list[dict[str, Any]], unit: ItemRef, jid: str | None, e: ApiError) -> None:
@@ -76,6 +91,7 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
                 run_id: str | None) -> dict[str, Any]:
     results, units, exporters = [], [], None
     if job_id is not None:  # a Job-level command on a recipe that cannot build is refused as a whole
+        refuse_direct(ctx, job_id)
         recipe = RECIPES[load_job(ctx.store, job_id)[0].recipe_id]
         gate = build_readiness(studio, recipe.id)
         if gate["state"] != "ready":
@@ -84,6 +100,7 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
         jid = None
         try:
             jid = job_of(b, job_id)
+            refuse_direct(ctx, jid)
             job, _ = load_job(ctx.store, jid)
             recipe = RECIPES[job.recipe_id]
             gate = build_readiness(studio, recipe.id)
@@ -128,6 +145,9 @@ def build_chain(studio: Studio, ctx: ProjectContext, run: BuildRun, unit: dict[s
     def add(stage: str, **kw: Any) -> None:
         deps = [out[-1].id] if out else []
         out.append(new_task(studio, STAGES[stage], deps=deps, **common, **kw))
+    if run.build.startswith("direct_"):  # deterministic CPU transform: no mask, segmentation or model stage
+        add("derive")
+        return out
     needs_mask = run.build == "model3d" or run.build == "sprite" or (
         run.build == "icon" and snap["parameters"].get("background") == "transparent")
     if run.kind == "reexport":
@@ -191,6 +211,114 @@ def build_approved(studio: Studio, ctx: ProjectContext, job_id: str | None, req:
         return {**_plan_build(studio, ctx, job_id, req, run_id), "run_id": run_id,
                 "wave_id": derived_id("wav", cid) if run_id else None}
     return commands.execute(studio, ctx, "build_approved", req.idempotency_key, body, plan)
+
+
+# --- direct transforms (variants) ------------------------------------------------------------------------------------
+def _direct_row(ctx: ProjectContext, job: Job) -> tuple[Any, Any]:
+    from .variant_jobs import load_plan
+
+    v = job.variant or {}
+    plan = load_plan(ctx, v["plan_id"])
+    row = next((r for r in plan.rows if r.id == v["row_id"]), None)
+    if plan.sha256 != v["plan_sha256"] or row is None:
+        raise ApiError(409, "stale_variant_plan", "the frozen variant plan does not match this Job")
+    return plan, row
+
+
+def _verified_source(ctx: ProjectContext, plan: Any) -> Any:
+    ref = plan.source.artifact(plan.source.primary_role)
+    if ref is None:
+        raise ApiError(409, "source_integrity_failed", f"source has no {plan.source.primary_role} artifact")
+    try:
+        art = ctx.store.verify_artifact(ref.artifact_id, use_cache=False)
+        if art.sha256 != ref.sha256:
+            raise IntegrityError("artifact hash differs from the plan")
+    except (IntegrityError, NotFound) as e:
+        raise ApiError(409, "source_integrity_failed", f"the source failed verification: {e}") from e
+    return ref
+
+
+def _transform_unit(studio: Studio, ctx: ProjectContext, jid: str, r: ItemRef, cid: str) -> dict[str, Any]:
+    job, _ = load_job(ctx.store, jid)
+    if not job.direct or job.variant is None:
+        raise ApiError(422, "not_direct", "only direct-transform Jobs run a transform")
+    item, _ = load_item(ctx.store, jid, r.item_id)
+    if item.revision != r.expected_item_revision:
+        raise ApiError(409, "stale_item", f"{item.name} changed (revision {item.revision}); reload")
+    if item.accepted_build is not None:
+        raise ApiError(409, "accepted", "a result is already accepted")
+    if busy(item_tasks(studio, ctx.id, item), "build"):
+        raise ApiError(409, "busy", "a build is already running")
+    if item.current_build and load_build(ctx.store, jid, item.current_build)[0].status not in (
+            "failed", "blocked", "cancelled"):
+        raise ApiError(409, "already_built", "this transform already has a result; review or accept it")
+    plan, row = _direct_row(ctx, job)
+    ref = _verified_source(ctx, plan)
+    transform = row.glb_transform or row.raster_transform
+    if transform is None:
+        raise ApiError(422, "not_direct", "the variant row has no transform")
+    bound = {"direct": True, "artifact_id": ref.artifact_id, "image_sha256": ref.sha256, "plan_id": plan.id,
+             "plan_sha256": plan.sha256, "row_id": row.id, "transform": transform.model_dump(mode="json"),
+             "confirm_duplicate": row.confirm_duplicate,
+             "source": {"asset_id": plan.source.asset_id, "version_id": plan.source.version_id}}
+    return {"job_id": jid, "item_id": item.id, "approval_id": derived_id("dec", cid, item.id), "bound": bound,
+            "build": "direct_glb" if plan.output_kind is Kind.model3d else "direct_raster",
+            "run_id": active_run_for(studio, ctx, jid)}
+
+
+def run_transform(studio: Studio, ctx: ProjectContext, job_id: str | None, req: RunTransform) -> dict[str, Any]:
+    """The human confirmation gate of a direct Job: binds the exact source bytes + transform, then builds."""
+    body = {"job_id": job_id, **req.model_dump(mode="json")}
+
+    def plan(cid: str) -> dict[str, Any]:
+        if job_id is not None and not load_job(ctx.store, job_id)[0].direct:
+            raise ApiError(422, "not_direct", "only direct-transform Jobs run a transform")
+        results, units = [], []
+        for r in req.items:
+            jid = None
+            try:
+                jid = job_of(r, job_id)
+                units.append(_transform_unit(studio, ctx, jid, r, cid))
+            except ApiError as e:
+                _fail(results, r, jid, e)
+                continue
+            results.append({"job_id": jid, "item_id": r.item_id, "ok": True})
+        return {"units": units, "results": results, "run_id": None, "wave_id": None,
+                "idempotency_key": req.idempotency_key}
+    return commands.execute(studio, ctx, "run_transform", req.idempotency_key, body, plan)
+
+
+def _confirm_transform(studio: Studio, ctx: ProjectContext, u: dict[str, Any], key: str) -> None:
+    jid, did = u["job_id"], u["approval_id"]
+    if ctx.store.repo.stat_object(decision_key(jid, did)) is None:
+        ctx.store.create(decision_key(jid, did), ReviewDecision(
+            id=did, gate="transform_confirmation", job_id=jid, item_id=u["item_id"], bound=u["bound"],
+            decided_at=now_iso(), idempotency_key=key, run_id=u.get("run_id")))
+
+    def apply(x: JobItem) -> None:
+        if did not in x.decisions:
+            x.decisions.append(did)
+        x.approval, x.regen_requested = did, False
+    mutate_item(studio, ctx, jid, u["item_id"], apply)
+
+
+@commands.replayable("run_transform")
+def _transform_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
+    results = {(r["job_id"], r["item_id"]): r for r in plan["results"]}
+    created: list[str] = []
+    for u in plan["units"]:
+        key = (u["job_id"], u["item_id"])
+        _confirm_transform(studio, ctx, u, plan["idempotency_key"])
+        run = create_run(studio, ctx, u["job_id"], load_item(ctx.store, *key)[0], u["approval_id"], u["build"], cid)
+        try:
+            created += studio.journal.tasks.create(build_chain(studio, ctx, run, u, plan.get("wave_id")), cid)
+        except Busy as e:
+            results[key] = {**results[key], "ok": False, "code": "busy", "message": str(e)}
+            continue
+        results[key] = {**results[key], "build_run_id": run.id, "approval_id": u["approval_id"]}
+    studio.events.publish("tasks", project_id=ctx.id)
+    return {"command_id": cid, "results": list(results.values()), "tasks": created,
+            "operation": {"id": cid, "kind": "build", "tasks": created} if created else None}
 
 
 def reexport(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Reexport) -> dict[str, Any]:
@@ -289,6 +417,17 @@ def publish_target(ctx: ProjectContext, item: JobItem, taken: set[str]) -> dict[
     raise ApiError(409, "naming_exhausted", f"no free name for {item.name}")
 
 
+def _variant_lineage(ctx: ProjectContext, job: Job) -> dict[str, Any]:
+    """Family / Derived from rows of the Publish tab (variant Jobs only)."""
+    v = job.variant
+    if v is None:
+        return {}
+    fam = ctx.store.get_opt(family_key(v["family_id"]), AssetFamily)[0]
+    return {"family": {"id": v["family_id"], "name": fam.name if fam else ""},
+            "derived_from": {"asset_id": v["source_asset_id"], "version_id": v["source_version_id"],
+                             "display_version": v["source_display_version"], "name": v["source_name"]}}
+
+
 def publish_preview(ctx: ProjectContext, job_ids: list[str]) -> list[dict[str, Any]]:
     taken: set[str] = set()
     out = []
@@ -301,7 +440,8 @@ def publish_preview(ctx: ProjectContext, job_ids: list[str]) -> list[dict[str, A
             target = publish_target(ctx, item, taken)
             taken.add(target["name_id"])
             out.append({"job_id": jid, "item_id": item.id, "name": item.name, "build_run_id": item.accepted_build,
-                        "expected_item_revision": item.revision, "published": item.published is not None, **target})
+                        "expected_item_revision": item.revision, "published": item.published is not None, **target,
+                        **_variant_lineage(ctx, job)})
     return out
 
 
@@ -324,6 +464,9 @@ def publish(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Publis
                 run, _ = load_build(ctx.store, jid, p.build_run_id)
                 if run.result != "valid":
                     raise ApiError(409, "invalid_build", "structural validation did not pass")
+                if item.published is not None and item.published.build_run_id == p.build_run_id:
+                    raise ApiError(409, "already_published", "this accepted result is already published as "
+                                   f"{item.published.asset_id} v{item.published.display_version}")
                 target = publish_target(ctx, item, taken)
                 if not target["new_asset"] and target["current_version_id"] != p.expected_current_version:
                     raise ApiError(409, "stale_pointer", "the target asset's current version changed; reload")

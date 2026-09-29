@@ -93,14 +93,23 @@ def create_batch(studio: Studio, ctx: ProjectContext, req: CreateBatch) -> dict[
                                          "batch_id": derived_id("bch", cid)})
 
 
+def write_batch_group(ctx: ProjectContext, batch_id: str, title: str, job_ids: list[str]) -> Batch:
+    """Idempotent save of a Batch group (derived id); an existing record is returned untouched."""
+    key = batch_group_key(batch_id, "batch.json")
+    with ctx.store.lock:
+        existing, _ = ctx.store.get_opt(key, Batch)
+        if existing is not None:
+            return existing
+        now = now_iso()
+        batch = Batch(id=batch_id, alias=f"B-{len(batch_ids(ctx)) + 1:03d}", title=title, job_ids=job_ids,
+                      created_at=now, updated_at=now)
+        ctx.store.create(key, batch)
+        return batch
+
+
 @commands.replayable("batch_create")
 def _batch_create(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
-    now = now_iso()
-    alias = f"B-{len(batch_ids(ctx)) + 1:03d}"
-    batch = Batch(id=plan["batch_id"], alias=alias, title=plan["title"], job_ids=plan["job_ids"], created_at=now,
-                  updated_at=now)
-    if ctx.store.repo.stat_object(batch_group_key(batch.id, "batch.json")) is None:
-        ctx.store.create(batch_group_key(batch.id, "batch.json"), batch)
+    batch = write_batch_group(ctx, plan["batch_id"], plan["title"], plan["job_ids"])
     studio.events.publish("batch", project_id=ctx.id, batch_id=batch.id)
     return {"batch_id": batch.id}
 
@@ -147,7 +156,7 @@ def active_run_for(studio: Studio, ctx: ProjectContext, job_id: str) -> str | No
     return None
 
 
-def _classify(studio: Studio, ctx: ProjectContext, item: JobItem) -> tuple[str, str]:
+def _classify(studio: Studio, ctx: ProjectContext, item: JobItem, direct: bool = False) -> tuple[str, str]:
     """(action, reason) for a run start that stops at prompt review."""
     from .taskview import busy, item_tasks
 
@@ -158,6 +167,8 @@ def _classify(studio: Studio, ctx: ProjectContext, item: JobItem) -> tuple[str, 
         return "excluded", "work already in progress for this item"
     if item.published is not None and item.accepted_build is not None:
         return "done", "published"
+    if direct:  # never enhanced or generated: waits for the human "run transform" gate
+        return "at_gate", "direct transform (no model stages)"
     if item.current_set is not None and not item.regen_requested:
         return "at_gate", "candidates awaiting review or later stages"
     if item.prompt_confirmed is not None and item.prompt_confirmed == item.current_prompt:
@@ -190,7 +201,7 @@ def plan_run(studio: Studio, ctx: ProjectContext, batch_id: str | None, job_ids:
         owner = active_run_for(studio, ctx, jid)
         entries = []
         for item in load_items(ctx.store, job):
-            action, reason = _classify(studio, ctx, item)
+            action, reason = _classify(studio, ctx, item, job.direct)
             if owner is not None:
                 action, reason = "excluded", f"managed by active run {owner}"
             entries.append({"item_id": item.id, "name": item.name, "revision": item.revision, "action": action,

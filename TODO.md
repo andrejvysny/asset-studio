@@ -17,10 +17,11 @@ Baseline: lint clean, 130 tests pass.
 - [x] processing: GLB parent-transform scale (bounds, anchors, preservation checks), raster resize/pad, single-view
       source render (no montage), tests VT01–VT08
 ## Phase B — variant drafts -> Jobs (+ direct vertical slice)
-- [ ] source binding/eligibility preflight (capabilities endpoint, reasons), source references (renders/2D prep)
-- [ ] drafts CRUD (revision), create-jobs: plan freeze, family resolve, N one-item Jobs + draft Batch, idempotent
-- [ ] direct build route (no prompt/candidates; confirmation binds numeric transform), final sizing helper
-- [ ] tests VD01–VD13, VP01–VP06, VL01–VL09, VT09–VT13 (fake engines)
+- [x] source binding/eligibility preflight (capabilities endpoint, reasons), source references (renders/2D prep)
+- [x] drafts CRUD (revision), create-jobs: plan freeze, family resolve, N one-item Jobs + draft Batch, idempotent
+- [x] direct build route (no prompt/candidates; confirmation binds numeric transform), final sizing helper
+- [x] tests VD01–VD08/VD11, VP01–VP04, VT05/VT08/VT13 (fake engines); VL via families contract
+- [x] aux v2: /enhance presets+edit+images, /compare, /analyze_source, /suggest_variants (live-smoked)
 ## Phase C — planning, references, style
 - [ ] draft-scoped VLM tasks: analyze source, suggest rows (never overwrite manual rows)
 - [ ] preserve/change contract + enforcement preview; style/source conflict + ack
@@ -28,7 +29,7 @@ Baseline: lint clean, 130 tests pass.
 ## Phase D — image editing (Qwen-Image-Edit-2511)
 - [x] lock entry qwen_image_edit_2511 (fp8mixed, Comfy-Org @f68ace8), download started
 - [x] edit graph + bindings (template 0.11.69 non-Lightning); canary: source conditioning verified, ~130 s/edit @40 steps, GPU0 peak 24.07 GB, alpha must be composited on declared bg
-- [ ] ImageEditRequest, workflow registry, controlled upload, edit graph + bindings, fake edit engine
+- [x] ImageEditRequest, workflow registry, controlled upload, edit graph + bindings, fake edit engine
 - [ ] GPU spike: conditioning canary, VRAM/RAM, offline, T2I<->edit switch (VG01–VG12)
 ## Phase E — generative variants + QA
 - [ ] generate stage edit mode (source-conditioned, never sibling), rounds (approve from any set)

@@ -76,6 +76,30 @@ class T2IRequest:
     speed_lora: LoraUse | None = None
 
 
+@dataclass(frozen=True)
+class EngineImageHandle:
+    """A source image known to be in the engine's input store. Built only by the adapter after a verified upload."""
+    name: str
+    subfolder: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class ImageEditRequest:
+    prompt_id: str
+    source_sha256: str
+    prepared_input_sha256: str
+    image: bytes  # verified PNG bytes of the prepared single-object input, never a path/URL
+    positive: str
+    negative: str
+    seed: int
+    steps: int
+    cfg: float
+    filename_prefix: str
+    output_profile_id: str = "edit.default"
+    recipe_version: int = 1
+
+
 @dataclass
 class JobStatus:
     state: EngineState
@@ -98,7 +122,13 @@ class ImageEngine(Protocol):
 
     def status(self, prompt_id: str) -> JobStatus: ...
 
-    def fetch_image(self, prompt_id: str) -> bytes: ...
+    def submit_edit(self, req: ImageEditRequest) -> dict[str, Any]:
+        """Receipt: {prompt_id, workflow, workflow_version, graph_sha256, input: {name, subfolder, sha256}}."""
+        ...
+
+    def supports(self, kind: str) -> bool: ...
+
+    def fetch_image(self, prompt_id: str, workflow_id: str | None = None) -> bytes: ...
 
     def cancel(self, prompt_id: str) -> dict[str, Any]: ...
 
@@ -118,7 +148,19 @@ class LeasedWorker(Protocol):
 
 class AuxService(LeasedWorker, Protocol):
     def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
-                execution_id: str | None = None) -> dict[str, Any]: ...
+                execution_id: str | None = None, preset: str = "conservative", mode: str = "t2i",
+                images: list[tuple[bytes, str, str]] | None = None, preserve: str = "",
+                change: str = "") -> dict[str, Any]: ...
+
+    def compare(self, *, images: list[tuple[bytes, str, str]], questions: list[tuple[str, str]], context: str,
+                epoch: int, execution_id: str | None = None) -> dict[str, Any]: ...
+
+    def analyze_source(self, *, images: list[tuple[bytes, str]], kind: str, user_facts: str = "", epoch: int,
+                       execution_id: str | None = None) -> dict[str, Any]: ...
+
+    def suggest_variants(self, *, images: list[tuple[bytes, str]], request: str, count: int, intent: str,
+                         preserve: str, kind: str, observations: list[str] | None = None, epoch: int,
+                         execution_id: str | None = None) -> dict[str, Any]: ...
 
     def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
            execution_id: str | None = None) -> dict[str, Any]: ...

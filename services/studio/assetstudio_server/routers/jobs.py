@@ -129,6 +129,12 @@ def build(job_id: str, req: production.BuildApproved, ctx: ProjectContext = Depe
     return _accepted(production.build_approved(s, ctx, job_id, req))
 
 
+@router.post("/{job_id}:run-transform")
+def run_transform(job_id: str, req: production.RunTransform, ctx: ProjectContext = Depends(project),
+                  s: Studio = Depends(studio)) -> JSONResponse:
+    return _accepted(production.run_transform(s, ctx, job_id, req))
+
+
 @router.post("/{job_id}:reexport")
 def reexport(job_id: str, req: production.Reexport, ctx: ProjectContext = Depends(project),
              s: Studio = Depends(studio)) -> JSONResponse:

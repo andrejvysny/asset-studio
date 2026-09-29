@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
+from .production import refuse_direct
 from .prompts import ItemRef, job_of, outcome
 from .records import decision_key, load_build, load_cset, load_item, load_items, load_job, load_qa
 from .runs import active_run_for, record_wave
@@ -81,9 +82,12 @@ def approve(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Approv
         return prior
     cid = derived_id("cmd", ctx.id, "approve", req.idempotency_key)
     results, units = [], []
+    if job_id is not None:
+        refuse_direct(ctx, job_id)
     for a in req.items:
         try:
             jid = job_of(a, job_id)
+            refuse_direct(ctx, jid)
         except ApiError as e:
             results.append({"item_id": a.item_id, "ok": False, "code": e.code, "message": e.message})
             continue

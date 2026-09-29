@@ -247,8 +247,10 @@ def render_preview(inp: BuildInput) -> None:
     try:
         png = inp.preview()
         model = inp.roles.get("model")
-        art = inp.env.ctx.store.register_artifact(png, "preview", "image/png", lineage=[model] if model else [],
-                                                  meta={"derived": "CPU render, 4 views, simplified shading"},
+        base = model or inp.roles.get("image")
+        derived = "CPU render, 4 views, simplified shading" if model else "thumbnail of the delivered image"
+        art = inp.env.ctx.store.register_artifact(png, "preview", "image/png", lineage=[base] if base else [],
+                                                  meta={"derived": derived},
                                                   artifact_id=inp.artifact_id("preview"))
         inp.roles["preview"] = art.id
         inp.run.preview, inp.run.preview_error = "available", None

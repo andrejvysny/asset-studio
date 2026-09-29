@@ -11,6 +11,10 @@ from .base import EngineRejected, EngineUnavailable, post_ack
 TIMEOUT = httpx.Timeout(300.0, connect=5.0)
 
 
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode()
+
+
 class AuxClient:
     name = "aux"
     simulated = False
@@ -48,9 +52,34 @@ class AuxClient:
         return {"reachable": r.status_code == 200, **body}
 
     def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
-                execution_id: str | None = None) -> dict[str, Any]:
-        return self._post("/enhance", {"brief": brief, "kind": kind, "constraints": constraints,
-                                       "style_guide": style_guide}, epoch, execution_id)
+                execution_id: str | None = None, preset: str = "conservative", mode: str = "t2i",
+                images: list[tuple[bytes, str, str]] | None = None, preserve: str = "",
+                change: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"brief": brief, "kind": kind, "constraints": constraints,
+                                   "style_guide": style_guide}
+        if preset != "conservative" or mode != "t2i" or images or preserve or change:
+            payload |= {"preset": preset, "mode": mode, "preserve": preserve, "change": change,
+                        "images": [{"b64": _b64(b), "role": role, "note": note} for b, role, note in images or []]}
+        return self._post("/enhance", payload, epoch, execution_id)
+
+    def compare(self, *, images: list[tuple[bytes, str, str]], questions: list[tuple[str, str]], context: str,
+                epoch: int, execution_id: str | None = None) -> dict[str, Any]:
+        return self._post("/compare", {
+            "images": [{"b64": _b64(b), "label": label, "note": note} for b, label, note in images],
+            "questions": [{"id": i, "question": q} for i, q in questions], "context": context}, epoch, execution_id)
+
+    def analyze_source(self, *, images: list[tuple[bytes, str]], kind: str, user_facts: str = "", epoch: int,
+                       execution_id: str | None = None) -> dict[str, Any]:
+        return self._post("/analyze_source", {"images": [{"b64": _b64(b), "view": v} for b, v in images],
+                                              "kind": kind, "user_facts": user_facts}, epoch, execution_id)
+
+    def suggest_variants(self, *, images: list[tuple[bytes, str]], request: str, count: int, intent: str,
+                         preserve: str, kind: str, observations: list[str] | None = None, epoch: int,
+                         execution_id: str | None = None) -> dict[str, Any]:
+        return self._post("/suggest_variants", {
+            "images": [{"b64": _b64(b), "view": v} for b, v in images], "request": request, "count": count,
+            "intent": intent, "preserve": preserve, "kind": kind, "observations": observations or []},
+            epoch, execution_id)
 
     def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
            execution_id: str | None = None) -> dict[str, Any]:

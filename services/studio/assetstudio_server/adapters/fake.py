@@ -7,9 +7,19 @@ import json
 import threading
 from typing import Any
 
+from assetstudio_core.canonical import sha256_json
 from PIL import Image, ImageDraw
 
-from .base import AckError, EngineUnavailable, ExecutionFailed, ExecutionLost, JobStatus, T2IRequest
+from .base import (
+    AckError,
+    EngineRejected,
+    EngineUnavailable,
+    ExecutionFailed,
+    ExecutionLost,
+    ImageEditRequest,
+    JobStatus,
+    T2IRequest,
+)
 
 
 def _png(seed: int, w: int, h: int, label: str) -> bytes:
@@ -21,6 +31,24 @@ def _png(seed: int, w: int, h: int, label: str) -> bytes:
     cx, cy = w // 2 + (rnd[4] - 128) * w // 2000, h // 2 + (rnd[5] - 128) * h // 2000
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=base)
     d.text((8, 8), f"SIMULATED {label}", fill=(60, 60, 60))
+    out = io.BytesIO()
+    im.save(out, "PNG")
+    return out.getvalue()
+
+
+def _edit_png(source: bytes, seed: int) -> bytes:
+    """Deterministic 'edit': hue-shifted source plus a text-free overlay; output depends on the source bytes."""
+    rnd = hashlib.sha256(f"edit:{seed}".encode()).digest()
+    with Image.open(io.BytesIO(source)) as src:
+        im = src.convert("RGB")
+    h, s_, v = im.convert("HSV").split()
+    shift = 16 + rnd[0] % 224
+    h = h.point(lambda x: (x + shift) % 256)
+    im = Image.merge("HSV", (h, s_, v)).convert("RGB")
+    w, ht = im.size
+    d = ImageDraw.Draw(im)
+    x0, y0 = w * (5 + rnd[1] % 20) // 100, ht * (5 + rnd[2] % 20) // 100
+    d.rectangle((x0, y0, x0 + max(4, w // 5), y0 + max(4, ht // 8)), outline=(255, 255, 255), width=max(1, w // 128))
     out = io.BytesIO()
     im.save(out, "PNG")
     return out.getvalue()
@@ -40,7 +68,9 @@ class FakeEngine:
         self._lock = threading.Lock()
 
     def check(self) -> dict[str, Any]:
-        return {"reachable": not self.down, "ready": not self.down, "problems": [], "simulated": True}
+        return {"reachable": not self.down, "ready": not self.down, "problems": [], "simulated": True,
+                "workflows": {"fake.t2i": {"kind": "t2i", "ready": True, "problems": []},
+                              "fake.image_edit": {"kind": "image_edit", "ready": True, "problems": []}}}
 
     def submit(self, req: T2IRequest) -> str:
         with self._lock:
@@ -52,6 +82,26 @@ class FakeEngine:
                 self.lose_ack -= 1
                 raise EngineUnavailable("simulated lost submit response")
         return req.prompt_id
+
+    def supports(self, kind: str) -> bool:
+        return kind in ("t2i", "image_edit")
+
+    def submit_edit(self, req: ImageEditRequest) -> dict[str, Any]:
+        if hashlib.sha256(req.image).hexdigest() != req.prepared_input_sha256:
+            raise EngineRejected("prepared input hash mismatch")
+        with self._lock:
+            self.calls.append(("submit_edit", req.prompt_id))
+            if self.down:
+                raise EngineUnavailable("simulated outage")
+            self.jobs.setdefault(req.prompt_id, {"req": req, "polls": 0})
+            if self.lose_ack > 0:
+                self.lose_ack -= 1
+                raise EngineUnavailable("simulated lost submit response")
+        digest = req.prepared_input_sha256
+        graph = {"simulated": True, "seed": req.seed, "steps": req.steps, "cfg": req.cfg, "input": digest}
+        return {"prompt_id": req.prompt_id, "workflow": "fake.image_edit", "workflow_version": 0,
+                "graph_sha256": sha256_json(graph),
+                "input": {"name": f"as_{digest[:32]}.png", "subfolder": "assetstudio", "sha256": digest}}
 
     def status(self, prompt_id: str) -> JobStatus:
         with self._lock:
@@ -65,8 +115,10 @@ class FakeEngine:
                 return JobStatus("failed", "simulated failure")
             return JobStatus("succeeded" if job["polls"] >= self.steps_to_finish else "running")
 
-    def fetch_image(self, prompt_id: str) -> bytes:
-        req: T2IRequest = self.jobs[prompt_id]["req"]
+    def fetch_image(self, prompt_id: str, workflow_id: str | None = None) -> bytes:
+        req = self.jobs[prompt_id]["req"]
+        if isinstance(req, ImageEditRequest):
+            return _edit_png(req.image, req.seed)
         return _png(req.seed, min(req.width, 512), min(req.height, 512), f"seed {req.seed}")
 
     def cancel(self, prompt_id: str) -> dict[str, Any]:
@@ -115,6 +167,16 @@ class _FakeLease:
         return {**self.info(), "loaded": False, "owner_token": owner_token}
 
 
+_FAKE_VARIANTS = [
+    ("Taller", "Taller body; keep materials and identity"),
+    ("Squat", "Shorter and wider; same materials"),
+    ("Slimmer", "Narrower silhouette"),
+    ("Weathered", "Worn, faded surfaces"),
+    ("Damaged", "One broken part, otherwise intact"),
+    ("Detailed", "One extra decorative detail"),
+]
+
+
 class FakeAux:
     name = "aux"
     simulated = True
@@ -148,13 +210,66 @@ class FakeAux:
         return self.gpu.lease(epoch)
 
     def enhance(self, *, brief: str, kind: str, constraints: str, style_guide: str, epoch: int,
-                execution_id: str | None = None) -> dict[str, Any]:
+                execution_id: str | None = None, preset: str = "conservative", mode: str = "t2i",
+                images: list[tuple[bytes, str, str]] | None = None, preserve: str = "",
+                change: str = "") -> dict[str, Any]:
         self._use("vlm", epoch)
         self.calls.append("enhance")
         text = brief.strip().rstrip(".")
-        return {"description": f"{text[:1].upper()}{text[1:]}, clearly readable form, simulated enhancement.",
-                "short_title": text[:30], "tags": [kind], "meta": {"model": "simulated", "seconds": 0.0,
-                                                                   "raw": "simulated", "execution_id": execution_id}}
+        if mode == "edit":
+            desc = (f"Edit the source object: {change or text}. Keep: {preserve or 'its identity'}. "
+                    "Use the input image as the identity reference; single object, no collage, no scene, "
+                    "no duplicates. Simulated instruction.")
+        else:
+            desc = f"{text[:1].upper()}{text[1:]}, clearly readable form, simulated enhancement."
+        refs = [note for _, role, note in images or [] if role == "reference"]
+        return {"description": desc, "short_title": text[:30], "tags": [kind], "facts": [text] if text else [],
+                "additions": ["simulated addition: finer surface detail"] if preset == "creative" else [],
+                "assumptions": [], "reference_cues": [{"index": i, "cue": n or "(no note)"}
+                                                      for i, n in enumerate(refs)],
+                "meta": {"model": "simulated", "simulated": True, "seconds": 0.0, "raw": "simulated",
+                         "execution_id": execution_id}}
+
+    def compare(self, *, images: list[tuple[bytes, str, str]], questions: list[tuple[str, str]], context: str,
+                epoch: int, execution_id: str | None = None) -> dict[str, Any]:
+        self._use("vlm", epoch)
+        self.calls.append("compare")
+        src = next((b for b, label, _ in images if label == "source"), None)
+        cand = next((b for b, label, _ in images if label == "candidate"), None)
+        checks: dict[str, bool | str] = {}
+        reasons: dict[str, str] = {}
+        for qid, _ in questions:
+            if "change" in qid:
+                checks[qid] = not (src is not None and cand is not None and src == cand)
+                reasons[qid] = "simulated: candidate differs from source" if checks[qid] \
+                    else "simulated: candidate is identical to source"
+            else:
+                checks[qid], reasons[qid] = True, "simulated: assumed satisfied"
+        return {"checks": checks, "reasons": reasons,
+                "meta": {"model": "simulated", "simulated": True, "seconds": 0.0, "execution_id": execution_id}}
+
+    def analyze_source(self, *, images: list[tuple[bytes, str]], kind: str, user_facts: str = "", epoch: int,
+                       execution_id: str | None = None) -> dict[str, Any]:
+        self._use("vlm", epoch)
+        self.calls.append("analyze_source")
+        return {"observations": [{"text": "simulated observation: single object", "images": [0]}],
+                "uncertainties": ["simulated: materials inferred"],
+                "proposed_preserve": [{"id": "preserve_identity", "text": "Keep the same asset identity."}],
+                "proposed_changeable": ["simulated: proportions"], "dropped_observations": 0,
+                "meta": {"model": "simulated", "simulated": True, "seconds": 0.0, "execution_id": execution_id}}
+
+    def suggest_variants(self, *, images: list[tuple[bytes, str]], request: str, count: int, intent: str,
+                         preserve: str, kind: str, observations: list[str] | None = None, epoch: int,
+                         execution_id: str | None = None) -> dict[str, Any]:
+        self._use("vlm", epoch)
+        self.calls.append("suggest_variants")
+        rows = []
+        for i in range(count):
+            label, change = _FAKE_VARIANTS[i % len(_FAKE_VARIANTS)]
+            n = i // len(_FAKE_VARIANTS)
+            rows.append({"label": label if n == 0 else f"{label} {n + 1}", "change_request": change})
+        return {"rows": rows, "short_by": 0, "notes": ["simulated suggestions"],
+                "meta": {"model": "simulated", "simulated": True, "seconds": 0.0, "execution_id": execution_id}}
 
     def qa(self, *, image: bytes, questions: list[tuple[str, str]], context: str, epoch: int,
            execution_id: str | None = None) -> dict[str, Any]:

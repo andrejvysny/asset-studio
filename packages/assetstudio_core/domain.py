@@ -225,6 +225,7 @@ class Published(BaseModel):
     asset_id: str
     version_id: str
     display_version: int
+    build_run_id: str | None = None  # the accepted run this publication committed (None: recorded before variants)
 
 
 class JobItem(JobScoped):
@@ -320,7 +321,7 @@ class QaEvaluation(Record):
 
 class ReviewDecision(JobScoped):
     id: str
-    gate: Literal["candidate_approval", "final_acceptance"]
+    gate: Literal["candidate_approval", "final_acceptance", "transform_confirmation"]
     job_id: str
     item_id: str
     run_id: str | None = None
