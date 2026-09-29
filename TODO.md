@@ -34,9 +34,20 @@ baseline + Podman override; 3D = TRELLIS.2 + DINOv3 only (no fallback; DINOv3 ac
 - [ ] inline pipeline parameter editor (today: YAML)
 - [ ] OpenAPI response models -> generated web types
 - [ ] real Docker (non-Podman) deployment validation
-- [ ] commit branch (awaiting user)
+- [x] commit Phases 0–2 (3a3f031); legacy line-a containers/images, output/ data, gpu-acceptance project removed
 
-## Later phases (not this run)
+## Phase 5 — image-kind builds (current)
+Defaults (open Qs): derived material maps off; atlas pow2 = param, default off; sprite pivot bottom_center.
+- [x] B1 build registry (coordinator/builds/*), shared BuildRun scaffolding, mask reuse from QA
+- [x] B2 processing: raster.py (mask→RGBA, trim, pad, pivot, variants, seam, tile), atlas.py (frames, grid pack, meta)
+- [x] B3 recipes: sprite/icon/material build ids, int_list param, structural checks
+- [x] B4 imports: frame sequence (PNGs/zip, safe) → sheet/vfx; material bundle role mapping
+- [x] B5 web: per-kind build/asset viewers (components/outputs.tsx), frame player, import modes
+- [x] B6 tests: unit 12, contract 9, e2e 3, GPU real sprite+icon+material 1 pass
+- [x] B7 docs: SPEC record, acceptance, README, TODO
+- [ ] material tileability: generated materials fail seam gate (ratio ≈4) — decide: seamless-tiling step vs. tiling-capable model/LoRA vs. project threshold
+
+## Later phases
 - Phase 3: native ComfyUI TRELLIS.2 worker (needs DINOv3 access), 3D build/re-export, mesh processing
 - Phase 4: S3 backend + conformance, GC plan/execute, retention expiry, export targets (files/Godot/Git)
 - Phase 5: icon/sprite/material/sheet/vfx builds + frame import/packing

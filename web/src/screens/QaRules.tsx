@@ -8,7 +8,7 @@ import { clone, useConfig } from "../lib/project";
 const METRICS = ["mask_margin", "mask_fill", "mask_single_blob", "min_resolution", "palette_reserved"];
 const METRIC_SOURCE: Record<string, string> = { mask_margin: "mask_metric", mask_fill: "mask_metric",
   mask_single_blob: "mask_metric", min_resolution: "image_metric", palette_reserved: "image_metric" };
-const INTEGRITY = ["decode", "hash_matches_approval", "glb reload · geometry · indices", "frame metadata (Phase 5)"];
+const INTEGRITY = ["decode", "hash_matches_approval", "glb reload · geometry · indices", "cut-out alpha · exact sizes", "material seam ratio", "frame size · order · atlas bounds"];
 
 export function QaRules() {
   const cfg = useConfig();

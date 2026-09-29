@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { bytes, ErrorLine, Loading, ModelViewer, OK, relTime } from "../components/ui";
+import { OutputView } from "../components/outputs";
+import { bytes, ErrorLine, Loading, OK, relTime } from "../components/ui";
 import { type AssetDetail as Detail, artifactUrl, key, P, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
@@ -39,9 +40,10 @@ export function AssetDetail() {
   const [copied, setCopied] = useState(false);
   if (!d.data) return d.error ? <div className="content"><ErrorLine error={d.error} /></div> : <Loading what="asset" />;
   const { manifest: m, shown_version: v } = d.data;
-  const model = d.data.files.find((f) => f.mime === "model/gltf-binary");
-  const image = d.data.files.find((f) => f.role === "image") ?? d.data.files.find((f) => f.role === "preview");
   const lic = v.licence.status;
+  const frameFiles = d.data.files.filter((f) => f.role.startsWith("frame_"));
+  const files = [...d.data.files.filter((f) => !f.role.startsWith("frame_")), ...frameFiles.slice(0, 3)];
+  const hiddenFrames = frameFiles.length - Math.min(frameFiles.length, 3);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", minHeight: "100%" }}>
       <section className="content">
@@ -62,11 +64,8 @@ export function AssetDetail() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(260px,1fr) minmax(260px,1fr)", gap: 16 }}>
           <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
-            {model ? <ModelViewer src={artifactUrl(id, model.artifact_id)} height={300} />
-              : image ? <div className="checker" style={{ height: 300, display: "flex" }}>
-                <img src={artifactUrl(id, image.artifact_id)} alt={m.display_name}
-                  style={{ maxWidth: "100%", maxHeight: 300, margin: "auto", objectFit: "contain" }} /></div>
-                : <div className="stripes" style={{ height: 300 }} />}
+            <OutputView key={v.version_id} project={id} height={300} alt={m.display_name}
+              roles={Object.fromEntries(d.data.files.map((f) => [f.role, f.artifact_id]))} />
             <div className="sub tr" style={{ padding: "8px 12px" }}>
               showing v{v.display_version} · {d.data.is_current ? "current" : "older version"}</div>
           </div>
@@ -119,7 +118,7 @@ export function AssetDetail() {
         <div>
           <div className="label" style={{ marginBottom: 8 }}>Files in v{v.display_version}</div>
           <div className="table">
-            {d.data.files.map((f) => (
+            {files.map((f) => (
               <div key={f.role} className="td" style={{ gridTemplateColumns: "110px minmax(140px,1fr) 80px minmax(160px,1.2fr)" }}>
                 <span className="dim">{f.role}</span>
                 <a className="mono" href={`${artifactUrl(id, f.artifact_id)}?download=1`}>{f.mime}</a>
@@ -127,6 +126,8 @@ export function AssetDetail() {
                 <span className="mono dim ellipsis" title={f.sha256}>blobs/sha256/{f.sha256.slice(0, 2)}/{f.sha256}</span>
               </div>
             ))}
+            {hiddenFrames > 0 && <div className="td sub" style={{ gridTemplateColumns: "1fr" }}>
+              + {hiddenFrames} more source frames (frame_0003 … ) · all hashed and listed in the manifest</div>}
           </div>
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>

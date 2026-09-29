@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from .kinds import Kind
 
-ParamType = Literal["int", "float", "choice", "str"]
+ParamType = Literal["int", "float", "choice", "str", "bool", "int_list"]
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,10 @@ class ParamSpec:
     choices: tuple[str, ...] = ()
 
     def validate(self, value: Any) -> str | None:
+        if self.type == "int_list":
+            return self._validate_list(value)
+        if self.type == "bool" and not isinstance(value, bool):
+            return "must be true or false"
         if self.type == "int" and (isinstance(value, bool) or not isinstance(value, int)):
             return "must be an integer"
         if self.type == "float" and (isinstance(value, bool) or not isinstance(value, int | float)):
@@ -32,6 +36,16 @@ class ParamSpec:
             return f"must be >= {self.min:g}"
         if self.max is not None and isinstance(value, int | float) and value > self.max:
             return f"must be <= {self.max:g}"
+        return None
+
+    def _validate_list(self, value: Any) -> str | None:
+        if not isinstance(value, list | tuple) or not 1 <= len(value) <= 8:
+            return "must be a list of 1–8 integers"
+        for v in value:
+            if isinstance(v, bool) or not isinstance(v, int):
+                return "must be a list of integers"
+            if (self.min is not None and v < self.min) or (self.max is not None and v > self.max):
+                return f"each value must be within {self.min:g}–{self.max:g}"
         return None
 
 
@@ -91,6 +105,16 @@ def _image_params(extra: tuple[ParamSpec, ...] = ()) -> tuple[ParamSpec, ...]:
 
 
 _NO_TEMPORAL = "no verified local temporal/pose generation adapter; import an ordered frame sequence instead"
+_IMPORT_ONLY = "built from imported frame sequences (Import → frame sequence), not from batches"
+
+
+def _atlas_params(extra: tuple[ParamSpec, ...] = ()) -> tuple[ParamSpec, ...]:
+    return (
+        ParamSpec("fps", "int", 12, "playback rate stored in the atlas metadata", 1, 120),
+        ParamSpec("columns", "int", 0, "atlas grid columns; 0 = near-square", 0, 256),
+        ParamSpec("padding", "int", 2, "px between frames", 0, 64),
+        ParamSpec("pow2", "bool", False, "round atlas sides up to powers of two"),
+    ) + extra
 
 RECIPES: dict[str, Recipe] = {r.id: r for r in (
     Recipe(
@@ -114,19 +138,30 @@ RECIPES: dict[str, Recipe] = {r.id: r for r in (
         "icon.default", Kind.icon, 1, "Icon",
         (_TEXT, _CONFIRM, Stage("images", "Art", "ComfyUI · Qwen-Image · GPU0"), _QA, _APPROVE,
          Stage("build", "Resize + pad variants", "CPU"), _PUBLISH),
-        _image_params((ParamSpec("sizes", "str", "128,64,32", "output sizes px"),)),
+        _image_params((
+            ParamSpec("sizes", "int_list", (256, 128, 64, 32), "square output sizes px", 8, 2048),
+            ParamSpec("background", "choice", "transparent", "transparent = BiRefNet cut-out",
+                      choices=("transparent", "keep")),
+            ParamSpec("padding", "float", 0.06, "margin inside each icon (transparent only)", 0.0, 0.4),
+        )),
         "single centred subject, square composition, plain background, no text or letters",
-        "text, letters, watermark, multiple subjects", _T2I_MODELS, (), "comfyui.qwen_t2i",
-        build=None, build_blocked_reason="icon build (cut-out, sized variants) is Phase 5",
+        "text, letters, watermark, multiple subjects", _T2I_MODELS, ("birefnet",), "comfyui.qwen_t2i",
+        build="icon",
     ),
     Recipe(
         "sprite.default", Kind.sprite, 1, "Sprite",
         (_TEXT, _CONFIRM, Stage("images", "Candidates", "ComfyUI · Qwen-Image · GPU0"), _QA, _APPROVE,
          Stage("build", "Cut-out + canvas", "BiRefNet · CPU"), _PUBLISH),
-        _image_params((ParamSpec("alpha_threshold", "int", 128, "", 0, 255),)),
+        _image_params((
+            ParamSpec("alpha_threshold", "int", 128, "alpha counted as the sprite for trimming", 1, 255),
+            ParamSpec("padding", "float", 0.04, "transparent margin, fraction of the canvas", 0.0, 0.4),
+            ParamSpec("pivot", "choice", "bottom_center", "anchor recorded in the sprite metadata",
+                      choices=("bottom_center", "center")),
+            ParamSpec("canvas", "int", 512, "square canvas px; 0 = trimmed size + padding", 0, 4096),
+        )),
         "single subject, plain background, full figure visible",
         "multiple subjects, scene, text, watermark, cropped", _T2I_MODELS, ("birefnet",), "comfyui.qwen_t2i",
-        build=None, build_blocked_reason="sprite build (cut-out, pivot, canvas) is Phase 5",
+        build="sprite",
     ),
     Recipe(
         "concept.default", Kind.concept_art, 1, "Concept art",
@@ -140,28 +175,31 @@ RECIPES: dict[str, Recipe] = {r.id: r for r in (
         "material.default", Kind.material, 1, "Material",
         (_TEXT, _CONFIRM, Stage("images", "Tileable base colour", "ComfyUI · Qwen-Image · GPU0"), _QA, _APPROVE,
          Stage("build", "PBR maps", "explicitly configured derivation"), _PUBLISH),
-        _image_params((ParamSpec("maps", "str", "base_color", "maps to publish; derived maps are labelled"),)),
+        _image_params((
+            ParamSpec("seam_max_ratio", "float", 2.0,
+                      "wrap-edge ΔE ÷ neighbour ΔE; above this the build is invalid", 1.0, 10.0),
+            ParamSpec("require_square", "bool", True, "invalid unless width == height"),
+        )),
         "seamless tileable surface texture, orthographic top-down, even diffuse lighting, no objects",
         "objects, perspective, directional shadows, text", _T2I_MODELS, (), "comfyui.qwen_t2i",
-        build=None, build_blocked_reason="material map packaging + seam QA is Phase 5", candidate_mask=False,
+        build="material", candidate_mask=False,
+        extra={"derived_maps": "not generated: no verified local PBR derivation; import a material bundle instead"},
     ),
     Recipe(
         "sheet.default", Kind.sprite_sheet, 1, "Sprite sheet",
         (_TEXT, _CONFIRM, Stage("images", "Pose keys", "not available"), _QA, _APPROVE,
          Stage("build", "Frames + sheet", "atlas packer · CPU"), _PUBLISH),
-        (ParamSpec("frames", "int", 8, "", 1, 256), ParamSpec("frame_size", "int", 64, "px", 8, 2048),
-         ParamSpec("fps", "int", 12, "", 1, 120)),
+        _atlas_params((ParamSpec("pivot", "choice", "bottom_center", "", choices=("bottom_center", "center")),)),
         "", "", (), (), None, generation_blocked_reason=_NO_TEMPORAL,
-        build=None, build_blocked_reason="frame-sequence import + atlas packing is Phase 5", candidate_mask=False,
+        build=None, build_blocked_reason=_IMPORT_ONLY, candidate_mask=False,
     ),
     Recipe(
         "vfx.default", Kind.vfx_flipbook, 1, "VFX flipbook",
         (_TEXT, _CONFIRM, Stage("images", "Keyframes", "not available"), _QA, _APPROVE,
          Stage("build", "Frames + atlas", "atlas packer · CPU"), _PUBLISH),
-        (ParamSpec("frames", "int", 12, "", 1, 256), ParamSpec("fps", "int", 12, "", 1, 120),
-         ParamSpec("blend", "choice", "alpha", "", choices=("alpha", "additive"))),
+        _atlas_params((ParamSpec("blend", "choice", "alpha", "", choices=("alpha", "additive")),)),
         "", "", (), (), None, generation_blocked_reason=_NO_TEMPORAL,
-        build=None, build_blocked_reason="frame-sequence import + atlas packing is Phase 5", candidate_mask=False,
+        build=None, build_blocked_reason=_IMPORT_ONLY, candidate_mask=False,
     ),
 )}
 

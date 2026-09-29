@@ -121,6 +121,22 @@ async def import_preview(file: UploadFile = File(...), ctx: ProjectContext = Dep
     return import_svc.preview(s, ctx, file.filename or "upload", data)
 
 
+@router.post("/imports:preview-set")
+async def import_preview_set(mode: str = Query(pattern="^(frames|material)$"),
+                             files: list[UploadFile] = File(...), ctx: ProjectContext = Depends(project),
+                             s: Studio = Depends(studio)) -> dict[str, Any]:
+    if len(files) > 1024:
+        raise ApiError(422, "too_many_files", "at most 1024 files per import")
+    budget, out = s.settings.max_upload_bytes, []
+    for f in files:
+        data = await f.read(budget + 1)
+        budget -= len(data)
+        if budget < 0:
+            raise ApiError(413, "too_large", "files exceed the upload limit")
+        out.append((f.filename or f"file{len(out)}", data))
+    return import_svc.preview_set(s, ctx, mode, out)
+
+
 @router.post("/imports:commit")
 def import_commit(req: import_svc.CommitImport, ctx: ProjectContext = Depends(project),
                   s: Studio = Depends(studio)) -> dict[str, Any]:

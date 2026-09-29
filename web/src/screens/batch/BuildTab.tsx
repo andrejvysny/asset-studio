@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { Bar, BAD, ErrorLine, INFO, ModelViewer, NONE, OK } from "../../components/ui";
+import { OutputView } from "../../components/outputs";
+import { Bar, BAD, ErrorLine, INFO, NONE, OK } from "../../components/ui";
 import { artifactUrl, key, P, send } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
@@ -27,8 +28,6 @@ export function BuildTab({ batch, reload }: TabProps) {
     if (res.results[0] && !res.results[0].ok) throw new Error(res.results[0].message);
   });
   const view = active?.build;
-  const model = view?.artifacts.model;
-  const image = view?.artifacts.image ?? view?.artifacts.preview;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {rows.length === 0 ? <div className="empty">Nothing built yet. Approve candidates, then run the build from Approve.</div> : (
@@ -64,10 +63,7 @@ export function BuildTab({ batch, reload }: TabProps) {
             <aside className="inspector">
               <div className="row sub" style={{ padding: "8px 12px", justifyContent: "space-between" }}>
                 <span>{active.name}</span><span>{view?.status ?? active.tasks.build?.state}</span></div>
-              {model ? <ModelViewer src={artifactUrl(id, model)} height={320} /> : image ? (
-                <div className="checker" style={{ height: 320, display: "flex" }}>
-                  <img src={artifactUrl(id, image)} alt={`${active.name} final`} style={{ maxWidth: "100%", maxHeight: 320,
-                    margin: "auto", objectFit: "contain" }} /></div>) : <div className="stripes" style={{ height: 320 }} />}
+              <OutputView key={view?.id ?? "none"} project={id} roles={view?.artifacts ?? {}} alt={`${active.name} final`} />
               <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
                 <span className="label">Structural validation (mandatory)</span>
                 {(view?.validation.checks ?? []).map((c) => <div key={c.id} className="row" style={{ gap: 8 }}>

@@ -180,6 +180,12 @@ export async function upload<T>(path: string, file: File): Promise<T> {
   return parse<T>(await fetch(path, { method: "POST", headers: { "X-AssetStudio": "1" }, body: form }));
 }
 
+export async function uploadMany<T>(path: string, files: File[]): Promise<T> {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  return parse<T>(await fetch(path, { method: "POST", headers: { "X-AssetStudio": "1" }, body: form }));
+}
+
 export const key = (): string => crypto.randomUUID();
 export const P = (project: string) => `/api/v1/projects/${project}`;
 export const artifactUrl = (project: string, artifactId: string) => `${P(project)}/artifacts/${artifactId}/content`;

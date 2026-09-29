@@ -213,3 +213,7 @@ portable data; self-hosted generation; offline local acceptance; recoverable fai
 | 2026-09-28 | Concept art gets a passthrough build (approved original → final + preview) to exercise the full lifecycle in Phase 2. |
 | 2026-09-28 | BiRefNet moved into the aux service (GPU1 text/VLM/segmentation); the legacy TRELLIS worker is only reachable through `compose.legacy-3d.yml`. |
 | 2026-09-28 | API response types are hand-written in `web/src/lib/api.ts` (most responses are view dicts); OpenAPI type generation deferred until response models exist. |
+| 2026-09-29 | Phase 5 (image kinds) before Phase 3 while DINOv3 is pending. Sprite/icon/material builds; sheet/VFX only from imported frame sequences (no verified temporal generator). |
+| 2026-09-29 | Material builds publish the approved base colour + tiling preview only; derived PBR maps are not generated (no verified local derivation). Full map sets come from material-bundle imports with explicit per-file roles. |
+| 2026-09-29 | Material seam check = wrap-edge ΔE ÷ neighbour ΔE (`seam_max_ratio`, default 2.0), structural and not overridable. |
+| 2026-09-29 | Sprite/icon cut-outs reuse the QA mask only when its lineage is the approved candidate artifact; otherwise the build segments on GPU1 (build op runs on the gpu1 lane). Sprite pivot default `bottom_center`; atlas power-of-two is a parameter (default off). |

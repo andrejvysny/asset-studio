@@ -21,15 +21,16 @@ open http://127.0.0.1:8190      # create an empty project, define categories in 
 Library-only use (no GPUs/models): `STUDIO_ENGINE=none`. Demo/test mode with a clearly labelled
 **simulated** engine: `STUDIO_ENGINE=fake`.
 
-## Status of this release (Phases 0–2)
+## Status of this release (Phases 0–2 + 5)
 
 | Capability | State |
 |---|---|
-| Projects, schema inheritance, snapshots, shot list, import (PNG/JPEG/GLB), versions, publication | working |
+| Projects, schema inheritance, snapshots, shot list, import (PNG/JPEG/GLB, frame sequences, material bundles), versions, publication | working |
 | Batches: enhance → confirm → candidates + advisory QA → approve / regenerate → build → accept → publish | working |
 | Concept art build (approved original → final) | working |
 | 3D build (TRELLIS.2) | blocked: DINOv3 access pending; native worker is Phase 3 |
-| Icon / sprite / material / sheet / VFX builds | Phase 5 (generation of candidates works for image kinds) |
+| Sprite (cut-out, canvas, pivot), icon (sized variants), material (base colour + seam gate) builds | working |
+| Sprite sheet / VFX flipbook | atlas from imported frame sequences; no generation (no verified local temporal model) |
 | S3 storage, GC, export targets (files / Godot / Git) | Phase 4 |
 
 See `TODO.md` for the tracked checklist, `docs/` for architecture, installation and acceptance evidence.

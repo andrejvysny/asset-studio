@@ -59,8 +59,9 @@ def build_approved(studio: Studio, ctx: ProjectContext, batch_id: str, req: Buil
         if out["ok"]:
             eligible.append({"item_id": b.item_id, "approval_id": b.approval_id})
     op_public = None
+    lane = "gpu1" if "birefnet" in recipe.build_models else "cpu"  # may need segmentation when QA had no mask
     if eligible:
-        op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="build", lane="cpu",
+        op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="build", lane=lane,
                                              affinity=f"build.{recipe.build}",
                                              payload={"batch_id": batch_id, "items": eligible},
                                              idempotency_key=req.idempotency_key, hold=True)

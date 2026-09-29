@@ -3,12 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.canonical import now_iso
 from assetstudio_core.domain import AssetManifest, BatchItem, BuildRun, Published
-from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import Kind, Origin
 from assetstudio_core.recipes import RECIPES
-from assetstudio_processing.images import ImageRejected, inspect_image, thumbnail_png
 from assetstudio_storage.project import manifest_key
 from assetstudio_storage.publication import NewAsset, PublishRequest, StalePointer, publish
 from assetstudio_storage.repo import Conflict, IntegrityError
@@ -16,7 +13,6 @@ from assetstudio_storage.repo import Conflict, IntegrityError
 from ..models import load_lock
 from ..provenance import licence_summary
 from ..services.records import (
-    build_key,
     load_batch,
     load_build,
     load_cset,
@@ -27,44 +23,9 @@ from ..services.records import (
     mutate_item,
     set_task,
 )
+from .builds import BUILDS, BuildFailed, run_build
 from .runner import TaskEnv
 from .tasks_prompt import _items_error
-
-
-def _passthrough(env: TaskEnv, batch_id: str, item: BatchItem, approval_id: str) -> BuildRun:
-    """concept.default: the approved original is the final image; add a preview; validate decode + hash."""
-    store = env.ctx.store
-    decision = load_decision(store, batch_id, approval_id)
-    bound = decision.bound
-    run_id = derived_id("run", env.op.id, item.id)
-    existing, token = store.get_opt(build_key(batch_id, run_id), BuildRun)
-    if existing is not None and existing.status == "succeeded":
-        return existing
-    now = now_iso()
-    run = existing or BuildRun(id=run_id, item_id=item.id, batch_id=batch_id, build="passthrough",
-                               inputs={"approval_id": approval_id, "candidate_artifact_id": bound["artifact_id"],
-                                       "image_sha256": bound["image_sha256"]},
-                               status="running", created_at=now, updated_at=now, op_id=env.op.id)
-    if existing is None:
-        token = store.create(build_key(batch_id, run_id), run)
-    data = store.artifact_bytes(bound["artifact_id"])
-    checks = []
-    art = store.artifact(bound["artifact_id"])
-    checks.append({"id": "hash_matches_approval", "ok": art.sha256 == bound["image_sha256"]})
-    try:
-        info = inspect_image(data, ("PNG", "JPEG"))
-        checks.append({"id": "decode", "ok": True, "detail": f"{info.format} {info.width}x{info.height}"})
-        preview = store.register_artifact(thumbnail_png(data), "preview", "image/png", lineage=[art.id],
-                                          meta={"derived": "thumbnail 384px"})
-        run.artifacts = {"image": art.id, "preview": preview.id}
-    except ImageRejected as e:
-        checks.append({"id": "decode", "ok": False, "detail": str(e)})
-    ok = all(c["ok"] for c in checks)
-    run.validation = {"ok": ok, "checks": checks, "required": [c["id"] for c in checks]}
-    run.status, run.result, run.updated_at = "succeeded", "valid" if ok else "invalid", now_iso()
-    assert token is not None
-    store.replace(build_key(batch_id, run_id), run, token)
-    return run
 
 
 def build(env: TaskEnv) -> dict[str, Any]:
@@ -81,9 +42,16 @@ def build(env: TaskEnv) -> dict[str, Any]:
             out[item.id] = "stale"
             continue
         mutate_item(env.studio, env.ctx, batch_id, item.id, lambda x: set_task(x, "build", env.op.id, "running"))
-        if recipe.build != "passthrough":
+        fn = BUILDS.get(recipe.build or "")
+        if fn is None:
             raise RuntimeError(f"no build implementation {recipe.build}")
-        run = _passthrough(env, batch_id, item, entry["approval_id"])
+        try:
+            run = run_build(env, batch_id, item, entry["approval_id"], recipe.build or "", fn)
+        except BuildFailed as e:
+            mutate_item(env.studio, env.ctx, batch_id, item.id,
+                        lambda x, e=e: set_task(x, "build", env.op.id, "failed", str(e)[:300]))
+            out[item.id] = "failed"
+            continue
 
         def apply(x: BatchItem, run: BuildRun = run) -> None:
             if run.id not in x.build_runs:
