@@ -19,6 +19,7 @@ from assetstudio_processing.render import glb_stats, preview_png
 from ...adapters.base import EngineUnavailable, ExecutionCancelled, ExecutionFailed, ExecutionLost
 from ..errors import Blocked, Cancelled
 from .common import BuildFailed, BuildInput, foreground_mask
+from .sizing import apply_final_size
 
 EXPORT_RANGE = (1_000, 2_000_000)  # what the worker accepts
 RAW_MIME = "application/x-npz"
@@ -29,7 +30,7 @@ def target_triangles(inp: BuildInput) -> dict[str, Any]:
     explicit re-export override > explicitly configured parameter > category budget max > recipe default,
     then clamped only to the backend's declared range."""
     tri = ((inp.snap.get("values") or {}).get("budget") or {}).get("triangles") or {}
-    overrides = (inp.reexport or {}).get("overrides", {})
+    overrides = (inp.reexport or {}).get("overrides") or (inp.run.inputs.get("overrides") if inp.run else None) or {}
     sources = inp.snap.get("parameter_sources") or {}
     if "triangles" in overrides:
         requested, source = int(overrides["triangles"]), "re-export override"
@@ -118,7 +119,8 @@ def sample(inp: BuildInput) -> str:
         return cp.outputs["raw"]
     _preflight(inp)
     cutout_id = segment(inp)
-    seed = int(inp.bound.get("seed") or 0) % 2**31
+    override = inp.run.inputs.get("seed_override") if inp.run else None  # resample: a new seed, recorded
+    seed = int(override if override is not None else (inp.bound.get("seed") or 0)) % 2**31
     params = {"seed": seed, "pipeline_type": inp.params["pipeline_type"]}
     raw, meta, eid = _execute(inp, "sample", "generate", params, store.artifact_bytes(cutout_id))
     if not raw.startswith(b"SIMULATED-RAW:"):
@@ -167,9 +169,7 @@ def finalize(inp: BuildInput) -> None:
     inp.check("decode", True, f"{info.format} {info.width}x{info.height}")
     bake_cp, sample_cp = inp.done("bake"), inp.done("sample")
     assert bake_cp is not None
-    model_id = bake_cp.outputs["model"]
-    store = inp.env.ctx.store
-    glb = store.artifact_bytes(model_id)
+    model_id, glb = apply_final_size(inp, bake_cp.outputs["model"])
     budget = bake_cp.settings.get("budget") or target_triangles(inp)
     _validate(inp, glb, budget)
     inp.roles["model"] = model_id

@@ -13,8 +13,9 @@ from assetstudio_processing import metrics
 from assetstudio_processing.images import load_rgb_array
 
 from ...adapters.base import EngineRejected
-from ...services.records import load_cset, load_item, load_prompt, mutate_item, qa_key
+from ...services.records import load_cset, load_item, load_job, load_prompt, mutate_item, qa_key
 from ..runner import TaskEnv
+from .qa_compare import compare_checks, compare_rules, unavailable
 
 
 def reserved_colours(snap: dict[str, Any]) -> list[tuple[str, float]]:
@@ -122,6 +123,16 @@ def _dep_results(env: TaskEnv) -> dict[str, Any]:
     return out
 
 
+def _compare_results(checks: list[Any], res: dict[str, Any], cid: str, no_service: str) -> list[CheckResult]:
+    """Advisory comparison checks of one candidate; anything not computed is `unavailable` (never a pass)."""
+    if not checks:
+        return []
+    got = (res.get("compare") or {}).get(cid)
+    if got:
+        return [CheckResult.model_validate(x) for x in got]
+    return unavailable(checks, res.get("unavailable") or no_service or "comparison check not computed")
+
+
 def qa_finalize(env: TaskEnv) -> dict[str, Any]:
     cur = _current(env)
     if cur is None:
@@ -131,7 +142,10 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
     snap = store.read_snapshot(item.snapshot_sha)
     ruleset, rules, enabled = rules_for(snap)
     deps = _dep_results(env)
-    masks_res, vlm_res = deps.get("mask", {}), deps.get("qa_vlm", {})
+    masks_res, vlm_res, cmp_res = deps.get("mask", {}), deps.get("qa_vlm", {}), deps.get("qa_compare", {})
+    job, _ = load_job(store, t.job_id)
+    cmp_checks = compare_checks(job, item, snap)
+    cmp_rules = compare_rules(cmp_checks)
     no_service = "" if env.studio.aux is not None else "no VLM/segmentation service configured"
     reserved = reserved_colours(snap)
     evaluated: dict[str, str] = {}
@@ -156,7 +170,8 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
             rgb = load_rgb_array(store.artifact_bytes(c.artifact_id)) if r.metric == "palette_reserved" else None
             results.append(metrics.evaluate_metric(r, image_size=(c.width, c.height), mask=mask_arr, rgb=rgb,
                                                    reserved=reserved))
-        policy = evaluate_policy(rules, results, ruleset.policy)
+        results += _compare_results(cmp_checks, cmp_res, c.id, no_service)
+        policy = evaluate_policy(rules + cmp_rules, results, ruleset.policy)
         qid = derived_id("qa", t.id, c.id)
         if store.repo.stat_object(qa_key(t.job_id, qid)) is None:
             store.create(qa_key(t.job_id, qid), QaEvaluation(
@@ -165,7 +180,8 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
                     "qa_ruleset") else None, results=[x.model_dump() for x in results], policy=policy,
                 evaluators={"mask_artifact_id": mask_id, "mask_task": next(
                     (d for d in t.deps if (dt := env.studio.journal.tasks.get(d)) and dt.stage == "mask"), None),
-                    "simulated": bool(env.studio.aux and env.studio.aux.simulated)},
+                    "simulated": bool(env.studio.aux and env.studio.aux.simulated),
+                    **({"compare": cmp_res.get("inputs") or {}} if cmp_checks else {})},
                 evaluated_at=now_iso(), op_id=t.id))
         evaluated[c.id] = qid
 

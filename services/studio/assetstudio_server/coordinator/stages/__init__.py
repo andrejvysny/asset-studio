@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..builds.common import mark_run
-from . import build, generate, prompt, qa
+from . import build, diversity, generate, prompt, qa, qa_compare, variant_plan
 from .base import Stage, new_task, residency
 
 STAGES: dict[str, Stage] = {s.name: s for s in (
@@ -18,6 +18,10 @@ STAGES: dict[str, Stage] = {s.name: s for s in (
     Stage("derive", "build", "cpu", None, build.derive, on_error=mark_run),
     Stage("preview", "build", "cpu", None, build.preview),
     Stage("publish", "publish", "cpu", None, build.publish_item),
+    Stage("variant_analyze", "plan", "gpu1", "aux", variant_plan.analyze),
+    Stage("variant_suggest", "plan", "gpu1", "aux", variant_plan.suggest),
+    Stage("qa_compare", "qa", "gpu1", "aux", qa_compare.qa_compare, coalesce=True),
+    Stage("diversity", "diversity", "gpu1", "aux", diversity.run),
 )}
 
 __all__ = ["STAGES", "Stage", "new_task", "residency"]

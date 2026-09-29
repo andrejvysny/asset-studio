@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from assetstudio_core.ids import is_id
+
 from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import StageTask
@@ -132,7 +134,7 @@ class Coordinator:
 
     # --- planning -------------------------------------------------------------------------------------------
     def _producers_pending(self, stage: str) -> bool:
-        upstream = {"mask": "generate", "qa_vlm": "generate"}.get(stage)
+        upstream = {"mask": "generate", "qa_vlm": "generate", "qa_compare": "generate"}.get(stage)
         if upstream is None:
             return False
         return any(t.stage == upstream for t in self.studio.journal.tasks.list(states=("queued", "running")))
@@ -217,7 +219,7 @@ class Coordinator:
             self._current[lane]["task"] = t.id
             _, resource_blocked = self._run_task(t)
             done.append(t.id)
-            if t.job_id not in jobs:
+            if t.job_id not in jobs and not is_id(t.job_id, "vdr"):  # variant drafts are not Jobs
                 jobs.append(t.job_id)
             if resource_blocked:
                 self._blocked_until[residency] = time.monotonic() + RETRY_BLOCKED_S

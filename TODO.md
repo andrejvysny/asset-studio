@@ -23,18 +23,21 @@ Baseline: lint clean, 130 tests pass.
 - [x] tests VD01–VD08/VD11, VP01–VP04, VT05/VT08/VT13 (fake engines); VL via families contract
 - [x] aux v2: /enhance presets+edit+images, /compare, /analyze_source, /suggest_variants (live-smoked)
 ## Phase C — planning, references, style
-- [ ] draft-scoped VLM tasks: analyze source, suggest rows (never overwrite manual rows)
-- [ ] preserve/change contract + enforcement preview; style/source conflict + ack
-- [ ] Job references (upload/library, note, crop) + Conservative/Creative enhancement (aux enhance v2)
+- [x] draft-scoped VLM tasks: analyze source, suggest rows (never overwrite manual rows)
+- [x] style/source conflict + ack (409 style_source_conflict)
+- [ ] preserve/change enforcement preview table (UI; machine/advisory/unsupported)
+- [x] Job references (upload/library, note, crop) + Conservative/Creative enhancement (aux enhance v2)
 ## Phase D — image editing (Qwen-Image-Edit-2511)
 - [x] lock entry qwen_image_edit_2511 (fp8mixed, Comfy-Org @f68ace8), download started
 - [x] edit graph + bindings (template 0.11.69 non-Lightning); canary: source conditioning verified, ~130 s/edit @40 steps, GPU0 peak 24.07 GB, alpha must be composited on declared bg
 - [x] ImageEditRequest, workflow registry, controlled upload, edit graph + bindings, fake edit engine
 - [ ] GPU spike: conditioning canary, VRAM/RAM, offline, T2I<->edit switch (VG01–VG12)
 ## Phase E — generative variants + QA
-- [ ] generate stage edit mode (source-conditioned, never sibling), rounds (approve from any set)
-- [ ] variant QA dims (resemblance/change/style), diversity report on selection, final sizing after rebuild
-- [ ] recovery tests VR01–VR08, scheduling VS01–VS04
+- [x] generate stage edit mode (source-conditioned, never sibling), rounds (approve from any set)
+- [x] variant QA dims (resemblance/change/style), diversity report on selection, final sizing after rebuild
+- [x] build modes retry/resample/rebuild; final sizing after rebuild
+- [ ] recovery tests VR01–VR08, scheduling VS01–VS04 (after UI; GPU run)
+- [x] 2026-09-29 owner request: consolidated all projects into Demo 3D (6 assets republished w/ provenance; 4 projects removed; backups ~/assetstudio-backups/2026-09-29-consolidate)
 ## Phase F — UI to design v2 + delivery
 - [ ] Assets group-by-family + family filter; Asset detail family/derivation + New variant/Create variants
 - [ ] Create variants wizard; Job detail (3 tabs, rounds, refs, variant card, direct card, retry menu, stepper)

@@ -29,17 +29,25 @@ class ApprovalRequest:
     override_reason: str | None = None
 
 
+def qa_of(item: JobItem, candidate_set_id: str, candidate_id: str) -> str | None:
+    """The QA evaluation recorded for a candidate of ANY round (current set: `qa`, earlier rounds: history)."""
+    if item.current_set == candidate_set_id:
+        return item.qa.get(candidate_id)
+    return item.qa_history.get(candidate_set_id, {}).get(candidate_id)
+
+
 def check_binding(item: JobItem, cset: CandidateSet | None, qa: QaEvaluation | None,
                   req: ApprovalRequest, blob_sha: str | None, build_busy: bool = False) -> dict[str, Any]:
-    """Validates that the request names exactly the current reviewable bytes. Returns the decision payload."""
+    """Validates that the request names exactly the reviewable bytes of a candidate in any round (the round's own
+    prompt revision, the re-hashed image, its own QA). Returns the decision payload."""
     if item.revision != req.expected_item_revision:
         raise ReviewError("stale_item", f"item changed (revision {item.revision}); reload the review")
     if item.cancelled:
         raise ReviewError("item_cancelled", "item is cancelled")
     if item.accepted_build is not None or build_busy:
         raise ReviewError("build_in_progress", "a build is running or accepted for this item")
-    if cset is None or item.current_set != req.candidate_set_id or cset.id != req.candidate_set_id:
-        raise ReviewError("stale_set", f"candidate set {req.candidate_set_id} is not current ({item.current_set})")
+    if cset is None or cset.id != req.candidate_set_id or cset.id not in item.candidate_sets:
+        raise ReviewError("stale_set", f"candidate set {req.candidate_set_id} does not belong to this item")
     if cset.prompt_revision_id != req.prompt_revision_id:
         raise ReviewError("stale_prompt", "prompt revision does not match the candidate set")
     cand = next((c for c in cset.candidates if c.id == req.candidate_id), None)
@@ -47,7 +55,7 @@ def check_binding(item: JobItem, cset: CandidateSet | None, qa: QaEvaluation | N
         raise ReviewError("unknown_candidate", f"candidate {req.candidate_id} is not in set {cset.id}", 404)
     if cand.sha256 != req.image_sha256 or blob_sha != req.image_sha256:
         raise ReviewError("sha_mismatch", "image bytes changed; reload the review")
-    current_qa = item.qa.get(cand.id)
+    current_qa = qa_of(item, cset.id, cand.id)
     if req.qa_evaluation_id != current_qa:
         raise ReviewError("stale_qa", "QA evaluation changed; reload the review")
     status = qa.policy["status"] if qa else None

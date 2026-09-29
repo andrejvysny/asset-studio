@@ -1,18 +1,13 @@
 """Build and publication commands: exact approved inputs in, BuildRuns attached at creation, staged tasks out."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.domain import AssetFamily, AssetManifest, BuildRun, Job, JobItem, ReviewDecision
+from assetstudio_core.domain import BuildRun, Job, JobItem, ReviewDecision
 from assetstudio_core.ids import derived_id
-from assetstudio_core.inheritance import name_parts
 from assetstudio_core.kinds import Kind
-from assetstudio_core.naming import render_name, variant_letters
 from assetstudio_core.recipes import RECIPES, legacy_variant, validate_parameters
-from assetstudio_storage.families import family_key
-from assetstudio_storage.project import manifest_key
-from assetstudio_storage.publication import name_key
 from assetstudio_storage.repo import IntegrityError, NotFound
 from pydantic import BaseModel, Field
 
@@ -22,8 +17,10 @@ from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import Busy
-from . import commands
+from . import build_modes, commands
 from .prompts import ItemRef, job_of
+from .publish_view import publish_preview as publish_preview  # noqa: PLC0414 (re-export for routers)
+from .publish_view import publish_target
 from .records import decision_key, load_build, load_decision, load_item, load_job, mutate_item
 from .runs import active_run_for, record_wave
 from .runtime import build_readiness
@@ -32,6 +29,8 @@ from .taskview import busy, item_tasks
 
 class BuildItem(ItemRef):
     approval_id: str
+    mode: Literal["build", "retry", "resample", "rebuild"] = "build"
+    overrides: dict[str, Any] = Field(default={}, max_length=len(build_modes.REBUILD_KEYS))
 
 
 class BuildApproved(BaseModel):
@@ -96,6 +95,8 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
         gate = build_readiness(studio, recipe.id)
         if gate["state"] != "ready":
             raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
+        for b in req.items:
+            build_modes.check(recipe, b.mode, b.overrides)
     for b in req.items:
         jid = None
         try:
@@ -106,6 +107,7 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
             gate = build_readiness(studio, recipe.id)
             if gate["state"] != "ready":
                 raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
+            build_modes.check(recipe, b.mode, b.overrides)
             item, _ = load_item(ctx.store, jid, b.item_id)
             snap = ctx.store.read_snapshot(item.snapshot_sha)
             if (variant := legacy_variant(snap)) is not None:
@@ -128,6 +130,7 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
             _fail(results, b, jid, e)
             continue
         units.append({"job_id": jid, "item_id": b.item_id, "approval_id": b.approval_id, "build": recipe.build,
+                      "mode": b.mode, "overrides": b.overrides,
                       "run_id": run_id or active_run_for(studio, ctx, jid)})
         results.append({"job_id": jid, "item_id": b.item_id, "ok": True})
     return {"units": units, "results": results}
@@ -190,7 +193,8 @@ def _build_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], ci
                                                     "message": "the approval changed before the build started"}
             continue
         run = create_run(studio, ctx, u["job_id"], item, u["approval_id"], u["build"], cid,
-                         reexport_from=u.get("reexport_from"), overrides=u.get("overrides"))
+                         reexport_from=u.get("reexport_from"), overrides=u.get("overrides"),
+                         mode=u.get("mode", "build"))
         try:
             created += studio.journal.tasks.create(build_chain(studio, ctx, run, u, wave_id), cid)
         except Busy as e:
@@ -395,56 +399,6 @@ def _preview_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], 
 
 
 # --- publication ---------------------------------------------------------------------------------------------------
-def publish_target(ctx: ProjectContext, item: JobItem, taken: set[str]) -> dict[str, Any]:
-    """Where an accepted result will land: a new version of the target asset, or a new asset with a free name
-    (free by the authoritative name records, plus names already planned in this command)."""
-    if item.target_asset_id:
-        manifest, _ = ctx.store.get(manifest_key(item.target_asset_id), AssetManifest)
-        return {"asset_id": manifest.asset_id, "name_id": manifest.name_id, "new_asset": False,
-                "current_version_id": manifest.current_version_id,
-                "next_display_version": 1 + max((v.display_version for v in manifest.versions), default=0)}
-    snap = ctx.store.read_snapshot(item.snapshot_sha)
-    cfg, _ = ctx.config()
-    root, sub = name_parts(cfg, snap["category_id"])
-    template = snap["values"].get("naming") or "{name}"
-    for letter in variant_letters():
-        name_id = render_name(template, item.name, root, sub, snap["recipe"]["kind"], letter)
-        if "{variant}" not in template and "{v}" not in template and letter != "a":
-            name_id = f"{name_id}_{letter}"
-        if name_id not in taken and ctx.store.repo.stat_object(name_key(name_id)) is None:
-            return {"asset_id": None, "name_id": name_id, "new_asset": True, "current_version_id": None,
-                    "next_display_version": 1}
-    raise ApiError(409, "naming_exhausted", f"no free name for {item.name}")
-
-
-def _variant_lineage(ctx: ProjectContext, job: Job) -> dict[str, Any]:
-    """Family / Derived from rows of the Publish tab (variant Jobs only)."""
-    v = job.variant
-    if v is None:
-        return {}
-    fam = ctx.store.get_opt(family_key(v["family_id"]), AssetFamily)[0]
-    return {"family": {"id": v["family_id"], "name": fam.name if fam else ""},
-            "derived_from": {"asset_id": v["source_asset_id"], "version_id": v["source_version_id"],
-                             "display_version": v["source_display_version"], "name": v["source_name"]}}
-
-
-def publish_preview(ctx: ProjectContext, job_ids: list[str]) -> list[dict[str, Any]]:
-    taken: set[str] = set()
-    out = []
-    for jid in job_ids:
-        job, _ = load_job(ctx.store, jid)
-        for iid in job.item_ids:
-            item, _ = load_item(ctx.store, jid, iid)
-            if item.accepted_build is None:
-                continue
-            target = publish_target(ctx, item, taken)
-            taken.add(target["name_id"])
-            out.append({"job_id": jid, "item_id": item.id, "name": item.name, "build_run_id": item.accepted_build,
-                        "expected_item_revision": item.revision, "published": item.published is not None, **target,
-                        **_variant_lineage(ctx, job)})
-    return out
-
-
 def publish(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Publish,
             run_id: str | None = None) -> dict[str, Any]:
     body = {"job_id": job_id, "run_id": run_id, **req.model_dump(mode="json")}

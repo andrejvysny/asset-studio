@@ -94,7 +94,7 @@ def approve(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Approv
         tasks = item_tasks(studio, ctx.id, load_item(ctx.store, jid, a.item_id)[0])
 
         def apply(item: JobItem, a: ApproveItem = a, jid: str = jid, tasks: Any = tasks) -> None:
-            cset = load_cset(ctx.store, jid, a.candidate_set_id) if item.current_set == a.candidate_set_id else None
+            cset = load_cset(ctx.store, jid, a.candidate_set_id) if a.candidate_set_id in item.candidate_sets else None
             qa = load_qa(ctx.store, jid, a.qa_evaluation_id) if a.qa_evaluation_id else None
             cand = next((c for c in cset.candidates if c.id == a.candidate_id), None) if cset else None
             payload = check_binding(item, cset, qa, ApprovalRequest(

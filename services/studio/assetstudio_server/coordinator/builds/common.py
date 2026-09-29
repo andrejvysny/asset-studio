@@ -17,6 +17,7 @@ from ...adapters.base import EngineRejected
 from ...services.records import build_key, load_decision, load_item, load_qa, mutate_item
 from ..errors import Blocked, ItemFailed
 from ..runner import TaskEnv
+from .modes import inherit, mode_inputs
 
 
 class BuildFailed(ItemFailed):
@@ -139,26 +140,9 @@ def reusable_qa_mask(ctx: Any, job_id: str, bound: dict[str, Any], source: Artif
     return mask_id if ok else None
 
 
-RESUMABLE_STAGES = ("segment", "sample")  # upstream of the export settings: valid for any rebuild of the approval
-
-
-def _inherited(ctx: Any, job_id: str, item: JobItem, approval_id: str) -> tuple[str | None, dict[str, Any]]:
-    """Durable upstream checkpoints of the latest unfinished attempt for the same approval (e.g. a raw from a run
-    whose bake failed): an explicit rebuild resumes from them instead of resampling."""
-    for rid in reversed(item.build_runs):
-        prior, _ = ctx.store.get_opt(build_key(job_id, rid), BuildRun)
-        if prior is None or prior.inputs.get("approval_id") != approval_id or prior.kind != "build":
-            continue
-        if prior.status == "succeeded":
-            return None, {}
-        keep = {k: v for k, v in prior.checkpoints.items() if k in RESUMABLE_STAGES}
-        if keep:
-            return prior.id, keep
-    return None, {}
-
-
 def create_run(studio: Any, ctx: Any, job_id: str, item: JobItem, approval_id: str, build: str, command_id: str,
-               reexport_from: str | None = None, overrides: dict[str, Any] | None = None) -> BuildRun:
+               reexport_from: str | None = None, overrides: dict[str, Any] | None = None,
+               mode: str = "build") -> BuildRun:
     """At command time: the run exists and is attached to the item BEFORE any stage runs (H01)."""
     store = ctx.store
     run_id = derived_id("run", command_id, item.id)
@@ -172,9 +156,11 @@ def create_run(studio: Any, ctx: Any, job_id: str, item: JobItem, approval_id: s
                        status="queued", created_at=now, updated_at=now, op_id=command_id,
                        kind="reexport" if reexport_from else "build", derived_from=reexport_from)
         if reexport_from:
-            run.inputs = {**run.inputs, "reexport_of": reexport_from, "overrides": overrides or {}}
+            run.inputs = {**run.inputs, "reexport_of": reexport_from, "overrides": overrides or {},
+                          "mode": "reexport"}
         else:
-            resumed_from, checkpoints = _inherited(ctx, job_id, item, approval_id)
+            resumed_from, checkpoints = inherit(ctx, job_id, item, approval_id, mode, overrides or {})
+            run.inputs = {**run.inputs, **mode_inputs(ctx, job_id, item, mode, overrides or {}, command_id)}
             if checkpoints:
                 run.checkpoints = checkpoints
                 run.artifacts = {k: v for cp in checkpoints.values() for k, v in cp.outputs.items()}
@@ -204,7 +190,7 @@ def open_input(env: TaskEnv) -> BuildInput:
         prior = store.get(build_key(t.job_id, run.derived_from), BuildRun)[0]
         reexport = {"from_run": prior, "overrides": run.inputs.get("overrides", {})}
     inp = BuildInput(env, t.job_id, item, bound, source, store.artifact_bytes(source.id),
-                     {**snap["parameters"], **(reexport or {}).get("overrides", {})}, snap, reexport,
+                     {**snap["parameters"], **run.inputs.get("overrides", {})}, snap, reexport,
                      roles=dict(run.artifacts), run=run, token=token)
     if run.status not in ("running",):
         run.status, run.error = "running", None

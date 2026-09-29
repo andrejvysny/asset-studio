@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..services import jobs as jsvc
-from ..services import production, prompts, review, runs
+from ..services import production, prompts, references, review, runs
 from ..services import runtime as runtime_svc
 from ..services.records import load_job
 from ..studio import Studio
@@ -74,6 +74,30 @@ def cancel(job_id: str, ctx: ProjectContext = Depends(project), s: Studio = Depe
     done = s.journal.tasks.request_cancel(ids)
     s.events.publish("job", project_id=ctx.id, job_id=job_id)
     return {"requested": len(ids), "cancelled_before_start": len(done)}
+
+
+@router.post("/{job_id}/items/{item_id}:add-reference")
+def add_reference(job_id: str, item_id: str, req: references.AddReference, ctx: ProjectContext = Depends(project),
+                  s: Studio = Depends(studio)) -> dict[str, Any]:
+    return references.add_reference(s, ctx, job_id, item_id, req)
+
+
+@router.patch("/{job_id}/items/{item_id}:update-reference")
+def update_reference(job_id: str, item_id: str, req: references.UpdateReference,
+                     ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
+    return references.update_reference(s, ctx, job_id, item_id, req)
+
+
+@router.post("/{job_id}/items/{item_id}:remove-reference")
+def remove_reference(job_id: str, item_id: str, req: references.RemoveReference,
+                     ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
+    return references.remove_reference(s, ctx, job_id, item_id, req)
+
+
+@router.patch("/{job_id}/items/{item_id}:set-preset")
+def set_preset(job_id: str, item_id: str, req: references.SetPreset, ctx: ProjectContext = Depends(project),
+               s: Studio = Depends(studio)) -> dict[str, Any]:
+    return references.set_preset(s, ctx, job_id, item_id, req)
 
 
 @router.post("/{job_id}:enhance")

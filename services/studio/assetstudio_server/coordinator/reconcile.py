@@ -10,11 +10,12 @@ import logging
 from typing import Any
 
 from ..registry import ProjectContext
-from ..services.records import load_item
+from ..services.records import load_item, load_job
 from ..studio import Studio
 from ..taskstore import Busy, StageTask
 from .stages import STAGES, new_task
 from .stages.qa import qa_needs
+from .stages.qa_compare import compare_needed
 
 log = logging.getLogger("assetstudio.reconcile")
 
@@ -35,6 +36,10 @@ def qa_tasks(studio: Studio, ctx: ProjectContext, t: StageTask, candidate_set_id
         v = new_task(studio, STAGES["qa_vlm"], inputs=ins, **common)
         out.append(v)
         deps.append(v.id)
+    if studio.aux is not None and compare_needed(load_job(ctx.store, t.job_id)[0], item):
+        c = new_task(studio, STAGES["qa_compare"], inputs=ins, **common)
+        out.append(c)
+        deps.append(c.id)
     out.append(new_task(studio, STAGES["qa_finalize"], inputs={**ins, "soft_deps": True}, deps=deps, **common))
     return out
 

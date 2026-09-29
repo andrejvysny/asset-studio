@@ -46,7 +46,8 @@ def model_identity(env_or_config: Any, key: str) -> str:
 
 def residency(studio: Any, stage: str, **kw: Any) -> str:
     """Static residencies per stage; image generation adds its weight-changing modifiers."""
-    if stage in ("enhance", "qa_vlm", "style_analyze", "style_synthesize", "style_evaluate"):
+    if stage in ("enhance", "qa_vlm", "qa_compare", "diversity", "variant_analyze", "variant_suggest",
+                 "style_analyze", "style_synthesize", "style_evaluate"):
         return f"aux.vlm:{model_identity(studio, 'qwen3_vl_8b_instruct')}"
     if stage in ("mask", "segment"):
         return f"aux.birefnet:{model_identity(studio, 'birefnet')}"
@@ -55,6 +56,8 @@ def residency(studio: Any, stage: str, **kw: Any) -> str:
                 f"+{model_identity(studio, 'trellis_image_large')}")
     if stage == "bake":
         return f"worker3d.bake:{kw.get('exporter', 'clean')}"
+    if stage == "generate" and kw.get("mode") == "image_edit":  # source/row ids never enter a signature
+        return f"comfyui:{model_identity(studio, 'qwen_image_edit_2511')}|edit"
     if stage == "generate":
         speed = kw.get("speed_preset") or "quality"
         lora = kw.get("style_lora")

@@ -250,6 +250,7 @@ class JobItem(JobScoped):
     candidate_sets: list[str] = []
     current_set: str | None = None
     qa: dict[str, str] = {}  # candidate id -> qa evaluation id (current set)
+    qa_history: dict[str, dict[str, str]] = {}  # earlier rounds: candidate set id -> {candidate id -> qa id}
     decisions: list[str] = []
     approval: str | None = None
     regen_requested: bool = False
@@ -278,6 +279,9 @@ class PromptRevision(Record):
     negative: str
     style_sha: str | None = None
     snapshot_sha: str
+    # What this revision was written against (variant plan/reference set, item references revision, preset,
+    # edit mode, enhancer facts/additions). Confirmation binds the whole revision, so these travel with it.
+    bindings: dict[str, Any] = {}
 
 
 class Candidate(BaseModel):

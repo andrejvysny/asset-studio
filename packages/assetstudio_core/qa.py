@@ -108,7 +108,7 @@ class QaRuleset(BaseModel):
 
 class CheckResult(BaseModel):
     rule_id: str
-    source: Source
+    source: Source | Literal["vlm_compare"]  # vlm_compare: multi-image comparison (variant/reference QA)
     severity: Literal["major", "minor"]
     result: Result
     reason: str = ""

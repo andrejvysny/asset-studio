@@ -55,19 +55,19 @@ def detail(batch_id: str, ctx: ProjectContext = Depends(project), s: Studio = De
 @router.post("/{batch_id}:enhance")
 def enhance(batch_id: str, req: prompts.EnhanceRequest, ctx: ProjectContext = Depends(project),
             s: Studio = Depends(studio)) -> JSONResponse:
-    return _accepted(prompts.enqueue_enhance(s, ctx, batch_id, req))
+    return _accepted(prompts.enqueue_enhance(s, ctx, batch_id, req, rounds=False))
 
 
 @router.post("/{batch_id}:edit-prompts")
 def edit_prompts(batch_id: str, req: prompts.EditPrompts, ctx: ProjectContext = Depends(project),
                  s: Studio = Depends(studio)) -> dict[str, Any]:
-    return {"results": prompts.edit_prompts(s, ctx, batch_id, req)}
+    return {"results": prompts.edit_prompts(s, ctx, batch_id, req, rounds=False)}
 
 
 @router.post("/{batch_id}:confirm-and-generate")
 def confirm(batch_id: str, req: prompts.ConfirmAndGenerate, ctx: ProjectContext = Depends(project),
             s: Studio = Depends(studio)) -> JSONResponse:
-    return _accepted(prompts.confirm_and_generate(s, ctx, batch_id, req))
+    return _accepted(prompts.confirm_and_generate(s, ctx, batch_id, req, rounds=False))
 
 
 @router.post("/{batch_id}:reexport")
