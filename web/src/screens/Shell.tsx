@@ -1,83 +1,88 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 
-import type { JobSummary } from "../lib/api";
+import { OK, WARN, BAD, NONE } from "../components/ui";
+import { P, type ProjectRow, type Runtime, type Summary } from "../lib/api";
 import { useApi } from "../lib/hooks";
-import type { RuntimeInfo } from "./Runtime";
+import { ProjectContext } from "../lib/project";
 
-function Nav({ to, label, count }: { to: string; label: string; count?: string | number }) {
-  return (
-    <NavLink to={to} className="clickable" style={({ isActive }) => ({
-      display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 5, textDecoration: "none",
-      background: isActive ? "var(--active-2)" : "transparent", color: isActive ? "#fff" : "var(--text-2)",
-    })}>
-      <span style={{ flex: 1 }}>{label}</span>
-      <span className="sub">{count ?? ""}</span>
-    </NavLink>
-  );
-}
+const NAV: ([string, string] | [string, string, (s: Summary) => string | number])[] = [
+  ["h", "Library"], ["assets", "Assets", (s) => s.counts.assets], ["shots", "Shot list", (s) => s.counts.shots],
+  ["h", "Production"],
+  ["batches", "Batches", (s) => (s.waiting.batches ? `${s.waiting.batches} waiting` : s.counts.batches)],
+  ["h", "Project"], ["schema", "Schema", (s) => s.counts.categories], ["pipelines", "Pipelines", (s) => s.counts.recipes],
+  ["qa", "QA rules"], ["style", "Style"], ["storage", "Storage", (s) => s.storage.state], ["export", "Export"],
+  ["runtime", "Runtime"],
+];
 
-function GpuDot({ label, busy, up }: { label: string; busy: boolean; up: boolean }) {
-  const color = !up ? "var(--bad)" : busy ? "var(--info)" : "var(--ok)";
-  return <span className="row" style={{ gap: 5 }}><span className="dot" style={{ background: color }} />
-    {label} {!up ? "down" : busy ? "busy" : "idle"}</span>;
+function gpuChip(rt: Runtime | null, lane: string): { text: string; color: string } {
+  const g = rt?.gpus.find((x) => x.lane === lane);
+  if (!rt) return { text: "…", color: NONE };
+  if (!g) return { text: "not found", color: BAD };
+  const own = g.ownership;
+  const running = rt.coordinator?.lanes[lane]?.running;
+  if (own && own.state === "unknown" && own.last_error) return { text: "ownership unknown", color: BAD };
+  if (running) return { text: `busy · ${g.util_pct}%`, color: WARN };
+  return { text: `idle · ${Math.round(g.vram_used_mb / 1024)}/${Math.round(g.vram_total_mb / 1024)} GB`, color: OK };
 }
 
 export function Shell() {
-  const navigate = useNavigate();
-  const jobs = useApi<JobSummary[]>("/api/jobs", 5000);
-  const runtime = useApi<RuntimeInfo>("/api/runtime", 10000);
-  const waiting = (jobs.data ?? []).filter((j) => j.waiting);
-  const reviewable = waiting.filter((j) => j.state === "waiting_for_selection").length;
-  const notCleared = (runtime.data?.licences ?? []).filter((l) => l.status === "not_cleared");
-  const rt = runtime.data;
-  const gpu1Loaded = rt ? Object.values(rt.workers).some((w) => w.loaded || w.trellis_loaded || w.birefnet_loaded) : false;
-
+  const { project = "" } = useParams();
+  const nav = useNavigate();
+  const summary = useApi<Summary>(`${P(project)}/summary`, { project, pollMs: 15000 });
+  const projects = useApi<{ projects: ProjectRow[] }>("/api/v1/projects");
+  const rt = useApi<Runtime>("/api/v1/runtime", { pollMs: 5000 });
+  const s = summary.data;
+  const g0 = gpuChip(rt.data, "gpu0");
+  const g1 = gpuChip(rt.data, "gpu1");
+  const storageColor = s?.storage.state === "read_only" ? WARN : OK;
   return (
-    <div style={{ height: "100vh", display: "grid", gridTemplateRows: "44px minmax(0,1fr)",
-      gridTemplateColumns: "196px minmax(0,1fr)" }}>
-      <div style={{ gridColumn: "1 / 3", display: "flex", alignItems: "center", gap: 16, padding: "0 14px",
-        borderBottom: "1px solid var(--line)", background: "var(--panel)" }}>
-        <div className="row" style={{ gap: 9 }}>
-          <div style={{ width: 14, height: 14, border: "1.5px solid var(--text)", transform: "rotate(45deg)" }} />
-          <span style={{ fontWeight: 600, letterSpacing: "-.01em" }}>Asset Studio</span>
-          <span className="sub">line_a · ComfyUI v1 API</span>
-        </div>
-        <div style={{ flex: 1 }} />
-        {notCleared.length > 0 && (
-          <button className="row btn-link" onClick={() => navigate("/runtime")} style={{ padding: "4px 10px",
-            borderRadius: 5, background: "var(--bad-bg)", color: "oklch(0.8 0.12 25)", fontSize: 12 }}>
-            <span className="dot" style={{ background: "var(--bad)" }} />Export runtime not cleared for commercial use
+    <ProjectContext.Provider value={{ id: project, summary }}>
+      <div className="app">
+        <header className="topbar">
+          <div className="row" style={{ gap: 9 }}>
+            <div className="logo" aria-hidden />
+            <span style={{ fontWeight: 600 }}>Asset Studio</span>
+            <span style={{ color: "#5a5c60" }}>/</span>
+            <select className="input" aria-label="project" value={project} style={{ padding: "3px 6px" }}
+              onChange={(e) => nav(`/p/${e.target.value}/assets`)}>
+              {(projects.data?.projects ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            {s?.simulated && <span className="sim-badge" title="Engine outputs are simulated test data">SIMULATED ENGINE</span>}
+          </div>
+          <div className="grow" />
+          <button className="chip-top" onClick={() => nav(`/p/${project}/storage`)}
+            title={s ? `${s.storage.backend} · ${s.storage.root}` : ""}>
+            <span className="dot" style={{ background: storageColor }} />
+            {s ? `${s.storage.root.split("/").slice(-1)[0]} · ${s.storage.state === "read_only" ? "read-only" : "local"}` : "…"}
           </button>
-        )}
-        <button className="row btn-link" onClick={() => navigate("/jobs")} style={{ padding: "4px 10px",
-          borderRadius: 5, background: "var(--active)", fontSize: 12, color: "var(--text)" }}>
-          <span className="mono" style={{ fontWeight: 600, fontSize: 11, background: "var(--text)", color: "var(--bg)",
-            borderRadius: 3, padding: "0 5px" }}>{waiting.length}</span>waiting on you
-        </button>
-        <div className="row sub" style={{ gap: 10, color: "var(--muted)" }}>
-          <GpuDot label="GPU0" up={!!rt?.comfyui.reachable} busy={(rt?.queue.running ?? 0) > 0} />
-          <GpuDot label="GPU1" up={!!rt && Object.values(rt.workers).some((w) => w.reachable)} busy={gpu1Loaded} />
-        </div>
+          <button className="chip-top" style={{ background: "#202124", fontFamily: "var(--sans)", fontSize: 12 }}
+            onClick={() => nav(`/p/${project}/batches`)}
+            title={(s?.waiting.detail ?? []).map((d) => `${d.alias}: ${d.next_action}`).join("\n") || "nothing waiting"}>
+            <span className="count-badge">{s?.waiting.batches ?? 0}</span>waiting on you
+          </button>
+          <button className="row" style={{ gap: 10, font: "500 11px var(--mono)", color: "var(--muted)" }}
+            onClick={() => nav(`/p/${project}/runtime`)} aria-label="GPU status">
+            <span className="row" style={{ gap: 5 }}><span className="dot" style={{ background: g0.color }} />GPU0 {g0.text}</span>
+            <span className="row" style={{ gap: 5 }}><span className="dot" style={{ background: g1.color }} />GPU1 {g1.text}</span>
+          </button>
+        </header>
+        <nav className="sidebar" aria-label="main">
+          {NAV.map(([id, label, count], i) => id === "h" ? <div key={i} className="nav-head">{label}</div> : (
+            <NavLink key={id} to={`/p/${project}/${id}`} className={({ isActive }) => `nav-item${isActive ? " on" : ""}`}>
+              <span className="label-text">{label}</span>
+              <span className="n">{s && count ? count(s) : ""}</span>
+            </NavLink>
+          ))}
+          <div className="grow" />
+          <div className="sub foot" style={{ padding: 10, lineHeight: 1.5, color: "var(--faint)" }}>
+            {s?.simulated ? "Engine: SIMULATED (tests/demo)" : "Self-hosted · no cloud inference"}
+          </div>
+        </nav>
+        <main className="main">
+          {summary.error && <div className="banner bad" style={{ margin: 16 }}>{summary.error}</div>}
+          <Outlet />
+        </main>
       </div>
-
-      <nav style={{ borderRight: "1px solid var(--line)", background: "var(--panel)", padding: "12px 8px",
-        display: "flex", flexDirection: "column", gap: 2, overflow: "auto" }}>
-        <div className="label" style={{ padding: "4px 10px 6px" }}>Library</div>
-        <Nav to="/library" label="Browse" />
-        <Nav to="/coverage" label="Coverage" />
-        <div className="label" style={{ padding: "14px 10px 6px" }}>Production</div>
-        <Nav to="/jobs" label="Jobs" count={jobs.data?.length} />
-        <Nav to="/new" label="New job" />
-        <Nav to="/review" label="Review" count={reviewable || ""} />
-        <div className="label" style={{ padding: "14px 10px 6px" }}>System</div>
-        <Nav to="/runtime" label="Runtime" count={notCleared.length ? "!" : ""} />
-        <div style={{ flex: 1 }} />
-        <div className="sub" style={{ padding: 10, lineHeight: 1.5 }}>3D line · catalog from Asset Library Kit</div>
-      </nav>
-
-      <main style={{ overflow: "auto", minWidth: 0 }}>
-        <Outlet />
-      </main>
-    </div>
+    </ProjectContext.Provider>
   );
 }

@@ -1,0 +1,16 @@
+# Legacy research worker (non-commercial nvdiffrast exporter). NEVER called by Studio recipes; kept only until the
+# Phase 3 native ComfyUI TRELLIS.2 worker lands. Explicit opt-in: add `-f compose.legacy-3d.yml`.
+services:
+  trellis-worker:
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-1}"], capabilities: [gpu]}]
+    build: {context: ., dockerfile: services/trellis_worker/Dockerfile}
+    image: localhost/assetstudio-trellis-legacy:dev
+    shm_size: 8g
+    environment: {HF_HUB_OFFLINE: "1", TRANSFORMERS_OFFLINE: "1", DO_NOT_TRACK: "1"}
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - ./output:/output
+    networks: [internal]

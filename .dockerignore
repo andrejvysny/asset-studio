@@ -1,0 +1,14 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.env
+models
+output
+projects
+web/node_modules
+web/dist
+tests
+comfyui/user

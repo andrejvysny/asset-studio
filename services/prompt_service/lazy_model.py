@@ -1,10 +1,12 @@
-"""Lazy-load/idle-unload holder. GPU1 is time-shared, so models must not stay resident."""
+"""Lazy-load / explicit-unload holder with active-use counting. GPU1 is time-shared: never unload mid-use."""
 from __future__ import annotations
 
 import gc
 import threading
 import time
-from typing import Callable, Generic, TypeVar
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from typing import Generic, TypeVar
 
 import torch
 
@@ -16,34 +18,51 @@ class LazyModel(Generic[T]):
         self._loader = loader
         self._idle_unload_s = idle_unload_s
         self._model: T | None = None
-        self._lock = threading.RLock()
+        self._cond = threading.Condition()
+        self._active = 0
         self._last_used = 0.0
+        self.loads = 0
         threading.Thread(target=self._reaper, daemon=True).start()
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
-    def get(self) -> T:
-        with self._lock:
+    @contextmanager
+    def use(self) -> Iterator[T]:
+        with self._cond:
             if self._model is None:
                 self._model = self._loader()
-            self._last_used = time.monotonic()
-            return self._model
+                self.loads += 1
+            self._active += 1
+            model = self._model
+        try:
+            yield model
+        finally:
+            with self._cond:
+                self._active -= 1
+                self._last_used = time.monotonic()
+                self._cond.notify_all()
 
-    def unload(self) -> None:
-        with self._lock:
+    def unload(self, timeout: float = 120.0) -> bool:
+        """Waits for active users to finish. Returns True only if the weights are actually released."""
+        with self._cond:
+            if not self._cond.wait_for(lambda: self._active == 0, timeout=timeout):
+                return False
             self._model = None
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        return True
 
     def _reaper(self) -> None:
         while True:
             time.sleep(15)
-            with self._lock:
-                if self._model is not None and time.monotonic() - self._last_used > self._idle_unload_s:
-                    self.unload()
+            with self._cond:
+                idle = self._model is not None and self._active == 0 and \
+                    time.monotonic() - self._last_used > self._idle_unload_s
+            if idle:
+                self.unload(timeout=0)
 
 
 def gpu_info() -> dict | None:

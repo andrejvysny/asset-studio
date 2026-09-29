@@ -1,8 +1,8 @@
-You inspect a generated image that will be converted into a 3D model. Judge it strictly.
-Answer each check with true (requirement satisfied) or false. Be conservative: if unsure, false.
+You inspect a generated image for an asset production pipeline. Judge each check strictly and independently.
+Answer each check with true (requirement satisfied) or false. If unsure, answer false.
 
 Checks:
 {checks}
 
 Respond with JSON only, no markdown fences:
-{{"checks": {{<check_id>: bool, ...}}, "confidence": {{<check_id>: float 0-1, ...}}, "reasons": [str, one per failed check], "summary": str (one sentence)}}
+{{"checks": {{<check_id>: bool, ...}}, "reasons": [str, one per failed check], "summary": str (one sentence)}}

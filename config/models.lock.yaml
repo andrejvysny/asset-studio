@@ -1,0 +1,262 @@
+# Pinned model dependency closure: the single source for download, verify, readiness and run provenance.
+# local_dir is relative to the models root (./models on the host, /models in containers).
+# sha256 null = not yet known (gated/pending); such files can never pass full verification.
+schema_version: 1
+models:
+  qwen3_vl_8b_instruct:
+    repo: Qwen/Qwen3-VL-8B-Instruct
+    revision: 0c351dd01ed87e9c1b53cbc748cba10e6187ff3b
+    local_dir: checkpoints/qwen3-vl-8b-instruct
+    licence: Apache-2.0
+    licence_status: cleared
+    roles:
+    - text.enhance
+    - vlm.qa
+    service: aux
+    gated: false
+    optional: false
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      chat_template.json:
+        size: 5499
+        sha256: 5c72a170d2a4a1a3bc5adad2e689ae28138a9700e5b8c96c0266331e86c0acce
+      config.json:
+        size: 1474
+        sha256: 5cd452860dc1e9c29dd71cc3cef7f39b338b7a40793f7a260655c2d3568f3661
+      generation_config.json:
+        size: 269
+        sha256: 8469742d1fce0de951c8909b26a2c0c0d8490837ce476efb114da9e0cefc4d44
+      merges.txt:
+        size: 1671839
+        sha256: 599bab54075088774b1733fde865d5bd747cbcc7a547c5bc12610e874e26f5e3
+      model-00001-of-00004.safetensors:
+        size: 4902275944
+        sha256: d5d0aef0eb170fc7453a296c43c0849a56f510555d3588e4fd662bb35490aefa
+      model-00002-of-00004.safetensors:
+        size: 4915962496
+        sha256: 8be88fb5501e4d5719a6d4cc212e6a13480330e74f3e8c77daa1a68f199106b5
+      model-00003-of-00004.safetensors:
+        size: 4999831048
+        sha256: 83de00eafe6e0d57ccd009dbcf71c9974d74df2f016c27afb7e95aafd16b2192
+      model-00004-of-00004.safetensors:
+        size: 2716270024
+        sha256: 0a88b98e9f96270973f567e6a2c103ede6ccdf915ca3075e21c755604d0377a5
+      model.safetensors.index.json:
+        size: 67759
+        sha256: 520b2e05079402e9468a8701d03d1154d14b2599593afb6effa7fb60c1bff070
+      preprocessor_config.json:
+        size: 390
+        sha256: 27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516
+      tokenizer.json:
+        size: 7032403
+        sha256: a5d85b6dcc535e6b93115a9ef287e6132fdbf30270da6218194ba742261173c7
+      tokenizer_config.json:
+        size: 10868
+        sha256: c2da771801886ad9ae98181793ffd3dfb7f1af30f6f7c6a4e15d7dbba52e2399
+      video_preprocessor_config.json:
+        size: 385
+        sha256: 7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13
+      vocab.json:
+        size: 2776833
+        sha256: ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910
+  qwen_image_2512:
+    repo: Comfy-Org/Qwen-Image_ComfyUI
+    revision: 1f12b17be14c89b026c51a91d67c32f84bb047bc
+    local_dir: checkpoints/qwen-image-2512
+    licence: Apache-2.0
+    licence_status: cleared
+    roles:
+    - image.t2i
+    service: comfyui
+    gated: false
+    optional: false
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      split_files/diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors:
+        size: 20430679144
+        sha256: 5dc80554d5d83390046a2f4a94ece06afb7700bf7b0aaf8bde9769793875876b
+      split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors:
+        size: 9384670680
+        sha256: cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4
+      split_files/vae/qwen_image_vae.safetensors:
+        size: 253806246
+        sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
+  qwen_image_2512_lightning:
+    repo: lightx2v/Qwen-Image-2512-Lightning
+    revision: a52649c9d0f6e1a248bff13f0df33bb8a2abdb52
+    local_dir: loras/speed
+    licence: see lightx2v model card
+    licence_status: review
+    roles:
+    - image.speed_lora
+    service: comfyui
+    gated: false
+    optional: true
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors:
+        size: 849608296
+        sha256: de0d236e54ecf2c43b32447d13478c6eae0d361b1fed48c69675b084fa240d87
+      Qwen-Image-2512-Lightning-8steps-V1.0-bf16.safetensors:
+        size: 849608296
+        sha256: b48fb1a8edd939354579c1cf0b403c92f28879b32dddbaaa91b9d424bfc72081
+  birefnet:
+    repo: ZhengPeng7/BiRefNet
+    revision: e2bf8e4460fc8fa32bba5ea4d94b3233d367b0e4
+    local_dir: checkpoints/birefnet
+    licence: MIT
+    licence_status: cleared
+    roles:
+    - segmentation
+    service: aux
+    gated: false
+    optional: false
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      BiRefNet_config.py:
+        size: 298
+        sha256: e7b8c2a74f6cea6a59553d517f71d47f2c1d90e670a13416af17c25fe2f3dc52
+      birefnet.py:
+        size: 91896
+        sha256: 208771ae626f653d64128fbf2d6ac9f8e645c5cc5e286258a73ec3322bbfe5ef
+      config.json:
+        size: 405
+        sha256: c97ea21569daf66b205491a4635147dd3bc42c7c168b89d7d75b53f67ef548ae
+      handler.py:
+        size: 4762
+        sha256: b95f5806bfcd575ccff2a9f08816ae0e5d4df1e81b48797f9997f68b531404a5
+      model.safetensors:
+        size: 444473596
+        sha256: 9ab37426bf4de0567af6b5d21b16151357149139362e6e8992021b8ce356a154
+      requirements.txt:
+        size: 149
+        sha256: bdfdd83a090d31a2acf64f7350653fa63cd8b5d9d6e0ff3e135bea7ce3786341
+  trellis2:
+    repo: microsoft/TRELLIS.2-4B
+    revision: af44b45f2e35a493886929c6d786e563ec68364d
+    local_dir: checkpoints/trellis2
+    licence: MIT
+    licence_status: cleared
+    roles:
+    - 3d.image_to_mesh
+    service: comfy-3d
+    gated: false
+    optional: false
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      ckpts/shape_dec_next_dc_f16c32_fp16.json:
+        size: 678
+        sha256: 5f1b856dffce79466fb18f5f0eefc08f08c673b24b3c05b20359c0b6d318a209
+      ckpts/shape_dec_next_dc_f16c32_fp16.safetensors:
+        size: 948490494
+        sha256: e3b718d3e43e4f8780e9a24ac6fff231811a67e3b058e336e10fe654c911d581
+      ckpts/shape_enc_next_dc_f16c32_fp16.json:
+        size: 653
+        sha256: 5a960a5c419d70f8d4a7a6b6e52ae689cd948c88bd7ed92346adfbf82cd12007
+      ckpts/shape_enc_next_dc_f16c32_fp16.safetensors:
+        size: 708797208
+        sha256: f37c5ff5b983b68e9946060000f09bc131f3e84318a2c8b7430a81e4b4636c41
+      ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.json:
+        size: 458
+        sha256: 7ebd6d367393f52fee9e92c2b3d727a9026a338549c6a6fa84c7ea122140ffdd
+      ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.safetensors:
+        size: 2584574424
+        sha256: 07cd0596f634c5adc1890023d16023afc5eed02fb84b22bb23aff5bf0030fbbd
+      ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.json:
+        size: 458
+        sha256: ddbd7a1d34ce9a8e7af2f6ef9ae686d9ab49f69e62dacb98d8409b511cdbd5e2
+      ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.safetensors:
+        size: 2584574424
+        sha256: ec5e0917ef9b7e25ad51dffc7d19687a42019871f94239f2fa7f86264c55b70f
+      ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.json:
+        size: 458
+        sha256: 31f4fdad9974930e5e9324ac9dfb6ef7de6b30cea51854ba515ef827a8d353b2
+      ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors:
+        size: 2584672728
+        sha256: 580401269059a339b8318ab9ced459a13ba63391721c83a6c383198c29e77686
+      ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.json:
+        size: 458
+        sha256: 3093796257a62f838d2e5578ac4580ca3b7d88d10b87d348065d3fdfcc4c2077
+      ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.safetensors:
+        size: 2584672728
+        sha256: 8371aa1c5d13be79dcd5ddfd2cf3835e902e204dc34427169a1c702828e1a94d
+      ckpts/ss_flow_img_dit_1_3B_64_bf16.json:
+        size: 467
+        sha256: 6cdfb636854f60ffcadd8c49244169cd449f34c5ccdb55b5ff7c04678f9c399e
+      ckpts/ss_flow_img_dit_1_3B_64_bf16.safetensors:
+        size: 2584426920
+        sha256: ca01377c485bec418076d38ee80166d32dc776d744f2553b835cba1e97a7abf6
+      ckpts/tex_dec_next_dc_f16c32_fp16.json:
+        size: 705
+        sha256: 22074e4ab5b28e2b72d33a3fe61bf416134b89e12d0fc5c729f37da75da0c4d1
+      ckpts/tex_dec_next_dc_f16c32_fp16.safetensors:
+        size: 948458812
+        sha256: 97ea69addea2ecd9312910f5f548234665eef51c088386180b7cd5b258645e3c
+      ckpts/tex_enc_next_dc_f16c32_fp16.json:
+        size: 676
+        sha256: 22d78e219c9df19b00f7f97db5889bafdf18ee57fedf853cd888e5afbfa0ad6c
+      ckpts/tex_enc_next_dc_f16c32_fp16.safetensors:
+        size: 708797208
+        sha256: dd109f75f84b90fa411554ed6b0e4a87f430841163156fc0ebda2ebdc4752493
+      pipeline.json:
+        size: 4186
+        sha256: 222c359ab1ed9bc6735a640a34f95d47f8681b9bc4aaa101bfb80274676253c6
+      texturing_pipeline.json:
+        size: 2965
+        sha256: 64009974a391fe9c948b2943fd2846dc4526bc569c1d56dafb8f9e5c181fcac3
+  trellis_image_large:
+    repo: microsoft/TRELLIS-image-large
+    revision: 25e0d31ffbebe4b5a97464dd851910efc3002d96
+    local_dir: checkpoints/trellis-image-large
+    licence: MIT
+    licence_status: cleared
+    roles:
+    - 3d.ss_decoder
+    service: comfy-3d
+    gated: false
+    optional: false
+    hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
+    files:
+      ckpts/ss_dec_conv3d_16l8_fp16.json:
+        size: 245
+        sha256: 646781293f1cda74720de85d1cef50a957fb4aebd9a4bd014e454e32f2330ac5
+      ckpts/ss_dec_conv3d_16l8_fp16.safetensors:
+        size: 147591972
+        sha256: 1c76d4a40519aa2d711cc263a8404105231ac26db31d946bed48b84fee79009a
+  dinov3_vitl16:
+    repo: facebook/dinov3-vitl16-pretrain-lvd1689m
+    revision: ea8dc2863c51be0a264bab82070e3e8836b02d51
+    local_dir: checkpoints/dinov3-vitl16
+    licence: DINOv3 License
+    licence_status: review
+    roles:
+    - 3d.image_encoder
+    service: comfy-3d
+    gated: true
+    optional: false
+    hash_source: 'pending: gated repo access awaiting approval; refresh with `assetstudio models lock --refresh dinov3_vitl16`'
+    files:
+      config.json:
+        size: 745
+        sha256: null
+      model.safetensors:
+        size: 1212559808
+        sha256: null
+      preprocessor_config.json:
+        size: 585
+        sha256: null
+loras:
+  lightning_8step:
+    model: qwen_image_2512_lightning
+    file: Qwen-Image-2512-Lightning-8steps-V1.0-bf16.safetensors
+    base: qwen_image_2512
+    purpose: speed
+    steps: 8
+    cfg: 1.0
+  lightning_4step:
+    model: qwen_image_2512_lightning
+    file: Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors
+    base: qwen_image_2512
+    purpose: speed
+    steps: 4
+    cfg: 1.0

@@ -1,107 +1,154 @@
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { ErrorLine, ModelViewer, relTime } from "../components/ui";
-import { api, type AssetItem, attemptFile, fileUrl, type SlotDetail } from "../lib/api";
+import { bytes, ErrorLine, Loading, ModelViewer, OK, relTime } from "../components/ui";
+import { type AssetDetail as Detail, artifactUrl, key, P, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
+import { useProject } from "../lib/project";
+
+const FACT_LABEL: Record<string, string> = {
+  kind: "Asset type", recipe_id: "Pipeline", naming: "Naming rule", budget: "Budget", build_profile: "Texturing",
+  qa_ruleset: "QA rule set", reference_set: "Reference set", style: "Style", style_lora: "Style LoRA",
+  export_presets: "Export presets", candidate_count: "Candidates",
+};
+
+function fmt(v: unknown): string {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    if ("triangles" in o || "size_px" in o) {
+      return Object.entries(o).filter(([, r]) => r).map(([k, r]) => {
+        const x = r as { min: number | null; max: number | null; advisory: boolean };
+        return `${x.min ?? "…"}–${x.max ?? "…"} ${k.replace("_px", " px")}${x.advisory ? " (advisory)" : ""}`;
+      }).join(" · ") || "—";
+    }
+    if ("model_id" in o) return `${o.model_id as string} @ ${o.strength as number}`;
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
 
 export function AssetDetail() {
-  const { slotId = "" } = useParams();
-  const navigate = useNavigate();
-  const slot = useApi<SlotDetail>(`/api/slots/${slotId}`);
-  const unassigned = useApi<AssetItem[]>("/api/assets?unassigned=1");
-  const action = useAction();
+  const { id } = useProject();
+  const { assetId = "" } = useParams();
+  const [sp, setSp] = useSearchParams();
+  const nav = useNavigate();
+  const shown = sp.get("version");
+  const d = useApi<Detail>(`${P(id)}/assets/${assetId}${shown ? `?version=${shown}` : ""}`, { project: id });
+  const act = useAction();
   const [copied, setCopied] = useState(false);
-  const s = slot.data;
-  const a = s?.assignment;
-
-  const assign = (item: AssetItem) => action.run(async () => {
-    await api(`/api/slots/${slotId}/assignment`, { method: "PUT",
-      body: JSON.stringify({ job_id: item.job_id, attempt_id: item.attempt_id }) });
-    slot.reload(); unassigned.reload();
-  });
-  const unassign = () => action.run(async () => {
-    await api(`/api/slots/${slotId}/assignment`, { method: "DELETE" });
-    slot.reload(); unassigned.reload();
-  });
-  const manifestJson = JSON.stringify(s?.manifest ?? { slot: slotId, assignment: null }, null, 2);
-
+  if (!d.data) return d.error ? <div className="content"><ErrorLine error={d.error} /></div> : <Loading what="asset" />;
+  const { manifest: m, shown_version: v } = d.data;
+  const model = d.data.files.find((f) => f.mime === "model/gltf-binary");
+  const image = d.data.files.find((f) => f.role === "image") ?? d.data.files.find((f) => f.role === "preview");
+  const lic = v.licence.status;
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", minHeight: "100%" }}>
-      <div style={{ padding: "20px 24px 40px", display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
-        <ErrorLine error={slot.error ?? action.error} />
-        {s && <>
+      <section className="content">
+        <div>
+          <Link to={`/p/${id}/assets`} className="sub" style={{ textDecoration: "none" }}>← Library / {d.data.category_label ?? "unclassified"}</Link>
+          <div className="row" style={{ alignItems: "baseline", gap: 12, marginTop: 6, flexWrap: "wrap" }}>
+            <h1 className="h1" style={{ margin: 0 }}>{m.display_name}</h1>
+            <span className="mono muted" style={{ fontSize: 12 }}>{m.name_id}</span>
+          </div>
+          <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            <span className="tag">{d.data.kind_label}</span>
+            <span className="tag">{m.origin}</span>
+            <span className="pill ok">current v{m.versions.find((x) => x.version_id === m.current_version_id)?.display_version}</span>
+            <span className="tag">{m.versions.length} versions</span>
+            <span className={`pill ${lic === "cleared" ? "ok" : lic === "not_cleared" ? "bad" : "warn"}`}
+              title={v.licence.note}>licence: {lic}</span>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(260px,1fr) minmax(260px,1fr)", gap: 16 }}>
+          <div className="panel" style={{ display: "flex", flexDirection: "column" }}>
+            {model ? <ModelViewer src={artifactUrl(id, model.artifact_id)} height={300} />
+              : image ? <div className="checker" style={{ height: 300, display: "flex" }}>
+                <img src={artifactUrl(id, image.artifact_id)} alt={m.display_name}
+                  style={{ maxWidth: "100%", maxHeight: 300, margin: "auto", objectFit: "contain" }} /></div>
+                : <div className="stripes" style={{ height: 300 }} />}
+            <div className="sub tr" style={{ padding: "8px 12px" }}>
+              showing v{v.display_version} · {d.data.is_current ? "current" : "older version"}</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span className="label">Versions · immutable</span>
+            {[...m.versions].reverse().map((ver) => {
+              const isCur = ver.version_id === m.current_version_id;
+              const isShown = ver.version_id === v.version_id;
+              return (
+                <div key={ver.version_id} role="button" tabIndex={0} className="panel"
+                  style={{ padding: "9px 11px", display: "flex", flexDirection: "column", gap: 3, cursor: "pointer",
+                    borderColor: isShown ? "var(--dim)" : undefined, background: isShown ? "#1a1b1d" : undefined }}
+                  onClick={() => setSp(isCur ? {} : { version: ver.version_id })}
+                  onKeyDown={(e) => { if (e.key === "Enter") setSp(isCur ? {} : { version: ver.version_id }); }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="mono" style={{ fontWeight: 600 }}>v{ver.display_version}</span>
+                    {isCur && <span className="sub" style={{ color: OK }}>● current</span>}
+                    <span className="grow" />
+                    {!isCur && <button className="tag" disabled={act.busy} onClick={(e) => {
+                      e.stopPropagation();
+                      void act.run(async () => {
+                        await send("POST", `${P(id)}/assets/${m.asset_id}:set-current`, { version_id: ver.version_id,
+                          expected_current_version: m.current_version_id, idempotency_key: key(), reason: "set in UI" });
+                        d.reload();
+                      });
+                    }}>Set current</button>}
+                  </div>
+                  <span className="muted" style={{ fontSize: 12 }}>{ver.note || "—"}</span>
+                  <span className="sub">{relTime(ver.published_at)} · {ver.version_id}</span>
+                </div>
+              );
+            })}
+            <ErrorLine error={act.error} />
+          </div>
+        </div>
+        {d.data.facts.length > 0 && (
           <div>
-            <Link to={`/library/${s.biome}`} className="sub" style={{ textDecoration: "none" }}>
-              ← Library / {s.biome_name} / {s.layer + 1} · {s.layer_name} / {s.family}</Link>
-            <div className="h1 mono" style={{ fontSize: 18 }}>{s.id}</div>
-            <div className="row" style={{ marginTop: 8, flexWrap: "wrap" }}>
-              <span className={`pill ${a ? "ok" : "none"}`}>{a ? "assigned" : "planned"}</span>
-              {[s.biome, s.role, "1 m grid", "pivot: base centre"].map((t) => <span key={t} className="pill none">{t}</span>)}
+            <div className="label" style={{ marginBottom: 8 }}>Spec · current category schema (for new versions)</div>
+            <div className="kv">
+              {d.data.facts.filter((f) => f.value !== null || f.mode === "disabled").map((f) => (
+                <div key={f.key}><span className="dim" style={{ fontSize: 11 }}>{FACT_LABEL[f.key] ?? f.key}</span>
+                  <span className="mono" style={{ fontSize: 12 }}>{f.mode === "disabled" ? "disabled" : fmt(f.value)}</span>
+                  <span style={{ fontSize: 10.5, color: "var(--faint)" }}>{f.source.startsWith("category:")
+                    ? (f.source.slice(9) === m.category_id ? `set on ${f.source.slice(9)}` : `inherited from ${f.source.slice(9)}`)
+                    : f.source}</span></div>
+              ))}
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 10 }}>
-            {Object.entries(s.facts).map(([k, v]) => (
-              <div key={k} style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "9px 11px" }}>
-                <div className="dim" style={{ fontSize: 11 }}>{k.replace(/_/g, " ")}</div>
-                <div className="mono" style={{ fontSize: 12 }}>{v}</div>
+        )}
+        <div>
+          <div className="label" style={{ marginBottom: 8 }}>Files in v{v.display_version}</div>
+          <div className="table">
+            {d.data.files.map((f) => (
+              <div key={f.role} className="td" style={{ gridTemplateColumns: "110px minmax(140px,1fr) 80px minmax(160px,1.2fr)" }}>
+                <span className="dim">{f.role}</span>
+                <a className="mono" href={`${artifactUrl(id, f.artifact_id)}?download=1`}>{f.mime}</a>
+                <span className="mono muted">{bytes(f.size)}</span>
+                <span className="mono dim ellipsis" title={f.sha256}>blobs/sha256/{f.sha256.slice(0, 2)}/{f.sha256}</span>
               </div>
             ))}
           </div>
-          <div className="muted" style={{ fontSize: 12.5 }}><span className="dim">Family spec · </span>{s.variants}</div>
-
-          {a ? (
-            <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 240px", gap: 16 }}>
-              <div>
-                <ModelViewer src={fileUrl(a.job_id, a.glb)} height={380} />
-                <div className="sub" style={{ marginTop: 6 }}>live view of the delivered GLB</div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <span className="label">Source</span>
-                <div className="clickable" onClick={() => navigate(`/attempts/${a.job_id}`)}
-                  style={{ border: "1px solid var(--line)", borderRadius: 7, padding: 10 }}>
-                  <img className="thumb" alt="" style={{ borderRadius: 5, marginBottom: 8 }}
-                    src={attemptFile(a.job_id, a.attempt_id, "selected.png")} />
-                  <div style={{ fontWeight: 500 }}>{a.attempt_id} · {a.triangles ?? "?"} tris</div>
-                  <div className="sub ellipsis">{a.job_id}</div>
-                </div>
-                <div className="dim" style={{ fontSize: 12 }}>Assigned {relTime(a.assigned_at)}. Unassigning keeps the job and its attempts.</div>
-                <button className="btn" disabled={action.busy} onClick={unassign}>Unassign</button>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <span className="label">Unassigned approved results</span>
-              {(unassigned.data ?? []).length === 0 && <div className="dim">No completed, validated 3D attempts are waiting for a slot.</div>}
-              {(unassigned.data ?? []).map((u) => (
-                <div key={`${u.job_id}/${u.attempt_id}`} className="row" style={{ border: "1px solid var(--line)",
-                  borderRadius: 7, padding: 8 }}>
-                  <img alt="" src={attemptFile(u.job_id, u.attempt_id, "selected.png")}
-                    style={{ width: 48, height: 48, objectFit: "contain", borderRadius: 4, background: "#1b1c1e" }} />
-                  <div className="grow"><div>{u.title} · {u.attempt_id}</div>
-                    <div className="sub ellipsis">{u.job_id} · {u.triangles ?? "?"} tris</div></div>
-                  <button className="btn" disabled={action.busy} onClick={() => assign(u)}>Assign here</button>
-                </div>
-              ))}
-              <button className="btn-link" style={{ alignSelf: "flex-start" }}
-                onClick={() => navigate(`/new?brief=${encodeURIComponent(s.family.toLowerCase())}&slot=${s.id}`)}>
-                Or start a new job for this slot →</button>
-            </div>
-          )}
-        </>}
-      </div>
-
-      <div style={{ borderLeft: "1px solid var(--line)", background: "var(--panel)", padding: 16, display: "flex",
-        flexDirection: "column", gap: 10, minWidth: 0 }}>
-        <div className="row">
-          <span className="sub grow ellipsis">{a ? `output/${a.job_id}/manifest.json` : "manifest (unassigned)"}</span>
-          <button className="btn" style={{ padding: "3px 10px", fontSize: 12 }}
-            onClick={() => { void navigator.clipboard?.writeText(manifestJson); setCopied(true); }}>
-            {copied ? "Copied" : "Copy"}</button>
         </div>
-        <pre className="mono" style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: "var(--text-2)", overflow: "auto",
-          whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{manifestJson}</pre>
-      </div>
+        <div className="row" style={{ flexWrap: "wrap" }}>
+          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/batches/new?target=${m.asset_id}&kind=${m.kind}${m.category_id ? `&cat=${m.category_id}` : ""}&name=${encodeURIComponent(m.display_name)}`)}>
+            New version…</button>
+          <button className="btn" disabled title="Export targets arrive in Phase 4">Export current</button>
+        </div>
+      </section>
+      <aside style={{ borderLeft: "1px solid var(--line)", background: "var(--panel)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div className="row" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)" }}>
+          <span className="mono grow" style={{ fontSize: 11 }}>manifests/{m.asset_id}.json</span>
+          <button className="btn" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => {
+            void navigator.clipboard.writeText(d.data?.manifest_json ?? "");
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          }}>{copied ? "Copied" : "Copy"}</button>
+        </div>
+        <pre className="pre" style={{ flex: 1 }}>{d.data.manifest_json}</pre>
+        <div className="label" style={{ padding: "8px 14px" }}>version record · provenance</div>
+        <pre className="pre" style={{ flex: 1, borderTop: "1px solid var(--line)" }}>{JSON.stringify(
+          { sources: v.sources, qa: v.qa, validation: v.validation, licence: v.licence, parameters: v.parameters }, null, 2)}</pre>
+      </aside>
     </div>
   );
 }

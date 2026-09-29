@@ -1,22 +1,23 @@
 .env
-output/*
-!output/.gitkeep
+# legacy Line A job data (discarded by decision 2026-09-28; delete manually when no longer needed)
+output/
+# model weights and downloaded metadata: never in Git (see config/models.lock.yaml)
 models/checkpoints/*
 models/loras/*/*
 !models/loras/*/.gitkeep
 models/cache/*
+models/manifests/
 !models/**/.gitkeep
 __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
-# ComfyUI runtime state; only the generated Line A apps are tracked
-comfyui/user/*
-!comfyui/user/default/
-comfyui/user/default/*
-!comfyui/user/default/workflows/
-comfyui/user/default/workflows/*
-!comfyui/user/default/workflows/Line A - *.app.json
-library/*
-!library/.gitkeep
+.ruff_cache/
+web/dist/
+web/node_modules/
+web/tsconfig.tsbuildinfo
 tests/e2e/artifacts/
+# ComfyUI runtime state (advanced UI user data)
+comfyui/user/
+projects/*
+!projects/.gitkeep

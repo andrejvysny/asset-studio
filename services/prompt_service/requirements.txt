@@ -5,3 +5,8 @@ uvicorn==0.38.0
 pydantic==2.12.4
 pyyaml==6.0.3
 pillow==12.0.0
+numpy==1.26.4
+# BiRefNet remote code (audited copy under /models/checkpoints/birefnet): timm, kornia, einops
+timm==1.0.22
+kornia==0.8.2
+einops==0.8.1

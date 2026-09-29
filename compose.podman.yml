@@ -1,0 +1,15 @@
+# Podman override (rootless, CDI GPU names). podman-compose 1.0.x ignores deploy.resources, so GPUs come from
+# CDI `devices`; keep-id makes bind-mounted project files owned by the host user.
+services:
+  studio:
+    userns_mode: keep-id
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"   # Makefile exports the host ids (PODMAN=1)
+    environment: {HOME: /tmp}
+  comfyui:
+    userns_mode: keep-id
+    devices: ["nvidia.com/gpu=${GPU_IMAGE_ID:-0}"]
+    environment: {HOME: /tmp}
+  aux:
+    userns_mode: keep-id
+    devices: ["nvidia.com/gpu=${GPU_AUX_ID:-1}"]
+    environment: {HOME: /tmp}

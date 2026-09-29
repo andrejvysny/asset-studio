@@ -1,4 +1,4 @@
-# ComfyUI (GPU0): UI/API + Qwen-Image-2512 + Line A bridge nodes.
+# ComfyUI (GPU0): image engine for the Studio adapter + advanced UI. Stock nodes only; no product state.
 FROM python:3.12-slim-bookworm
 
 ARG COMFYUI_REF=v0.37.4
@@ -16,15 +16,11 @@ RUN uv pip install --system --no-cache torch==2.8.0 torchvision==0.23.0 torchaud
 COPY comfyui/constraints.txt /tmp/constraints.txt
 RUN uv pip install --system --no-cache -r requirements.txt -c /tmp/constraints.txt
 
-COPY comfyui/custom_nodes/line_a/requirements.txt /tmp/line_a_req.txt
-RUN uv pip install --system --no-cache -r /tmp/line_a_req.txt -c /tmp/constraints.txt
-
 COPY comfyui/extra_model_paths.yaml /opt/ComfyUI/extra_model_paths.yaml
-COPY comfyui/custom_nodes/line_a /opt/ComfyUI/custom_nodes/line_a
 
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 DO_NOT_TRACK=1 PYTHONUNBUFFERED=1
 EXPOSE 8188
 CMD ["python", "main.py", "--listen", "0.0.0.0", "--port", "8188", \
-     "--disable-auto-launch", "--output-directory", "/output/_comfy", \
+     "--disable-auto-launch", "--output-directory", "/comfy-output", \
      "--user-directory", "/comfy-user", \
-     "--temp-directory", "/tmp/comfy", "--input-directory", "/output/_comfy_input"]
+     "--temp-directory", "/tmp/comfy", "--input-directory", "/tmp/comfy-input"]

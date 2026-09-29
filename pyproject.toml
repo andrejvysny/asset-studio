@@ -1,0 +1,60 @@
+[project]
+name = "assetstudio"
+version = "0.2.0"
+description = "Self-hosted asset production and library studio"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.12.4",
+  "pyyaml==6.0.3",
+  "fastapi==0.121.0",
+  "uvicorn==0.38.0",
+  "httpx==0.28.1",
+  "python-multipart==0.0.20",
+  "pillow==12.0.0",
+  "numpy>=2.1,<2.4",
+  "scipy>=1.14,<1.17",
+  "trimesh==4.9.0",
+  "networkx>=3.3,<3.6",
+]
+
+[project.scripts]
+assetstudio = "assetstudio_server.cli:main"
+
+[dependency-groups]
+dev = ["pytest==8.4.2", "ruff==0.14.0"]
+e2e = ["playwright==1.55.0"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "packages/assetstudio_core",
+  "packages/assetstudio_storage",
+  "packages/assetstudio_processing",
+  "services/studio/assetstudio_server",
+]
+
+[tool.hatch.build]
+dev-mode-dirs = ["packages", "services/studio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/contract"]
+markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["web", "comfyui/custom_nodes", "services/trellis_worker"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["UP046"]  # pydantic generic models keep Generic[T]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]  # long request payloads read better unwrapped
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.File"]

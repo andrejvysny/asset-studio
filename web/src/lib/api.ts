@@ -1,133 +1,185 @@
-// Typed client for the library service (/api) and the proxied ComfyUI line_a routes (/comfy/line_a).
+// Typed client for the Studio API. The browser never talks to ComfyUI or the filesystem.
 
-export type Status = "recommended" | "not_recommended" | "unverified";
+export type Kind = "model3d" | "sprite" | "icon" | "vfx_flipbook" | "material" | "sprite_sheet" | "concept_art";
+export type Origin = "generated" | "imported" | "derived" | "mixed";
+export type QaStatus = "recommended" | "not_recommended" | "unverified";
+export type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 
-export interface Coverage { ran: number; total: number; missing: string[] }
-export interface QaResult {
-  candidate: string;
-  status: Status;
-  recommended: boolean;
-  checks: Record<string, boolean>;
-  coverage?: Coverage;  // absent in legacy QA files
-  failed_major: string[];
-  failed_minor: string[];
-  reasons: string[];
-  warnings?: string[];
-  summary: string;
-  services: { vlm: string; mask: string };
+export const KIND_LABEL: Record<Kind, string> = {
+  model3d: "3D model", sprite: "Sprite", icon: "Icon", vfx_flipbook: "VFX flipbook", material: "Material",
+  sprite_sheet: "Sprite sheet", concept_art: "Concept art",
+};
+export const KINDS = Object.keys(KIND_LABEL) as Kind[];
+
+export interface ProjectRow { id: string; name: string; root: string; open: boolean; read_only: boolean | null }
+export interface Summary {
+  id: string; name: string; read_only: boolean; simulated: boolean; owner: Record<string, string>;
+  storage: { backend: string; state: string; root: string };
+  counts: { assets: number; planned: number; shots: number; batches: number; categories: number; recipes: number };
+  waiting: { batches: number; items: number; detail: { batch_id: string; alias: string; next_action: string }[] };
 }
-
-export interface ValidationCheck { id: string; ok: boolean; detail: string }
-export interface Attempt {
-  id: string;
-  state: string;
-  created_at: string;
-  updated_at?: string;
-  index?: number;
-  candidate?: string;
-  candidate_set?: string;
-  image_sha256?: string;
-  qa_status?: Status | null;
-  qa_override?: boolean;
-  raw_from?: string;
-  cleanup?: { remesh: boolean; drop_floaters: boolean };
-  validated?: boolean;
-  validation?: { ok: boolean; checks: ValidationCheck[] };
-  mesh?: { triangles: number; vertices: number; components: number; has_uv: boolean;
-    has_base_color_texture: boolean; file_size_bytes: number; removed_floater_components: number };
-  triangles?: { requested: number | null; decimation_target: number; reason: string; actual: number };
-  outputs?: Record<string, string | null>;
-  params?: { cleanup?: { remesh: boolean; drop_floaters: boolean }; texture_size?: number };
-  known_limitations?: string[];
-  error?: string | null;
-  failed_stage?: string | null;
+export interface CategoryNode {
+  id: string; label: string; slug: string; path: string; parent_id: string | null; depth: number;
+  kind: Kind | null; kind_source: string; count: number;
 }
-
-export interface JobSummary {
-  job_id: string;
-  title: string;
-  prompt: string;
-  asset_type: string | null;
-  state: string;
-  stage: number;
-  waiting: boolean;
-  failed: boolean;
-  action: string;
-  active_operation: { name: string; started_at: string } | null;
-  current_attempt: string | null;
-  candidates: number;
-  created_at: string | null;
+export interface AssetRow {
+  asset_id: string; name_id: string; display_name: string; kind: Kind; origin: Origin; category_id: string | null;
+  tags: string[]; current_version_id: string | null; display_version: number | null; version_count: number;
+  preview_artifact_id: string | null; kind_label: string;
 }
-
-export interface JobDetail {
-  job_id: string;
-  state: string;
-  active_operation: { name: string; started_at: string } | null;
-  current_attempt: string | null;
-  history: { state: string; at: string; error?: string }[];
-  request: { prompt: string; asset_type: string | null; target_triangles: number | null; candidate_count: number;
-    seed_family: number; lora_name: string | null };
-  enhancement: { enhanced_prompt: string; description: string; short_title: string; asset_tags: string[];
-    camera_hint: string; meta: { model: { repo: string; revision: string }; seconds: number } } | null;
-  candidate_set: { set_id: string; images: Record<string, string> } | null;
-  candidates: string[];
-  qa: Record<string, QaResult>;
-  attempts: Attempt[];
-  manifest: Record<string, unknown>;
-  summary: JobSummary;
-  slots: Record<string, string>;
+export interface ShotRow {
+  id: string; name: string; category_id: string | null; kind: Kind | null; brief: string;
+  priority: "low" | "med" | "high"; notes: string; target_asset_id: string | null; external_id: string | null;
+  archived: boolean; status: "planned" | "in_batch" | "published" | "archived"; effective_kind: Kind | null;
+  membership: { batch_id: string; batch_alias: string; item_id: string; published: Published | null } | null;
 }
-
-export interface SlotRef { id: string; assigned: boolean; job_id?: string; attempt_id?: string }
-export interface Family { id: string; name: string; variants: string; count: number; assigned: number; slots: SlotRef[] }
-export interface BiomeTree {
-  id: string; name: string; prefix: string;
-  layers: { index: number; title: string; name: string; role: string; families: Family[] }[];
+export interface AssetList { items: AssetRow[]; total: number; planned: ShotRow[]; planned_total: number;
+  all_assets_total: number }
+export interface VersionRef { version_id: string; display_version: number; published_at: string;
+  publication_op: string; preview_artifact_id: string | null; note: string }
+export interface Manifest {
+  asset_id: string; name_id: string; display_name: string; kind: Kind; origin: Origin; category_id: string | null;
+  tags: string[]; created_at: string; current_version_id: string | null; versions: VersionRef[]; revision: number;
 }
-export interface BiomeSummary {
-  id: string; name: string; prefix: string; order: number; catalog_estimate: number; base: number; assigned: number;
-  families: number; layers: { index: number; name: string; families: number }[];
+export interface FileRef { role: string; artifact_id: string; sha256: string; size: number; mime: string }
+export interface AssetVersion {
+  version_id: string; display_version: number; origin: Origin; sources: Record<string, Json>;
+  licence: { status: string; components?: { id: string; name: string; licence: string; status: string }[];
+    note?: string };
+  validation: Record<string, Json>; qa: Record<string, Json> | null; publication: Record<string, Json>;
+  parameters: Record<string, Json>; note: string; config_snapshot_sha: string | null;
 }
-
-export interface SlotDetail {
-  id: string; biome: string; biome_name: string; layer: number; layer_name: string; role: string; family: string;
-  variants: string; facts: Record<string, string>;
-  assignment: { job_id: string; attempt_id: string; assigned_at: string; glb: string; triangles: number | null } | null;
-  manifest: Record<string, unknown> | null;
+export interface Fact { key: string; value: Json; mode: string; source: string }
+export interface AssetDetail {
+  manifest: Manifest; manifest_json: string; kind_label: string; category_label: string | null;
+  shown_version: AssetVersion; is_current: boolean; facts: Fact[]; files: FileRef[];
 }
-
-export interface AssetItem { job_id: string; attempt_id: string; title: string; triangles: number | null; glb: string;
-  created_at: string; slot: string | null }
-
-export interface QaCheckSpec { id: string; severity: "major" | "minor"; question: string; source: "vlm" | "mask" }
+export interface Published { asset_id: string; version_id: string; display_version: number }
+export interface Task { op_id: string; state: string; error: string | null; progress: { done?: number; total?: number } }
+export interface CheckResult { rule_id: string; source: string; severity: "major" | "minor";
+  result: "pass" | "fail" | "unavailable" | "not_applicable"; reason: string; observed: Json; threshold: Json }
+export interface QaView { id: string; status: QaStatus; coverage: { completed: number; applicable: number };
+  results: CheckResult[]; not_evaluated: boolean;
+  policy: { failed_major: string[]; failed_minor: string[]; unavailable: string[]; disabled: string[] } }
+export interface CandidateView { id: string; index: number; artifact_id: string; sha256: string; seed: number;
+  width: number; height: number; qa: QaView | null }
+export interface PromptRev { id: string; number: number; origin: string; description: string; template: string;
+  positive: string; negative: string; original_brief: string; enhancer: Record<string, Json> | null }
+export interface BuildRunView { id: string; status: string; result: "valid" | "invalid" | "validation_unavailable" | null;
+  artifacts: Record<string, string>; validation: { ok?: boolean; checks?: { id: string; ok: boolean; detail?: string }[] };
+  error: string | null }
+export interface ItemView {
+  id: string; name: string; brief: string; revision: number; category_id: string | null; shot_id: string | null;
+  target_asset_id: string | null; current_prompt: string | null; prompt_confirmed: string | null;
+  current_set: string | null; candidate_sets: string[]; approval: string | null; regen_requested: boolean;
+  current_build: string | null; accepted_build: string | null; published: Published | null; cancelled: boolean;
+  tasks: Record<string, Task>; qa: Record<string, string>;
+  stage: { stage: string; state: string; waiting_on_user: boolean; busy: boolean; failed: boolean };
+  prompt: PromptRev | null; prompt_locked: boolean;
+  candidate_set: { id: string; number: number; prompt_revision_id: string; requested: number;
+    generation: Record<string, Json>; candidates: CandidateView[] } | null;
+  approval_detail: { id: string; bound: Record<string, Json>; qa_status: string | null; override_qa: boolean;
+    failed_checks: string[]; missing_checks: string[] } | null;
+  build: BuildRunView | null;
+  legal: Record<"edit_prompt" | "enhance" | "confirm" | "approve" | "mark_regenerate" | "build" | "accept" | "publish",
+    boolean>;
+}
+export interface Counts { items: number; prompts: number; confirmed: number; candidates: number; approved: number;
+  regenerate: number; built: number; accepted: number; published: number; busy: number; failed: number;
+  cancelled: number }
+export interface BatchSummary {
+  id: string; alias: string; title: string; kind: Kind; kind_label: string; recipe_id: string;
+  category_id: string | null; category_label: string | null; created_at: string; source: string; counts: Counts;
+  by_stage: Record<string, number>; current_tab: string; waiting_on_user: boolean; next_action: string;
+}
+export interface Stage { tag: string; name: string; backend: string }
+export interface BatchDetail extends BatchSummary {
+  seed_family: number; config_revision: number; locked_template: string; items: ItemView[];
+  recipe: { id: string; label: string; build_label: string; build_available: boolean; build_blocked_reason: string;
+    generation_available: boolean; generation_blocked_reason: string; stages: Stage[] };
+}
+export interface Operation { id: string; kind: string; state: string; lane: string; batch_id: string | null;
+  progress: Record<string, Json>; error: { code: string; message: string; retryable?: boolean } | null;
+  created_at: string; updated_at: string }
+export interface Readiness { state: string; reason: string; missing?: string[] }
+export interface Param { key: string; type: string; default: Json; note: string; min: number | null;
+  max: number | null; choices: string[] }
+export interface RecipeInfo { id: string; kind: Kind; label: string; version: number; generation: Readiness;
+  build: Readiness; qa: Readiness; stages: Stage[]; params: Param[]; template: string; negative: string }
+export interface ModelRow { key: string; repo: string; revision: string; status: string; ready: boolean;
+  licence: string; licence_status: string; roles: string[]; optional: boolean; gated: boolean; detail: string;
+  bytes_expected: number; full_verified: boolean }
+export interface Runtime {
+  simulated: boolean; engine_mode: string;
+  gpus: { index: string; uuid: string; name: string; vram_used_mb: number; vram_total_mb: number; util_pct: number;
+    measured_at: string; lane: string | null;
+    ownership: { owner: string | null; state: string; last_error: string | null; workers: string[] } | null }[];
+  services: { name: string; role: string; url: string; reachable: boolean; ready: boolean; problems: string[];
+    version?: string | null; loaded?: Record<string, boolean> }[];
+  lanes: Record<string, { lane: string; owner: string | null; state: string; last_error: string | null }>;
+  coordinator: { lanes: Record<string, { running: string | null; queued: number }> } | null;
+  models: ModelRow[]; licences: { id: string; name: string; licence: string; status: string; note?: string }[];
+  recipes: RecipeInfo[];
+}
+export interface ConfigView {
+  config: StudioConfig; yaml: string; revision: number; categories: CategoryNode[];
+  effective: Record<string, Record<string, { value: Json; mode: string; source: string }> & {
+    _naming_examples?: string[] }>;
+}
+export interface Override { mode: "inherit" | "value" | "disabled"; value: Json }
+export interface CategoryCfg { id: string; parent_id: string | null; slug: string; label: string; archived: boolean;
+  defaults: Record<string, Override>; metadata: Record<string, string> }
+export interface QaRuleCfg { id: string; source: string; stage: string; enabled: boolean; severity: "major" | "minor";
+  question: string | null; metric: string | null; params: Record<string, Json> }
+export interface PaletteColor { hex: string; label: string; reserved: boolean; allowed_kinds: Kind[];
+  allowed_categories: string[]; tolerance_delta_e: number }
 export interface StudioConfig {
-  template: string;
-  image: { speed_presets: Record<string, { steps: number }>; steps: number };
-  mesh: { triangle_floor: number; texture_size: number };
-  qa_checks: QaCheckSpec[];
+  schema_version: number; project: { id: string; name: string }; revision: number;
+  defaults: Record<string, Override>; categories: CategoryCfg[];
+  pipelines: Record<string, { recipe_version: number; parameters: Record<string, Json>; template: string | null }>;
+  qa_rulesets: Record<string, { label: string; kind: Kind | null; rules: QaRuleCfg[]; policy: { minor_fail_limit: number } }>;
+  styles: Record<string, { label: string; guide: string; negative: string; palette: PaletteColor[] }>;
+  reference_sets: Record<string, { label: string; mode: string; images: { artifact_id: string; label: string;
+    role: string; source_rights: string }[] }>;
+  export_presets: Record<string, Json>;
+  retention: Record<"rejected_candidates" | "raw_intermediates" | "full_logs",
+    { keep: boolean; expire_after_days: number | null }>;
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string) { super(message); }
-}
-
-export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
-  const text = await r.text();
-  if (!r.ok) {
-    let msg = text;
-    try { msg = (JSON.parse(text) as { detail?: string }).detail ?? text; } catch { /* plain text body */ }
-    throw new ApiError(r.status, msg);
+  constructor(public status: number, public code: string, message: string, public detail: Json | undefined) {
+    super(message);
   }
-  return (text ? JSON.parse(text) : null) as T;
 }
 
-export const fileUrl = (job: string, rel: string): string => `/api/files/${job}/${rel}`;
-export const attemptFile = (job: string, att: string, rel: string): string =>
-  fileUrl(job, `model/attempts/${att}/${rel}`);
+const MUTATION_HEADERS = { "Content-Type": "application/json", "X-AssetStudio": "1" };
 
-export function approve(job: string, setId: string, index: number, sha: string, override: boolean) {
-  return api<{ attempt: Attempt; created: boolean }>(`/comfy/line_a/jobs/${job}/approve`, {
-    method: "POST", body: JSON.stringify({ set_id: setId, index, image_sha256: sha, override }),
-  });
+async function parse<T>(r: Response): Promise<T> {
+  const text = await r.text();
+  let body: unknown = null;
+  try { body = text ? JSON.parse(text) : null; } catch { /* non-JSON error body */ }
+  if (!r.ok) {
+    const err = (body as { error?: { code: string; message: string; detail?: Json } } | null)?.error;
+    throw new ApiError(r.status, err?.code ?? "http_error", err?.message ?? `HTTP ${r.status}`, err?.detail);
+  }
+  return body as T;
 }
+
+export async function get<T>(path: string): Promise<T> {
+  return parse<T>(await fetch(path, { headers: { Accept: "application/json" } }));
+}
+
+export async function send<T>(method: "POST" | "PUT" | "PATCH", path: string, body?: unknown): Promise<T> {
+  return parse<T>(await fetch(path, { method, headers: MUTATION_HEADERS,
+    body: body === undefined ? undefined : JSON.stringify(body) }));
+}
+
+export async function upload<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file);
+  return parse<T>(await fetch(path, { method: "POST", headers: { "X-AssetStudio": "1" }, body: form }));
+}
+
+export const key = (): string => crypto.randomUUID();
+export const P = (project: string) => `/api/v1/projects/${project}`;
+export const artifactUrl = (project: string, artifactId: string) => `${P(project)}/artifacts/${artifactId}/content`;

@@ -1,0 +1,23 @@
+# Typed inputs -> exact node ids of image.t2i.qwen.api.json. Validated against /object_info at startup.
+# Nodes listed under `optional` are removed (and their consumers rewired to `passthrough`) when unused.
+id: comfyui.qwen_t2i
+version: 1
+graph: image.t2i.qwen.api.json
+inputs:
+  positive: {node: "7", input: text}
+  negative: {node: "8", input: text}
+  seed: {node: "10", input: seed}
+  steps: {node: "10", input: steps}
+  cfg: {node: "10", input: cfg}
+  width: {node: "9", input: width}
+  height: {node: "9", input: height}
+  filename_prefix: {node: "12", input: filename_prefix}
+optional:
+  style_lora: {node: "4", passthrough: model, inputs: {file: lora_name, strength: strength_model}}
+  speed_lora: {node: "5", passthrough: model, inputs: {file: lora_name, strength: strength_model}}
+models:
+  - {node: "1", input: unet_name, model: qwen_image_2512}
+  - {node: "2", input: clip_name, model: qwen_image_2512}
+  - {node: "3", input: vae_name, model: qwen_image_2512}
+outputs:
+  image: {node: "12", kind: images}

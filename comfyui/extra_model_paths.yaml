@@ -1,4 +1,4 @@
-line_a:
+assetstudio:
   base_path: /models
   is_default: true
   diffusion_models: checkpoints/qwen-image-2512/split_files/diffusion_models

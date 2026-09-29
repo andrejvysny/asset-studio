@@ -1,74 +1,72 @@
-# GPU pinning uses CDI device names (podman native; Docker >= 25 with CDI enabled).
-# GPU0: comfyui only. GPU1: prompt-service + trellis-worker, time-shared (lazy load/unload).
-name: line-a
+# AssetStudio — Docker baseline (Linux + Docker + NVIDIA Container Toolkit).
+# Podman: `docker compose` -> `podman-compose -f compose.yml -f compose.podman.yml` (see Makefile COMPOSE).
+# GPU0: comfyui (image generation). GPU1: aux (text/VLM/segmentation), time-shared under Studio ownership.
+name: assetstudio
 
-x-common: &common
-  restart: unless-stopped
-  userns_mode: keep-id          # rootless podman: files in ./output owned by host user
-  networks: [internal]
-  environment: &env
-    HF_HUB_OFFLINE: "1"
-    TRANSFORMERS_OFFLINE: "1"
-    DO_NOT_TRACK: "1"
-    IDLE_UNLOAD_S: "300"
-    HOME: /tmp                  # keep-id user has no writable home
+x-gpu0: &gpu0
+  deploy:
+    resources:
+      reservations:
+        devices: [{driver: nvidia, device_ids: ["${GPU_IMAGE_ID:-0}"], capabilities: [gpu]}]
+x-gpu1: &gpu1
+  deploy:
+    resources:
+      reservations:
+        devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-1}"], capabilities: [gpu]}]
+x-offline: &offline
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  DO_NOT_TRACK: "1"
 
 services:
-  comfyui:
-    <<: *common
-    build: {context: ., dockerfile: comfyui/Dockerfile}
-    image: localhost/line-a-comfyui:dev
-    devices: ["${GPU_IMAGE:-nvidia.com/gpu=0}"]
-    ports: ["127.0.0.1:${COMFYUI_PORT:-8188}:8188"]
-    # keep-id user cannot write /opt/ComfyUI: all writable dirs are mounts or /tmp
-    command: [python, main.py, --listen, 0.0.0.0, --port, "8188", --disable-auto-launch,
-              --output-directory, /output/_comfy, --user-directory, /comfy-user,
-              --temp-directory, /tmp/comfy, --input-directory, /output/_comfy_input]
-    networks: [internal, public]
-    volumes:
-      - ./models:/models:ro
-      - ./output:/output
-      - ./config:/config:ro
-      - ./comfyui/user:/comfy-user
-      - ./comfyui/custom_nodes/line_a:/opt/ComfyUI/custom_nodes/line_a:ro  # code mounted: edit without rebuild
-
-  prompt-service:
-    <<: *common
-    build: {context: ., dockerfile: services/prompt_service/Dockerfile}
-    image: localhost/line-a-prompt-service:dev
-    devices: ["${GPU_3D:-nvidia.com/gpu=1}"]
-    volumes:
-      - ./models:/models:ro
-      - ./config:/config:ro
-      - ./output:/output:ro
-      - ./services/prompt_service:/app:ro
-
-  trellis-worker:
-    <<: *common
-    build: {context: ., dockerfile: services/trellis_worker/Dockerfile}
-    image: localhost/line-a-trellis-worker:dev
-    devices: ["${GPU_3D:-nvidia.com/gpu=1}"]
-    shm_size: 8g
-    volumes:
-      - ./models:/models:ro
-      - ./config:/config:ro
-      - ./output:/output
-      - ./services/trellis_worker:/app:ro
-
-  library:
-    <<: *common
-    build: {context: ., dockerfile: services/library/Dockerfile}
-    image: localhost/line-a-library:dev
+  studio:
+    build: {context: ., dockerfile: services/studio/Dockerfile}
+    image: localhost/assetstudio-studio:dev
+    restart: unless-stopped
     ports: ["127.0.0.1:${STUDIO_PORT:-8190}:8190"]
-    networks: [internal, public]
+    environment:
+      COMFY_URL: http://comfyui:8188
+      AUX_URL: http://aux:8001
+      STUDIO_ENGINE: ${STUDIO_ENGINE:-comfyui}
+      GPU_IMAGE_ID: ${GPU_IMAGE_ID:-0}
+      GPU_AUX_ID: ${GPU_AUX_ID:-1}
     volumes:
-      - ./output:/srv/output:ro          # jobs are mutated only via ComfyUI
-      - ./models:/srv/models:ro
-      - ./config:/srv/config:ro
-      - ./library:/srv/library           # assignments.json
-      - ./services/library/app:/app/app:ro                      # code mounted: edit without rebuild
-      - ./comfyui/custom_nodes/line_a/jobcore:/app/jobcore:ro
+      - ${PROJECTS_DIR:-./projects}:/projects          # portable project roots (server-side paths)
+      - studio-instance:/data/instance                  # journal, index, staging: machine-local state
+      - ${MODELS_DIR:-./models}:/models:ro              # readiness verification only
+    networks: [internal, public]
+
+  comfyui:
+    <<: *gpu0
+    build: {context: ., dockerfile: comfyui/Dockerfile}
+    image: localhost/assetstudio-comfyui:dev
+    restart: unless-stopped
+    ports: ["127.0.0.1:${COMFYUI_PORT:-8188}:8188"]  # advanced UI: localhost only
+    environment: *offline
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - comfy-user:/comfy-user
+      - comfy-output:/comfy-output
+    networks: [internal, public]
+
+  aux:
+    <<: *gpu1
+    build: {context: ., dockerfile: services/prompt_service/Dockerfile}
+    image: localhost/assetstudio-aux:dev
+    restart: unless-stopped
+    shm_size: 2g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    networks: [internal]                             # no egress, no host port
+
+volumes:
+  studio-instance: {}
+  comfy-user: {}
+  comfy-output: {}
 
 networks:
-  internal: {internal: true}    # workers have no egress
+  internal: {internal: true}
   public: {}
