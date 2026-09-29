@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.canonical import now_iso
+from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.domain import AssetFamily, BuildRun, Job, JobItem, ShotItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import ResolutionError, build_snapshot
@@ -239,5 +239,27 @@ def job_detail(studio: Studio, ctx: ProjectContext, job_id: str, build: dict[str
                    "generation_blocked_reason": recipe.generation_blocked_reason,
                    "stages": [s.__dict__ for s in recipe.stages]},
         "locked_template": snap["template"] if snap else recipe.template,
+        "candidate_count": int((snap or {}).get("parameters", {}).get("candidate_count", 0)) or None,
+        "style": _style_ref(snap),
+        "variant_row": _variant_row(ctx, job),
         "items": [item_view(studio, ctx, job, it, available) for it in items],
     }
+
+
+def _style_ref(snap: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The style recorded in the Job's frozen snapshot (not the live project config)."""
+    style = (snap or {}).get("style")
+    if not style:
+        return None
+    return {"name": style.get("name") or style.get("id"), "sha256": sha256_json(style)[:12]}
+
+
+def _variant_row(ctx: ProjectContext, job: Job) -> dict[str, Any] | None:
+    """The frozen plan row of a variant Job (its requested transform/change), readable before anything runs."""
+    if not job.variant:
+        return None
+    from .variant_jobs import load_plan
+
+    plan = load_plan(ctx, job.variant["plan_id"])
+    rows = plan["rows"] if isinstance(plan, dict) else [r.model_dump(mode="json") for r in plan.rows]
+    return next((r for r in rows if r["id"] == job.variant["row_id"]), None)

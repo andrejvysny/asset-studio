@@ -242,4 +242,18 @@ def _roles(ctx: ProjectContext, d: Path, meta: dict[str, Any], req: CommitImport
     if role != "model":
         roles["preview"] = ctx.store.register_artifact(thumbnail_png(data), "preview", "image/png",
                                                        lineage=[art.id], artifact_id=aid("preview")).id
+    elif (png := _glb_preview(data)) is not None:
+        roles["preview"] = ctx.store.register_artifact(png, "preview", "image/png", lineage=[art.id],
+                                                       meta={"derived": "CPU render, 4 views, simplified shading"},
+                                                       artifact_id=aid("preview")).id
     return roles, meta["validation"]
+
+
+def _glb_preview(data: bytes) -> bytes | None:
+    """A preview is a derivative: an unrenderable (e.g. over-budget) model still imports, just without one."""
+    from assetstudio_processing.render import preview_png
+
+    try:
+        return preview_png(data)
+    except Exception:  # noqa: BLE001 - renderer limits/format quirks must never fail the import
+        return None

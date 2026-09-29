@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { OK, WARN, BAD, NONE } from "../components/ui";
 import { P, type ProjectRow, type Runtime, type Summary } from "../lib/api";
@@ -9,7 +9,7 @@ const NAV: ([string, string] | [string, string, (s: Summary) => string | number]
   ["h", "Library"], ["assets", "Assets", (s) => s.counts.assets], ["shots", "Shot list", (s) => s.counts.shots],
   ["h", "Production"],
   ["jobs", "Jobs", (s) => (s.waiting.jobs ? `${s.waiting.jobs} waiting` : s.counts.jobs)],
-  ["batches", "Batches", (s) => (s.counts.active_batches ? `${s.counts.active_batches} active` : s.counts.batches)],
+  ["batches", "Batches", (s) => (s.counts.active_batches ? `${s.counts.active_batches} running` : s.counts.batches)],
   ["h", "Project"], ["schema", "Schema", (s) => s.counts.categories], ["pipelines", "Pipelines", (s) => s.counts.recipes],
   ["qa", "QA rules"], ["style", "Style"], ["storage", "Storage", (s) => s.storage.state], ["export", "Export"],
   ["runtime", "Runtime"],
@@ -35,6 +35,10 @@ export function Shell() {
   const s = summary.data;
   const g0 = gpuChip(rt.data, "gpu0");
   const g1 = gpuChip(rt.data, "gpu1");
+  const g = s?.waiting.by_gate ?? {};
+  const waitTitle = s ? `${g.prompts ?? 0} prompts to confirm · ${g.approve ?? 0} candidate sets to approve · `
+    + `${g.build ?? 0} builds to start or review · ${g.publish ?? 0} to publish` : "";
+  const path = useLocation().pathname;
   const storageColor = s?.storage.state === "read_only" ? WARN : OK;
   return (
     <ProjectContext.Provider value={{ id: project, summary }}>
@@ -57,12 +61,8 @@ export function Shell() {
             {s ? `${s.storage.root.split("/").slice(-1)[0]} · ${s.storage.state === "read_only" ? "read-only" : "local"}` : "…"}
           </button>
           <button className="chip-top" style={{ background: "#202124", fontFamily: "var(--sans)", fontSize: 12 }}
-            onClick={() => nav(`/p/${project}/jobs`)}
-            title={s ? [`prompts ${s.waiting.by_gate.prompts ?? 0} · candidates ${s.waiting.by_gate.approve ?? 0} · `
-              + `builds ${s.waiting.by_gate.build ?? 0} · publish ${s.waiting.by_gate.publish ?? 0}`,
-              ...s.waiting.detail.map((d) => `${d.alias}: ${d.next_action}`)].join("\n") : ""}>
-            <span className="count-badge">{s?.waiting.jobs ?? 0}</span>Jobs waiting on you
-            {s?.counts.active_batches ? ` · ${s.counts.active_batches} active Batch${s.counts.active_batches > 1 ? "es" : ""}` : ""}
+            onClick={() => nav(`/p/${project}/jobs`)} title={waitTitle}>
+            <span className="count-badge">{s?.waiting.jobs ?? 0}</span>waiting on you
           </button>
           <button className="row" style={{ gap: 10, font: "500 11px var(--mono)", color: "var(--muted)" }}
             onClick={() => nav(`/p/${project}/runtime`)} aria-label="GPU status">
@@ -72,7 +72,8 @@ export function Shell() {
         </header>
         <nav className="sidebar" aria-label="main">
           {NAV.map(([id, label, count], i) => id === "h" ? <div key={i} className="nav-head">{label}</div> : (
-            <NavLink key={id} to={`/p/${project}/${id}`} className={({ isActive }) => `nav-item${isActive ? " on" : ""}`}>
+            <NavLink key={id} to={`/p/${project}/${id}`} className={({ isActive }) =>
+              `nav-item${isActive || (id === "batches" && path.includes("/runs/")) ? " on" : ""}`}>
               <span className="label-text">{label}</span>
               <span className="n">{s && count ? count(s) : ""}</span>
             </NavLink>

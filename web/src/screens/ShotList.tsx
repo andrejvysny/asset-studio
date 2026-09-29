@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { Box, Empty, ErrorLine, INFO, Loading, OK, PageHead } from "../components/ui";
+import { Box, Empty, ErrorLine, INFO, Loading, OK, PageHead, Toggle } from "../components/ui";
 import { type CategoryNode, J, key, type Kind, KIND_LABEL, KINDS, P, send, type ShotRow, upload, V2 } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
@@ -26,6 +26,7 @@ export function ShotList() {
   const [drafts, setDrafts] = useState<Draft[] | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [imp, setImp] = useState<ImportPreview | null>(null);
+  const [asBatch, setAsBatch] = useState(true);
   const [actions, setActions] = useState<Record<string, string>>({});
   const act = useAction();
   const dirty = drafts !== null;
@@ -34,32 +35,37 @@ export function ShotList() {
   const rows = shots.data?.items ?? [];
   const catLabel = (c: string | null) => cats.data?.categories.find((x) => x.id === c)?.path ?? "—";
   const selected = rows.filter((r) => sel.has(r.id));
-  const kinds = useMemo(() => [...new Set(selected.map((r) => r.effective_kind))], [selected]);
 
-  /** One Job per output kind (a Job holds one recipe); optionally group the new Jobs into one Batch. Save only. */
-  const createJobs = (asBatch: boolean) => void act.run(async () => {
-    const groups = new Map<string, ShotRow[]>();
-    selected.forEach((r) => groups.set(r.effective_kind ?? "?", [...(groups.get(r.effective_kind ?? "?") ?? []), r]));
+  /** One Job per selected row (any kind); optionally group the new Jobs into one Batch. Save only, nothing runs. */
+  const createJobs = () => void act.run(async () => {
     const ids: string[] = [];
-    for (const [kind, list] of groups) {
-      const out = await send<{ job: { id: string } }>("POST", J(id), {
-        title: `${KIND_LABEL[kind as Kind] ?? kind} · ${list.length} from shot list`, idempotency_key: key(),
-        kind, source: `shot list · ${list.length} rows`,
-        items: list.map((r) => ({ name: r.name, brief: r.brief, category_id: r.category_id, kind: r.kind,
-          shot_id: r.id, target_asset_id: r.target_asset_id })) });
-      ids.push(out.job.id);
+    const failed: string[] = [];
+    for (const r of selected) {
+      try {
+        const out = await send<{ job: { id: string } }>("POST", J(id), {
+          title: r.name, idempotency_key: key(), kind: r.effective_kind, category_id: r.category_id, source: "shot list",
+          items: [{ name: r.name, brief: r.brief, category_id: r.category_id, kind: r.kind, shot_id: r.id,
+            target_asset_id: r.target_asset_id }] });
+        ids.push(out.job.id);
+      } catch (e) {
+        failed.push(`${r.name}: ${(e as Error).message}`);
+      }
     }
-    if (asBatch) {
+    if (failed.length) {
+      shots.reload();
+      throw new Error(`${ids.length} Job(s) created, ${failed.length} failed:\n${failed.join("\n")}`);
+    }
+    if (asBatch && ids.length > 1) {
       const b = await send<{ batch: { id: string } }>("POST", `${V2(id)}/batches`, {
-        title: `Shot list · ${selected.length} rows`, job_ids: ids, idempotency_key: key() });
+        title: `Shot list · ${ids.length} Jobs`, job_ids: ids, idempotency_key: key() });
       nav(`/p/${id}/batches/${b.batch.id}`);
       return;
     }
-    nav(ids.length === 1 ? `/p/${id}/jobs/${ids[0]}` : `/p/${id}/jobs`);
+    nav(`/p/${id}/jobs`);
   });
 
   if (!shots.data) return shots.error ? <div className="content"><ErrorLine error={shots.error} /></div> : <Loading what="shot list" />;
-  const eligible = selected.length > 0 && selected.every((r) => r.status === "planned");
+  const eligible = selected.length > 0;
   const cols = "34px minmax(150px,1fr) minmax(140px,0.9fr) 110px minmax(240px,2fr) 70px 150px";
   return (
     <div className="content narrow" style={{ maxWidth: 1320 }}>
@@ -78,14 +84,12 @@ export function ShotList() {
             setDrafts(null);
             shots.reload();
           })}>Save shot list</button></>}
-        {!dirty && <button className="btn btn-primary" disabled={!eligible || act.busy} onClick={() => createJobs(false)}>
-          {selected.length === 0 ? "Select rows for a Job" : kinds.length > 1 ? `Create ${kinds.length} Jobs (split by type)`
-            : `Create Job from ${selected.length}`}</button>}
-        {!dirty && kinds.length > 1 && <button className="btn" disabled={!eligible || act.busy} onClick={() => createJobs(true)}>
-          Create {kinds.length} Jobs as one Batch</button>}
+        {!dirty && <label className="row" style={{ gap: 7, fontSize: 12.5, color: "var(--text-2)" }}>
+          <Toggle on={asBatch} onChange={setAsBatch} label="Group into a new Batch" />Group into a new Batch</label>}
+        {!dirty && <button className="btn btn-primary" disabled={!eligible || act.busy} onClick={createJobs}>
+          {selected.length === 0 ? "Select rows" : `Create ${selected.length} Job${selected.length > 1 ? "s" : ""}${
+            asBatch && selected.length > 1 ? " + Batch" : ""}`}</button>}
       </PageHead>
-      {selected.some((r) => r.status !== "planned") &&
-        <div className="banner note">Rows already in a Job or published cannot be added again; deselect them.</div>}
       {imp && (
         <div className="panel" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row"><span className="mono">{imp.filename}</span>
@@ -158,18 +162,19 @@ export function ShotList() {
             );
           }) : rows.map((r) => {
             const on = sel.has(r.id);
-            const toggle = () => { const n = new Set(sel); if (on) n.delete(r.id); else n.add(r.id); setSel(n); };
+            const planned = r.status === "planned";
+            const toggle = () => { if (!planned) return; const n = new Set(sel); if (on) n.delete(r.id); else n.add(r.id); setSel(n); };
             return (
-              <div key={r.id} className={`td clickable${on ? " sel" : ""}`} style={{ gridTemplateColumns: cols, minWidth: 960 }}
-                onClick={toggle}>
-                <Box on={on} label={`select ${r.name}`} onChange={toggle} />
+              <div key={r.id} className={`td${planned ? " clickable" : ""}${on ? " sel" : ""}`}
+                style={{ gridTemplateColumns: cols, minWidth: 960 }} onClick={toggle}>
+                {planned ? <Box on={on} label={`select ${r.name}`} onChange={toggle} /> : <span />}
                 <span style={{ fontWeight: 500 }}>{r.name}</span>
                 <span className="mono muted" style={{ fontSize: 11.5 }}>{catLabel(r.category_id)}</span>
                 <span className="mono muted" style={{ fontSize: 11 }}>{r.effective_kind ? KIND_LABEL[r.effective_kind] : "?"}</span>
                 <span className="muted" style={{ fontSize: 12 }}>{r.brief}</span>
                 <span className="sub">{r.priority}</span>
                 <span className="sub" style={{ color: r.status === "planned" ? "var(--dim)" : r.status === "published" ? OK : INFO }}>
-                  {r.status === "in_batch" ? `in batch ${r.membership?.batch_alias}` : r.status}</span>
+                  {r.status === "in_batch" ? `job ${r.membership?.batch_alias}` : r.status}</span>
               </div>
             );
           })}
@@ -178,8 +183,8 @@ export function ShotList() {
             archived: false }])}>+ Add row</button></div>}
         </div>
       )}
-      <div className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>
-        Select rows to create a batch. Mixed types become one batch per type. Rows already in a batch or published are skipped.</div>
+      <div className="dim" style={{ fontSize: 12 }}>Each selected row becomes its own Job; asset types can be mixed. Rows that
+        already have a Job are skipped. Creating Jobs never starts generation.</div>
     </div>
   );
 }

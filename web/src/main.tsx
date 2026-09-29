@@ -11,6 +11,7 @@ import { createBrowserRouter, Navigate, RouterProvider, useParams, useRouteError
 
 import { AssetDetail } from "./screens/AssetDetail";
 import { Assets } from "./screens/Assets";
+import { CreateVariants } from "./screens/CreateVariants";
 import { BatchDetail } from "./screens/batches/BatchDetail";
 import { Batches } from "./screens/batches/Batches";
 import { RunView } from "./screens/batches/RunView";
@@ -52,6 +53,7 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="assets" replace /> },
       { path: "assets", element: <Assets /> },
       { path: "assets/:assetId", element: <AssetDetail /> },
+      { path: "assets/:assetId/variants", element: <CreateVariants /> },
       { path: "shots", element: <ShotList /> },
       { path: "jobs", element: <Jobs /> },
       { path: "jobs/new", element: <NewJob /> },

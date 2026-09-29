@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { Empty, ErrorLine, INFO, Loading, PageHead, Toggle } from "../components/ui";
-import { type AssetList, artifactUrl, type CategoryNode, KIND_LABEL, KINDS, P } from "../lib/api";
+import { type AssetList, type CategoryNode, type Family, type Kind, KIND_LABEL, KINDS, type Origin, P } from "../lib/api";
 import { useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
+import type { AssetQuery } from "../lib/variantsApi";
+import { AssetCard, FamilyTile, useGroupedAssets } from "./AssetsGrouped";
 import { ImportDialog } from "./ImportDialog";
 
 const PAGE = 60;
@@ -20,18 +22,25 @@ export function Assets() {
   const q = sp.get("q") ?? "";
   const planned = sp.get("planned") !== "0";
   const page = Number(sp.get("page") ?? "0");
-  const set = (k: string, v: string | null) => {
+  const group = sp.get("group") === "family";
+  const familyId = sp.get("family");
+  const grouped = group && !familyId;
+  const setMany = (kv: Record<string, string | null>) => {
     const next = new URLSearchParams(sp);
-    if (v === null || v === "") next.delete(k); else next.set(k, v);
-    if (k !== "page") next.delete("page");
+    for (const [k, v] of Object.entries(kv)) if (v === null || v === "") next.delete(k); else next.set(k, v);
+    if (!("page" in kv)) next.delete("page");
     setSp(next, { replace: true });
   };
-  const params = new URLSearchParams({ limit: String(PAGE), offset: String(page * PAGE), planned: planned ? "1" : "0" });
-  if (cat) params.set("category_id", cat);
-  if (kind) params.set("kind", kind);
-  if (origin) params.set("origin", origin);
-  if (q) params.set("q", q);
-  const list = useApi<AssetList>(`${P(id)}/assets?${params}`, { project: id });
+  const set = (k: string, v: string | null) => setMany({ [k]: v });
+  const filters: AssetQuery = { ...(cat ? { category_id: cat } : {}), ...(kind ? { kind: kind as Kind } : {}),
+    ...(origin ? { origin: origin as Origin } : {}), ...(q ? { q } : {}) };
+  const params = new URLSearchParams({ limit: String(PAGE), offset: String(page * PAGE), planned: planned && !familyId ? "1" : "0" });
+  for (const [k, v] of Object.entries(filters)) params.set(k, String(v));
+  if (familyId) params.set("family_id", familyId);
+  const list = useApi<AssetList>(grouped ? null : `${P(id)}/assets?${params}`, { project: id });
+  const gp = useGroupedAssets(id, filters, grouped, PAGE);
+  const family = useApi<Family>(familyId ? `${P(id)}/families/${familyId}` : null, { project: id });
+  const anyFilter = !!(cat || kind || origin || q);
   const cats = useApi<{ categories: CategoryNode[] }>(`${P(id)}/categories`, { project: id });
   const current = cats.data?.categories.find((c) => c.id === cat);
   const d = list.data;
@@ -44,7 +53,7 @@ export function Assets() {
           <Link to={`/p/${id}/schema`} className="dim" style={{ fontSize: 11.5 }}>Edit schema</Link>
         </div>
         <button className={`side-row${!cat ? " on" : ""}`} onClick={() => set("cat", null)}>
-          <span>All assets</span><span className="n">{d?.all_assets_total ?? ""}</span></button>
+          <span>All assets</span><span className="n">{d?.all_assets_total ?? (grouped ? gp.allAssets : "")}</span></button>
         {(cats.data?.categories ?? []).map((c) => (
           <button key={c.id} className={`side-row${cat === c.id ? " on" : ""}`}
             style={{ paddingLeft: 8 + c.depth * 16 }} onClick={() => set("cat", c.id)}>
@@ -71,37 +80,48 @@ export function Assets() {
           <button className={`chip${origin === "imported" ? " on" : ""}`}
             onClick={() => set("origin", origin === "imported" ? null : "imported")} title="origin filter">Imported</button>
           <span className="grow" />
+          {familyId && <button className="chip on" aria-label="remove family filter" onClick={() => set("family", null)}>
+            Family: {family.data?.name ?? familyId} ×</button>}
           <label className="row" style={{ gap: 7, fontSize: 12 }}>
-            <Toggle on={planned} label="show planned" onChange={(v) => set("planned", v ? null : "0")} />Show planned
+            <Toggle on={planned} label="show planned" disabled={group || !!familyId} onChange={(v) => set("planned", v ? null : "0")} />Show planned
+          </label>
+          <label className="row" style={{ gap: 7, fontSize: 12, color: "var(--text-2)" }}>
+            <Toggle on={group} label="Group by family" onChange={(v) => setMany({ group: v ? "family" : null, family: null })} />Group by family
           </label>
         </div>
-        <ErrorLine error={list.error} />
-        {!d ? <Loading what="assets" /> : (
+        <ErrorLine error={grouped ? gp.error : list.error} />
+        {grouped ? (
+          gp.loading ? <Loading what="assets" /> : (
+            <>
+              <div className="sub">{gp.matchingAssets} asset{gp.matchingAssets === 1 ? "" : "s"} · grouped by family</div>
+              {gp.groups.length === 0 ? (
+                <Empty>{gp.allAssets === 0
+                  ? <>No assets yet. <button className="btn-link" onClick={() => setImporting(true)}>Import files</button>
+                    or <Link to={`/p/${id}/jobs/new`}>create a Job</Link>.</>
+                  : "Nothing matches these filters."}</Empty>
+              ) : (
+                <div className="grid-cards">
+                  {gp.groups.map((g) => g.type === "family"
+                    ? <FamilyTile key={g.family_id} project={id} g={g} filtered={anyFilter} onOpen={() => set("family", g.family_id)} />
+                    : <AssetCard key={g.asset.asset_id} project={id} a={g.asset} />)}
+                </div>
+              )}
+              {gp.nextCursor && <div className="row"><button className="btn" disabled={gp.loadingMore} onClick={gp.more}>
+                {gp.loadingMore ? "Loading…" : "Load more"}</button></div>}
+            </>
+          )
+        ) : !d ? <Loading what="assets" /> : (
           <>
-            <div className="sub">{d.total} asset{d.total === 1 ? "" : "s"}{planned ? ` · ${d.planned_total} planned (not counted)` : ""}</div>
-            {d.total === 0 && d.planned.length === 0 ? (
+            <div className="sub">{d.total} asset{d.total === 1 ? "" : "s"}{planned && !familyId ? ` · ${d.planned_total} planned (not counted)` : ""}</div>
+            {d.total === 0 && (familyId || d.planned.length === 0) ? (
               <Empty>{d.all_assets_total === 0
                 ? <>No assets yet. <button className="btn-link" onClick={() => setImporting(true)}>Import files</button>
                   or <Link to={`/p/${id}/jobs/new`}>create a Job</Link>.</>
                 : "Nothing matches these filters."}</Empty>
             ) : (
               <div className="grid-cards">
-                {d.items.map((a) => (
-                  <Link key={a.asset_id} to={`/p/${id}/assets/${a.asset_id}`} className="card">
-                    <div className="media checker">
-                      {a.preview_artifact_id
-                        ? <img src={artifactUrl(id, a.preview_artifact_id)} alt={a.display_name} loading="lazy" />
-                        : <span className="sub">{a.kind === "model3d" ? "GLB · open to view" : "no preview"}</span>}
-                      <span className="corner" style={{ left: 7 }}>{a.kind_label}{a.origin === "imported" ? " · imp" : ""}</span>
-                      <span className="corner" style={{ right: 7, fontWeight: 600, color: "var(--text)" }}>v{a.display_version}</span>
-                    </div>
-                    <div className="meta">
-                      <span className="ellipsis" style={{ fontWeight: 500 }}>{a.display_name}</span>
-                      <span className="sub ellipsis" style={{ fontSize: 10 }}>{a.name_id}</span>
-                    </div>
-                  </Link>
-                ))}
-                {planned && d.planned.map((s) => (
+                {d.items.map((a) => <AssetCard key={a.asset_id} project={id} a={a} />)}
+                {planned && !familyId && d.planned.map((s) => (
                   <Link key={s.id} className="card planned"
                     to={s.membership ? `/p/${id}/jobs/${s.membership.batch_id}` : `/p/${id}/shots`}>
                     <div className="media" style={{ flexDirection: "column", gap: 4 }}>

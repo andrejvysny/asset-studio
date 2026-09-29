@@ -32,8 +32,10 @@ def studio_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
            "STUDIO_PROJECT_ROOTS": str(tmp / "projects"), "STUDIO_WEB_DIR": str(ROOT / "web" / "dist"),
            "STUDIO_MODELS_ROOT": str(ROOT / "models"), "STUDIO_PORT": str(port)}
     (tmp / "projects").mkdir()
+    # A log FILE, not a pipe: nobody reads a pipe while tests run, so a full 64 KB buffer would block the server.
+    log = (tmp / "studio.log").open("wb")
     proc = subprocess.Popen([sys.executable, "-m", "assetstudio_server.cli", "serve"], env=env,
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                            stdout=log, stderr=subprocess.STDOUT)
     url = f"http://127.0.0.1:{port}"
     for _ in range(100):
         try:
@@ -43,10 +45,11 @@ def studio_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             time.sleep(0.2)
     else:
         proc.kill()
-        raise RuntimeError(proc.stdout.read().decode() if proc.stdout else "studio did not start")
+        raise RuntimeError((tmp / "studio.log").read_text(errors="replace")[-4000:] or "studio did not start")
     yield url
     proc.terminate()
     proc.wait(timeout=10)
+    log.close()
 
 
 @pytest.fixture

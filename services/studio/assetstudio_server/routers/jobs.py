@@ -1,8 +1,10 @@
 """v2 Jobs: production workflows of one or more items. Create = save (no inference); runs are explicit."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from assetstudio_core.ids import validate_id
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -56,6 +58,18 @@ def create(req: CreateJobV2, ctx: ProjectContext = Depends(project), s: Studio =
 def detail(job_id: str, ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
     job, _ = load_job(ctx.store, job_id)
     return jsvc.job_detail(s, ctx, job_id, runtime_svc.build_readiness(s, job.recipe_id))
+
+
+@router.get("/{job_id}/builds/{run_id}")
+def build_run(job_id: str, run_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
+    """One build attempt (any of the item's history): artifacts, checkpoints, validation, meta report."""
+    from ..services.records import load_build
+
+    validate_id(run_id, "run")
+    run, _ = load_build(ctx.store, job_id, run_id)
+    meta_id = run.artifacts.get("meta")
+    meta = json.loads(ctx.store.artifact_bytes(meta_id)) if meta_id else None
+    return {**run.model_dump(mode="json"), "meta": meta}
 
 
 @router.post("/{job_id}:run")

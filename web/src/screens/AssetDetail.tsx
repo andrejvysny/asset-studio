@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { OutputView } from "../components/outputs";
 import { bytes, ErrorLine, Loading, OK, relTime } from "../components/ui";
-import { type AssetDetail as Detail, artifactUrl, key, P, send } from "../lib/api";
+import { type AssetDetail as Detail, artifactUrl, type Derivation, key, P, send, type VariantMethod } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
 
@@ -12,6 +12,30 @@ const FACT_LABEL: Record<string, string> = {
   qa_ruleset: "QA rule set", reference_set: "Reference set", style: "Style", style_lora: "Style LoRA",
   export_presets: "Export presets", candidate_count: "Candidates",
 };
+
+const METHOD_LABEL: Record<VariantMethod, string> = {
+  image_edit_reconstruct: "Structural reconstruction", image_edit: "Design variant", direct_transform: "Direct size transform",
+};
+
+/** The manifest file plus the shown version's lineage (kept in the version record, shown here as in the design). */
+function manifestText(json: string, deriv: Derivation | null): string {
+  if (!deriv) return json;
+  try {
+    return JSON.stringify({ ...(JSON.parse(json) as Record<string, unknown>), derivation: {
+      source_asset_id: deriv.source.asset_id, source_version: deriv.source.display_version, method: deriv.method } }, null, 2);
+  } catch { return json; }
+}
+
+function downloadAll(project: string, files: { artifact_id: string }[]): void {
+  files.forEach((f, i) => setTimeout(() => {
+    const a = document.createElement("a");
+    a.href = `${artifactUrl(project, f.artifact_id)}?download=1`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }, i * 300));
+}
 
 function fmt(v: unknown): string {
   if (v === null || v === undefined) return "—";
@@ -29,6 +53,10 @@ function fmt(v: unknown): string {
   return String(v);
 }
 
+function variantNote(d: Derivation | null | undefined): string {
+  return d ? `Variant of ${d.source.display_name} v${d.source.display_version}` : "";
+}
+
 export function AssetDetail() {
   const { id } = useProject();
   const { assetId = "" } = useParams();
@@ -44,6 +72,10 @@ export function AssetDetail() {
   const frameFiles = d.data.files.filter((f) => f.role.startsWith("frame_"));
   const files = [...d.data.files.filter((f) => !f.role.startsWith("frame_")), ...frameFiles.slice(0, 3)];
   const hiddenFrames = frameFiles.length - Math.min(frameFiles.length, 3);
+  const src = d.data.derived_from;
+  const lineage = new Map(d.data.versions.map((x) => [x.version_id, x.derivation]));
+  const variantsUrl = (count: number) => `/p/${id}/assets/${m.asset_id}/variants?version=${v.version_id}&count=${count}`;
+  const shownManifest = manifestText(d.data.manifest_json, v.derivation);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", minHeight: "100%" }}>
       <section className="content">
@@ -58,6 +90,12 @@ export function AssetDetail() {
             <span className="tag">{m.origin}</span>
             <span className="pill ok">current v{m.versions.find((x) => x.version_id === m.current_version_id)?.display_version}</span>
             <span className="tag">{m.versions.length} versions</span>
+            {d.data.family_id && <Link className="tag" style={{ borderColor: "var(--line-3)", color: "var(--text)", textDecoration: "none" }}
+              to={`/p/${id}/assets?family=${d.data.family_id}`} title="Open the family in the library">
+              family · {d.data.family_name ?? d.data.family_id}</Link>}
+            {src && <Link className="sub" style={{ padding: "1px 2px", color: "var(--muted)" }}
+              to={`/p/${id}/assets/${src.asset_id}?version=${src.version_id}`} title={`Open ${src.display_name} v${src.display_version}`}>
+              from {src.asset_id} · v{src.display_version} · {METHOD_LABEL[src.method]}</Link>}
             <span className={`pill ${lic === "cleared" ? "ok" : lic === "not_cleared" ? "bad" : "warn"}`}
               title={v.licence.note}>licence: {lic}</span>
           </div>
@@ -93,7 +131,7 @@ export function AssetDetail() {
                       });
                     }}>Set current</button>}
                   </div>
-                  <span className="muted" style={{ fontSize: 12 }}>{ver.note || "—"}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{ver.note || variantNote(lineage.get(ver.version_id)) || "—"}</span>
                   <span className="sub">{relTime(ver.published_at)} · {ver.version_id}</span>
                 </div>
               );
@@ -131,21 +169,24 @@ export function AssetDetail() {
           </div>
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>
-          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/jobs/new?target=${m.asset_id}&kind=${m.kind}${m.category_id ? `&cat=${m.category_id}` : ""}&name=${encodeURIComponent(m.display_name)}`)}>
+          <button className="btn btn-primary" onClick={() => nav(variantsUrl(1))}>New variant</button>
+          <button className="btn" onClick={() => nav(variantsUrl(6))}>Create variants…</button>
+          <button className="btn" onClick={() => nav(`/p/${id}/jobs/new?target=${m.asset_id}&kind=${m.kind}${m.category_id ? `&cat=${m.category_id}` : ""}&name=${encodeURIComponent(m.display_name)}`)}>
             New version…</button>
           <button className="btn" disabled title="Export targets arrive in Phase 4">Export current</button>
+          <button className="btn" onClick={() => downloadAll(id, d.data?.files ?? [])}>Download files</button>
         </div>
       </section>
       <aside style={{ borderLeft: "1px solid var(--line)", background: "var(--panel)", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div className="row" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)" }}>
-          <span className="mono grow" style={{ fontSize: 11 }}>manifests/{m.asset_id}.json</span>
+          <span className="mono grow" style={{ fontSize: 11 }} title={v.derivation ? "manifest file plus the derivation of the shown version" : undefined}>manifests/{m.asset_id}.json</span>
           <button className="btn" style={{ padding: "3px 9px", fontSize: 12 }} onClick={() => {
-            void navigator.clipboard.writeText(d.data?.manifest_json ?? "");
+            void navigator.clipboard.writeText(shownManifest);
             setCopied(true);
             setTimeout(() => setCopied(false), 1200);
-          }}>{copied ? "Copied" : "Copy"}</button>
+          }}>{copied ? "Copied" : "Copy JSON"}</button>
         </div>
-        <pre className="pre" style={{ flex: 1 }}>{d.data.manifest_json}</pre>
+        <pre className="pre" style={{ flex: 1 }}>{shownManifest}</pre>
         <div className="label" style={{ padding: "8px 14px" }}>version record · provenance</div>
         <pre className="pre" style={{ flex: 1, borderTop: "1px solid var(--line)" }}>{JSON.stringify(
           { sources: v.sources, qa: v.qa, validation: v.validation, licence: v.licence, parameters: v.parameters }, null, 2)}</pre>

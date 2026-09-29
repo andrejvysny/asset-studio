@@ -1,127 +1,119 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
 
-import { OutputView } from "../../components/outputs";
-import { Bar, BAD, ErrorLine, INFO, NONE, OK, WARN } from "../../components/ui";
-import { artifactUrl, J, key, send } from "../../lib/api";
+import { ErrorLine } from "../../components/ui";
+import type { BuildHistoryRow, ItemView, JobDetail } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
-import { ActionBar, type TabProps } from "./JobWorkspace";
-import { ReexportDialog } from "./ReexportDialog";
+import { BuildPanel } from "./BuildPanel";
+import * as act from "./jobActions";
+import {
+  attemptMarks, attemptPct, attemptState, DIM, FAINT, isRunning, MODE_LABEL, pickLabel, VERB,
+} from "./jobModel";
+import type { TabProps } from "./JobWorkspace";
 
-export function BuildTab({ job, reload }: TabProps) {
-  const { id } = useProject();
-  const nav = useNavigate();
-  const [sp, setSp] = useSearchParams();
-  const act = useAction();
-  const base = `${J(id)}/${job.id}`;
-  const rows = job.items.filter((i) => i.current_build || (i.tasks.build && i.approval));
-  const active = rows.find((r) => r.id === sp.get("item")) ?? rows[0];
-  const accepted = job.items.filter((i) => i.accepted_build);
-  const built = job.items.filter((i) => i.build?.result === "valid");
-  const [reexporting, setReexporting] = useState<string | null>(null);
-  const blocked = !job.recipe.build_available && (
-    <div className="banner bad">{job.recipe.build_label} build is not available right now:{" "}
-      {job.recipe.build_blocked_reason}. Approved candidates and earlier builds are kept.</div>);
-  if (blocked && rows.length === 0) return blocked;
-  const accept = (itemId: string, run: string, rev: number, on: boolean) => void act.run(async () => {
-    const res = await send<{ results: { ok: boolean; message?: string }[] }>("POST", `${base}:accept-builds`, {
-      idempotency_key: key(), items: [{ item_id: itemId, build_run_id: run, expected_item_revision: rev, accept: on }] });
-    reload();
-    if (res.results[0] && !res.results[0].ok) throw new Error(res.results[0].message);
-  });
-  const view = active?.build;
+function attemptNote(item: ItemView, row: BuildHistoryRow): { text: string; bad: boolean } {
+  if (row.error) return { text: row.error, bad: true };
+  const from = item.build_history.findIndex((h) => h.id === row.derived_from);
+  return { text: row.mode === "reexport" && from >= 0 ? `Raw from attempt ${from + 1}. No new sampling.` : "", bad: false };
+}
+
+function settingsLine(job: JobDetail, item: ItemView, row: BuildHistoryRow): string {
+  const bake = row.current ? item.build?.checkpoints.bake?.settings : undefined;
+  const tris = row.overrides.triangles ?? (typeof bake?.decimation_target === "number" ? bake.decimation_target : null);
+  const tex = row.overrides.texture_size ?? (typeof bake?.texture_size === "number" ? bake.texture_size : null);
+  const parts = [row.seed != null ? `seed ${row.seed}` : "", job.kind === "model3d" ? (tris ? `${tris.toLocaleString()} tris` : "default triangles") : "",
+    tex ? `${tex}²` : ""];
+  return parts.filter(Boolean).join(" · ");
+}
+
+function AttemptRow({ job, item, row, n, on, onPick }:
+  { job: JobDetail; item: ItemView; row: BuildHistoryRow; n: number; on: boolean; onPick: () => void }) {
+  const is3d = job.kind === "model3d" && !job.direct;
+  const [state, color] = attemptState(row, is3d);
+  const note = attemptNote(item, row);
+  const line = [row.current && item.approval ? `from ${pickLabel(item, job.direct, job.kind)}` : "", settingsLine(job, item, row)]
+    .filter(Boolean).join(" · ");
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {blocked}
-      {rows.length === 0 ? <div className="empty">Nothing built yet. Approve candidates, then run the build from Approve.</div> : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(320px,440px)", gap: 16, alignItems: "start" }}>
-          <div className="table">
-            {rows.map((it) => {
-              const b = it.build;
-              const t = it.tasks.build;
-              const state = b ? (b.status === "succeeded" ? b.result ?? "done" : b.status) : t?.state ?? "—";
-              const color = state === "valid" ? OK : state === "invalid" || state === "failed" || state === "blocked" ? BAD : INFO;
-              const pct = b?.status === "succeeded" ? 100 : t?.state === "running" ? 50 : t?.state === "queued" ? 5 : 0;
-              return (
-                <div key={it.id} className="td clickable" onClick={() => setSp({ item: it.id })}
-                  style={{ gridTemplateColumns: "52px minmax(120px,1fr) minmax(120px,1fr) 110px",
-                    boxShadow: `inset 3px 0 0 ${it.id === active?.id ? "var(--text)" : "transparent"}` }}>
-                  {b?.artifacts.preview ? <img src={artifactUrl(id, b.artifacts.preview)} alt="" style={{ width: 52, height: 52,
-                    objectFit: "cover", borderRadius: 5 }} /> : <div className="stripes" style={{ width: 52, height: 52, borderRadius: 5 }} />}
-                  <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}><span style={{ fontWeight: 500 }}>{it.name}</span>
-                    <span className="sub" style={{ fontSize: 10.5 }}>from approved candidate</span></div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}><Bar pct={pct} color={color} />
-                    <span className="sub" style={{ color }}>{state}{t?.error ? ` · ${t.error}` : ""}</span></div>
-                  {b?.result === "valid" ? (
-                    <button className={`btn${it.accepted_build ? " btn-primary" : ""}`} style={{ padding: "3px 9px", fontSize: 12 }}
-                      disabled={act.busy || !!it.published} onClick={(e) => { e.stopPropagation();
-                        accept(it.id, b.id, it.revision, !it.accepted_build); }}>
-                      {it.published ? "published" : it.accepted_build ? "Accepted ✓" : "Accept"}</button>
-                  ) : <span className="sub" style={{ color: NONE }}>—</span>}
-                </div>
-              );
-            })}
-          </div>
-          {active && (
-            <aside className="inspector">
-              <div className="row sub" style={{ padding: "8px 12px", justifyContent: "space-between" }}>
-                <span>{active.name}</span><span>{view?.status ?? active.tasks.build?.state}</span></div>
-              <OutputView key={view?.id ?? "none"} project={id} roles={view?.artifacts ?? {}} alt={`${active.name} final`} />
-              <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-                <span className="label">Structural validation (mandatory)</span>
-                {(view?.validation.checks ?? []).map((c) => <div key={c.id} className="row" style={{ gap: 8, alignItems: "baseline" }}>
-                  <span className="dot" style={{ background: c.ok ? OK : c.advisory ? WARN : BAD, flex: "none" }} />
-                  <span className="mono" style={{ fontSize: 11, flex: "none" }}>{c.id}</span>
-                  <span className="sub" style={{ flex: 1, minWidth: 0, textAlign: "right", overflowWrap: "anywhere" }}>
-                    {c.ok ? "ok" : c.advisory ? "advisory" : "FAIL"} {c.detail ?? ""}</span></div>)}
-              </div>
-              {view?.result === "valid" && view.preview === "failed" && (
-                <div className="banner note" style={{ margin: "0 12px" }}>Preview failed ({view.preview_error}). The model
-                  itself is valid and available; retrying renders the preview from the delivered file only.
-                  <button className="btn" style={{ marginLeft: 8 }} disabled={act.busy || !active.legal.retry_preview}
-                    onClick={() => void act.run(async () => {
-                      await send("POST", `${base}:retry-preview`, { idempotency_key: key(),
-                        items: [{ item_id: active.id, expected_item_revision: active.revision }] });
-                      reload();
-                    })}>Retry preview</button></div>)}
-              {view?.status === "failed" && <div className="banner bad" style={{ margin: "0 12px" }}>
-                {view.validation.failed_stage ?? "build"} failed ({view.validation.failure_code}): {view.error}
-                {view.artifacts.raw ? " · the raw TRELLIS.2 output is kept: building again or re-exporting reuses it." : ""}</div>}
-              {active.build_history.length > 1 && (
-                <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span className="label">Build history</span>
-                  {active.build_history.slice().reverse().map((h) => (
-                    <div key={h.id} className="row" style={{ gap: 8, fontSize: 12 }}>
-                      <span className="mono" style={{ fontSize: 11 }}>{h.id.slice(-8)}</span>
-                      <span className="sub">{h.kind}{h.derived_from ? ` of ${h.derived_from.slice(-6)}` : ""}</span>
-                      <span className="sub" style={{ color: h.result === "valid" ? OK : h.status === "failed" ? BAD : INFO }}>
-                        {h.status === "succeeded" ? h.result : h.status}</span>
-                      {h.accepted && <span className="pill ok">accepted</span>}
-                      <span className="grow" />
-                      {h.has_raw && <button className="btn-link" disabled={!job.recipe.build_available}
-                        onClick={() => setReexporting(h.id)}>re-export</button>}
-                    </div>))}
-                </div>)}
-              <div className="row" style={{ padding: "9px 12px", flexWrap: "wrap" }}>
-                <button className="btn" disabled={!view?.artifacts.raw || !job.recipe.build_available || act.busy}
-                  title={view?.artifacts.raw ? "New GLB from the stored TRELLIS.2 output" : "Only 3D builds keep a raw intermediate"}
-                  onClick={() => setReexporting(view?.id ?? null)}>Re-export…</button>
-                <button className="btn" disabled={!active.legal.mark_regenerate} onClick={() => nav(`/p/${id}/jobs/${job.id}/approve?item=${active.id}`)}>
-                  Back to candidates</button>
-              </div>
-            </aside>
-          )}
+    <button className={`jw-attempt${on ? " on" : ""}`} onClick={onPick} aria-pressed={on} aria-label={`attempt ${n}, ${state}`}>
+      <div className="n stripes">#{n}</div>
+      <div style={{ gridArea: "info", display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span style={{ fontWeight: 500 }}>Attempt {n} · {job.direct ? "transform" : MODE_LABEL[row.mode] ?? row.mode}</span>
+        {line && <span className="sub" style={{ overflowWrap: "anywhere" }}>{line}</span>}
+        {note.text && <span style={{ fontSize: 11.5, color: note.bad ? "var(--bad)" : DIM }}>{note.text}</span>}
+      </div>
+      <div style={{ gridArea: "ck", display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+        <div style={{ height: 4, background: "var(--line)", borderRadius: 2 }}>
+          <div style={{ height: 4, borderRadius: 2, background: color, width: `${attemptPct(row, is3d)}%` }} /></div>
+        <div className="row" style={{ gap: 9, flexWrap: "wrap" }}>
+          {attemptMarks(row, is3d).map((m) => <span key={m.k} className="sub" style={{ color: m.color }}>{m.mark} {m.k}</span>)}
         </div>
-      )}
-      {reexporting && active && <ReexportDialog base={base} itemId={active.id} runId={reexporting}
-        revision={active.revision} onClose={() => setReexporting(null)} onDone={() => { setReexporting(null); reload(); }} />}
-      <ErrorLine error={act.error} />
-      <ActionBar note={`${built.length} built · ${accepted.length} accepted`}
-        sub="Only accepted, structurally valid results can be published. Rejected results keep their candidate set.">
-        <button className="btn btn-primary" disabled={!accepted.length} onClick={() => nav(`/p/${id}/jobs/${job.id}/publish`)}>
-          Go to publish →</button>
-      </ActionBar>
+      </div>
+      <div style={{ gridArea: "st", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
+        <span className="sub" style={{ color, fontSize: 11 }}>{state}</span>
+        {row.accepted && <span className="sub" style={{ color: "var(--ok)", fontWeight: 600 }}>accepted</span>}
+      </div>
+    </button>
+  );
+}
+
+export function BuildTab({ job, item, reload, goTab }: TabProps) {
+  const { id } = useProject();
+  const a = useAction();
+  const [picked, setPicked] = useState<string | null>(null);
+  const history = item.build_history;
+  const newestFirst = history.map((row, i) => ({ row, n: i + 1 })).reverse();
+  const sel = newestFirst.find((x) => x.row.id === picked) ?? newestFirst.find((x) => x.row.current) ?? newestFirst[0];
+  const latest = history[history.length - 1];
+  const pick = pickLabel(item, job.direct, job.kind);
+  const approvalChanged = !!item.approval && !!item.build?.inputs.approval_id && item.build.inputs.approval_id !== item.approval;
+  const canStart = job.direct ? item.legal.run_transform && history.length === 0
+    : !!item.approval && (history.length === 0 || approvalChanged) && !isRunning(latest) && !item.accepted_build;
+  const blocked = !job.direct && !job.recipe.build_available;
+  const verb = VERB[job.kind];
+  const start = () => void a.run(async () => {
+    if (job.direct) await act.startTransform(id, job.id, item.id);
+    else await act.startBuild(id, job.id, item.id, "build");
+    setPicked(null);
+    reload();
+  });
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 18, alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+        {blocked && <div className="banner bad">{job.recipe.build_label} build is not available right now: {job.recipe.build_blocked_reason}.
+          Approved candidates and earlier attempts are kept.</div>}
+        <div className="row" style={{ alignItems: "baseline", flexWrap: "wrap" }}>
+          <span className="label">Attempts · every attempt is kept</span><span className="grow" />
+          <span className="sub" style={{ color: "var(--muted)", fontSize: 11 }}>
+            {job.direct ? `${pick}${job.variant ? ` · ${job.variant.source_name} v${job.variant.source_display_version}` : ""}`
+              : pick ? `approved ${pick}` : "nothing approved"}</span>
+        </div>
+        {canStart && (
+          <div style={{ border: "1px dashed #33353a", borderRadius: 9, padding: "24px 20px", display: "flex", flexDirection: "column",
+            alignItems: "center", gap: 12, textAlign: "center" }}>
+            <span className="muted" style={{ fontSize: 12.5 }}>
+              {job.direct ? "The transform is deterministic and keeps the source untouched. Nothing has been run yet."
+                : history.length ? `Approval changed to ${pick}. Build it as a new attempt; earlier attempts stay.` : `Approved ${pick}. Nothing built yet.`}</span>
+            <button className="btn btn-primary" disabled={a.busy || blocked} onClick={start}>
+              {job.direct ? "Run transform" : `${verb} from ${pick}`}</button>
+          </div>)}
+        {!canStart && history.length === 0 && (
+          <div className="empty" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            {job.direct ? "Nothing to run yet." : "Nothing to build yet. Approve a candidate in Prompt & candidates."}
+            {!job.direct && <button className="btn" onClick={() => goTab("prompt")}>Go to Prompt & candidates</button>}
+          </div>)}
+        {history.length > 0 && (
+          <div className="jw-attempts">
+            {newestFirst.map(({ row, n }) => <AttemptRow key={row.id} job={job} item={item} row={row} n={n} on={row.id === sel?.row.id}
+              onPick={() => setPicked(row.id)} />)}
+          </div>)}
+        <ErrorLine error={a.error} />
+        {item.accepted_build && (
+          <div className="row" style={{ gap: 10 }}>
+            <span className="sub" style={{ color: FAINT }}>An attempt is accepted.</span>
+            <button className="btn btn-primary" onClick={() => goTab("publish")}>Go to publish →</button>
+          </div>)}
+      </div>
+      {sel && <BuildPanel job={job} item={item} sel={sel.row} n={sel.n} reload={reload} goPrompt={() => goTab("prompt")} />}
     </div>
   );
 }

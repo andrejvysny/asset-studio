@@ -1,18 +1,14 @@
 import { type ReactNode, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 
 import { BAD, Box, ErrorLine, INFO, Loading, OK, PageHead, QaPill, relTime, taskColor, WARN } from "../../components/ui";
 import { artifactUrl, type ItemView, key, type ModelPass, type RunDetail, send, V2 } from "../../lib/api";
 import { useAction, useApi } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
+import { runPill } from "./batchUi";
 
 type Row = ItemView & { job_title: string; job_id: string };
 
-export function runPill(status: string): ReactNode {
-  const cls = status === "running" || status === "waiting_for_review" || status === "paused" ? "warn"
-    : status === "completed" ? "ok" : status === "completed_with_errors" ? "bad" : "none";
-  return <span className={`pill ${cls}`}>{status.replaceAll("_", " ")}</span>;
-}
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {
   return (
@@ -211,6 +207,8 @@ export function RunView() {
   const act = useAction();
   if (!r.data) return r.error ? <div className="content"><ErrorLine error={r.error} /></div> : <Loading what="run" />;
   const run = r.data;
+  // Batch runs live in the Batch's Review tab; only standalone (Job) runs keep this minimal view.
+  if (run.batch_id) return <Navigate to={`/p/${id}/batches/${run.batch_id}/review`} replace />;
   const rows: Row[] = run.jobs.flatMap((j) => j.items.map((i) => ({ ...i, job_title: j.title, job_id: j.id })));
   const c = run.counts;
   const control = (action: string) => void act.run(async () => { await send("POST", `${base}:${action}`); r.reload(); });

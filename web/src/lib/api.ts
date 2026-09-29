@@ -102,6 +102,11 @@ export interface BuildRunView { id: string; status: string; result: "valid" | "i
   /** Build kind: "model3d" | "direct_glb" | "direct_raster" | image recipes... */
   build?: string; job_id?: string; item_id?: string; created_at?: string; updated_at?: string;
   op_id?: string | null; executions?: Record<string, string[]> }
+/** GET jobs/{job}/builds/{run}: any attempt, plus its meta report (null if none). */
+export type BuildRunDetail = BuildRunView & { meta: BuildMetaReport | null };
+export interface BuildMetaReport { mesh?: { triangles?: number };
+  budget?: { min?: number | null; max?: number | null; effective?: number };
+  transform?: GlbTransformReport | RasterTransformReport }
 export interface BuildHistoryRow { id: string; status: string; result: string | null; kind: string; error: string | null;
   derived_from: string | null; created_at: string; preview: string | null; checkpoints: string[]; has_raw: boolean;
   accepted: boolean; current: boolean;
@@ -167,6 +172,12 @@ export interface JobProgress { stage: number; state: ProgressState; label: strin
 export interface Stage { tag: string; name: string; backend: string }
 export interface JobDetail extends JobSummary {
   seed_family: number; config_revision: number; locked_template: string; items: ItemView[];
+  /** Candidates per round from the frozen snapshot. */
+  candidate_count: number | null;
+  /** Project style frozen into the Job. */
+  style: { name: string; sha256: string } | null;
+  /** The frozen plan row of a variant Job (readable before anything runs). */
+  variant_row: VariantRow | null;
   recipe: { id: string; label: string; build_label: string; build_available: boolean; build_blocked_reason: string;
     build_state: string; generation_available: boolean; generation_blocked_reason: string; stages: Stage[] };
 }
@@ -463,7 +474,7 @@ export interface Round {
   /** null while the round is still being generated (no record yet). */
   candidate_set_id: string | null; prompt_revision_id: string | null;
   prompt: { positive: string; origin: string; preset: EnhancePreset | null; references_revision: number | null;
-    additions: string[] } | null;
+    additions: string[]; reference_count: number } | null;
   created_at: string | null; requested: number | null; generating: boolean;
   /** In-flight placeholder only. */
   progress?: Task["progress"] | null;

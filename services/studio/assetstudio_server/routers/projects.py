@@ -1,8 +1,10 @@
 """Projects, configuration, storage, runtime, operations and events."""
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Iterator
+import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,7 @@ from ..services.storage import storage_view, test_storage
 from ..studio import Studio
 from .deps import project, studio
 
+SSE_POLL_S = 0.5
 router = APIRouter(prefix="/api/v1")
 
 
@@ -317,17 +320,23 @@ def events(request: Request, cursor: int = Query(default=-1), s: Studio = Depend
     if start < 0:
         start = s.events.seq
 
-    def stream() -> Iterator[str]:
-        pos = start
+    async def stream() -> AsyncIterator[str]:
+        # Async + non-blocking polling: a sync generator would hold a threadpool worker per open connection (up to
+        # 15 s per wait) and starve every sync endpoint once enough browser tabs are open.
+        pos, idle = start, 0.0
         yield f"event: hello\ndata: {json.dumps({'epoch': s.events.epoch, 'seq': pos})}\n\n"
-        for _ in range(240):  # ~1h max per connection; the client reconnects with Last-Event-ID
-            batch, expired = s.events.since(pos, timeout=15.0)
+        deadline = time.monotonic() + 3600  # ~1h per connection; the client reconnects with Last-Event-ID
+        while time.monotonic() < deadline and not await request.is_disconnected():
+            batch, expired = s.events.since(pos, timeout=0)
             if expired:
                 yield "event: reset\ndata: {}\n\n"
             for e in batch:
                 pos = e["seq"]
                 yield f"id: {s.events.epoch}:{pos}\nevent: change\ndata: {json.dumps(e)}\n\n"
-            if not batch:
+            idle = 0.0 if batch or expired else idle + SSE_POLL_S
+            if idle >= 15.0:
+                idle = 0.0
                 yield ": keepalive\n\n"
+            await asyncio.sleep(SSE_POLL_S)
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

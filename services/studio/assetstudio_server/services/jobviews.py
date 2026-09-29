@@ -62,7 +62,8 @@ def _round_view(ctx: ProjectContext, item: JobItem, cset: CandidateSet, generati
     qa_map = item.qa if cset.id == item.current_set else item.qa_history.get(cset.id, {})
     return {"number": cset.number, "candidate_set_id": cset.id, "prompt_revision_id": prompt.id,
             "prompt": {"positive": prompt.positive, "origin": prompt.origin, "preset": b.get("preset"),
-                       "references_revision": b.get("references_revision"), "additions": b.get("additions", [])},
+                       "references_revision": b.get("references_revision"), "additions": b.get("additions", []),
+                       "reference_count": len(b.get("reference_ids") or [])},
             "created_at": cset.created_at, "requested": cset.requested, "generating": generating,
             "candidates": [_candidate_view(ctx, item.job_id, c, qa_map.get(c.id)) for c in cset.candidates]}
 
