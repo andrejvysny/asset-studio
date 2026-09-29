@@ -82,6 +82,45 @@ GPU1 handed aux → worker3d with acknowledged unload → re-export at 1024² te
 publish (licence `review`: DINOv3 licence + Lightning LoRA; `exporter_clean` cleared; no nvdiffrast) →
 `storage verify` 0 problems.
 
+## Asset variants and families + design-v2 UI (2026-09-29)
+
+CPU evidence (SIMULATED engines; fake edit engine derives its output from the source image). Commits 2a197fa..d24337a.
+
+| Suite | Command | Engine | Result |
+|---|---|---|---|
+| Lint | `make lint` | — | pass |
+| Backend (unit + contract + regression) | `uv run pytest` | SIMULATED | 295 pass |
+| Browser e2e (all screens, variants wizard, family grouping, Jobs/Batches) | `make e2e` | SIMULATED | 28 pass |
+| Real GPU acceptance (variants) | see below | real | **not run yet** |
+| Docker (not Podman) deployment | — | — | **not run** |
+| Egress-blocked run with the edit model | — | — | **not run** (`make acceptance-offline` was not extended/re-run for the edit model) |
+
+Mapping to the spec's acceptance IDs (test names are in `tests/`):
+
+| IDs | Tests |
+|---|---|
+| VD (drafts, capabilities, Jobs) | `contract/test_api_variants.py::test_vd01_vd02…`, `test_vd03…`, `test_vd04…`, `test_vd05…`, `test_vd06…`, `test_vd07…`, `test_vd08…`, `test_vd11…`; `test_api_variants_direct.py::test_vt05_vd10_vp01…` |
+| VG (generation) | `contract/test_api_variants_generate.py::test_vg01…`–`test_vg04…`, `test_vg06…`; `test_api_rounds_refs.py::test_vg05…`; `unit/test_comfy_edit.py` (conditioning edges, upload, edit submit); VG07–VG12 (real model canary, VRAM, offline, T2I↔edit switch) need the GPU run |
+| VT (transforms) | `unit/test_transforms.py::test_vt01…`–`test_vt04…`, `test_vt06…`, `test_vt12…`; `contract/test_api_variants_direct.py::test_vt05…`, `test_vt08…`, `test_vt13…` |
+| VQ (variant QA) | `contract/test_api_variant_qa.py::test_vq01…`, `test_vq02…`, `test_vq02b…`, `test_vq03…`, `test_vq06…`; `unit/test_aux_v2.py::test_compare_*` |
+| VP (publication) | `contract/test_api_variants_direct.py::test_vp01` (in `test_vt05_vd10_vp01…`), `test_vp02…`, `test_vp03…`, `test_vp04…` |
+| VL (families/library) | no VL-named tests; covered by `contract/test_api_families.py` (grouped/filtered listing, detail family fields, family endpoints + rename, `derived_from`) |
+| VR (recovery) | `regression/test_variant_recovery.py::test_vr01…`–`test_vr08…`, `test_vr06b…` |
+| VS (scheduling) | `contract/test_variant_scheduling.py::test_vs01…`–`test_vs04…` |
+| VM (migration) | `contract/test_variant_scheduling.py::test_vm01…`–`test_vm03…` |
+| Planning / rounds / references | `contract/test_api_variant_planning.py`, `contract/test_api_rounds_refs.py`, `unit/test_aux_v2.py` |
+| UI | `e2e/test_ui_variants.py`, `test_ui_job_workspace.py`, `test_ui_jobs_list.py`, `test_ui_batches.py` |
+
+Defects found and fixed by the recovery/scheduling/migration tests: lost QA downstream planning, cancelled generation
+re-run, backoff race (flaky test), orphaned engine prompt on cancel (see TODO.md Phase E).
+
+### GPU acceptance (variants) — results pending
+
+**Placeholder: being run now; nothing below is a result.** Planned scenarios: pine (3D reconstruction), non-plant 3D
+asset, icon, direct transform; conditioning canary, VRAM/RAM, offline, T2I↔edit switch (VG01–VG12). Until this section
+holds recorded results, generative variants stay labelled "experimental". Only the pre-acceptance spike is recorded
+(SPEC.md decision record): conditioning verified, ~130 s/edit at 1024², GPU0 peak ~24.07 of 24.56 GB.
+
 ## Known limitations (this release)
 
 - 3D: upstream CuMesh simplification is not deterministic (same raw → e.g. 99 808 vs 99 221 faces); upstream export
@@ -96,3 +135,4 @@ publish (licence `review`: DINOv3 licence + Lightning LoRA; `exporter_clean` cle
 - Pipelines parameter editing is via Schema → YAML (typed validation); inline editor pending.
 - Response types in the web client are hand-written (no OpenAPI response models yet).
 - Model-load counts: the scheduler records passes; ComfyUI does not report its own loads.
+- Variants: see TODO.md ("Known limitations / follow-ups"). Edit-model VRAM headroom is ~0.5 GB on a 24 GB card.

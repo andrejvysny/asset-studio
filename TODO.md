@@ -45,6 +45,14 @@ Baseline: lint clean, 130 tests pass.
 - [x] New Job single asset; Shot list one Job per row + Batch toggle
 - [ ] e2e, docs (SPEC, README, architecture, acceptance), real GPU acceptance (pine + non-plant + icon + direct)
 
+### Known limitations / follow-ups
+- Second Batch start is blocked while one of its runs is open.
+- No bundle download endpoint (per-file downloads only).
+- Export manifest variant extension pending the shared exporter (Jobs/Batches Phase 3).
+- Jobs/Batches Phases 3–6 still open (below).
+- Preserve/change enforcement preview table (UI) not implemented.
+- Project-style revisions (Phase 4) not implemented: style conflict uses snapshot style hashes.
+
 ---
 # Previous milestone (Jobs/Batches) — Phases 3–6 still open
 # TODO — Jobs, Batches, delivery, project style (milestone 2026-09-29)

@@ -65,7 +65,7 @@ creates a new prompt revision and candidate set for selected rows only; history 
 
 ## Scheduling (stage-first, model-aware, across Jobs)
 
-- Work is a **StageTask** per (item, stage, exact inputs): `enhance`, `generate`, `mask`, `qa_vlm`, `qa_finalize`,
+- Work is a **StageTask** per (item, stage, exact inputs): `enhance`, `generate`, `mask`, `qa_vlm`, `qa_compare`, `qa_finalize`,
   `segment`, `sample`, `bake`, `finalize`, `derive`, `preview`, `publish`. Logical keys make creation idempotent.
 - Each task carries a **residency signature**: backend + exact model identities from the pinned lock + weight-changing
   modifiers (e.g. `comfyui:qwen_image_2512@…|speed=lightning_8step@…`, `aux.vlm:…`, `worker3d.trellis:…`,
@@ -127,6 +127,39 @@ contains no NVIDIA non-commercial code (a stub satisfies o_voxel's import). `res
 (research/evaluation-only licence), exists only in images built with `RESEARCH_EXPORTER=1`, and marks the version
 licence `not_cleared`. On a real mesh the two agree on 99.46 % of texel→triangle assignments and to 6e-8 at p99 in
 surface position (differences are edge tie-breaks); see `docs/acceptance.md`.
+
+## Asset variants and families
+
+Family membership lives only on `manifest.family_id` (`families/` records hold metadata + anchor, never a member list); the
+index derives family search, filter and group-by-family pagination. One variant row = one one-item Job; the rows of one
+plan share an immutable `VariantPlan` and a draft Batch.
+
+Data flow: **draft** (`variant-drafts/<id>.json`, revisioned; source bound to one exact version + artifact sha256) → **references**
+(source renders/2D prep via `:prepare-references`, guidance images) → optional draft-scoped aux planning
+(`variant_analyze`, `variant_suggest`; suggestions never overwrite manual rows) → **plan** frozen at `:create-jobs`
+(idempotent via command intent; family resolved/created) → **Jobs + draft Batch** → **edit generation** (`generate` in
+edit mode: prompt enhancement in edit mode, then one source-conditioned edit per slot; never conditioned on sibling
+candidates) → **QA compare** (`qa_compare`) → human approval (rounds; any set) → **build/sizing** (model3d: segment →
+sample → bake → exact final sizing; 2D: kind build; direct rows: transform only, no prompt/candidates) →
+**publication** as a new asset in the family with a `derivation` (source asset/version/artifact hashes, plan, row, method).
+
+New stages: `variant_analyze`, `variant_suggest` (gpu1/aux, draft-scoped, invisible to Jobs/Batches), `qa_compare`
+(aux `/compare`: resemblance, change, single-object, style, per-reference checks; coalesced), `diversity` (aux `/compare`
+over pairs of the selected variants; digest-bound advisory report under `comparisons/variants/`).
+
+Residency: an edit task's signature names the edit model (`qwen_image_edit_2511` + shared encoder/VAE) and sampler
+settings but excludes source ids, row ids, prompts and seeds, so all variant Jobs share one GPU0 pass. Direct transforms
+run on the cpu lane and never take a GPU grant.
+
+ComfyUI: a **workflow registry** (`comfyui/workflows/*.bindings.yaml`, kinds `t2i`, `image_edit`) replaces the single
+workflow; every binding lists model nodes and, for edit, the `conditioning` edges asserted before each submit (source
+image must reach both text-encode nodes and the VAE-encoded latent). Sources are sent through a **controlled upload**
+(content-named PNG, no overwrite, collision/non-PNG rejected) and referenced by handle. Edit builds omit speed/style LoRAs.
+
+Aux v2 endpoints: `/enhance` (Conservative/Creative presets, edit mode, reference cues), `/compare` (strict yes/no; malformed
+answers are `unsure`), `/analyze_source`, `/suggest_variants`. QA that cannot run is `unavailable`, never a pass.
+
+`GET /events` (SSE) is now an async generator with non-blocking polling, so open browser tabs no longer hold threadpool workers.
 
 ## Security posture
 

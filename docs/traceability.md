@@ -65,3 +65,30 @@ All in `tests/contract/test_jobs_batches.py` (SIMULATED engines with real load c
 
 GPU evidence for JB05/JB06/JB10 on real models: **not run yet** (Phase 6 real-host scenario).
 All other IDs (ST*, ML*, EX*) are open; see TODO.md phases.
+
+# Traceability — Asset Variants and Families (milestone 2026-09-29)
+
+Owner guide "AssetStudio — Asset Variants and Families" §1 (V01–V16). Statuses as above; simulated engines. Real GPU run:
+pending (`docs/acceptance.md`, "GPU acceptance (variants)").
+
+| ID | Requirement | Status | Code | Test |
+|---|---|---|---|---|
+| V01 | Structural 3D variants may be newly reconstructed meshes; no topology/UV/rig promise | done (simulated; real model run pending) | `core/variants.py` (`image_edit_reconstruct`), `builds/model3d.py`, `builds/sizing.py` | `test_vr05…`, `test_vt12…` (rigged/animated refused) |
+| V02 | Design variation primary; direct size transforms a separate labelled method; material/texture editing later | done | `core/variants.py` (`METHOD_LABELS`, `static_capability`), `processing/transforms.py` | `test_vd04…`, `test_vd08…`, `unit/test_transforms.py`, `test_api_variants_direct.py` |
+| V03 | Each accepted variant = separate Asset with own versions, linked by AssetFamily | done | `storage/families.py`, publication, `services/variants.py` | `test_vp02…`, `test_vp03…`, `test_api_families.py` |
+| V04 | Natural-language request -> editable variant table; fully manual rows without AI | done | `services/variant_planning.py`, `services/variants.py` (drafts) | `test_api_variant_planning.py` (suggest never overwrites rows), `test_vd03…`, `e2e/test_ui_variants.py` |
+| V05 | New variant from any eligible asset incl. imported and existing variants; single variant needs no big set | done | `services/variants.py` (capabilities, family resolve) | `test_vd01_vd02…`, `test_vd05…`, `e2e::test_single_variant_lands_on_job…` |
+| V06 | Intents Subtle / Related (default) / Exploratory (planning intent, not numeric) | done | `core/variants.py` (`Intent`, `INTENT_NOTES`) | `test_vd03…`, `e2e/test_ui_variants.py` |
+| V07 | Open-weight self-hosted models; tested editing adapter; never silently substitute text-only regeneration | done (simulated); real model canary pending | `adapters/comfyui.py`, `comfyui/workflows/image.edit.qwen2511.*`, `stages/generate.py` (`editing_model_unavailable`) | `unit/test_comfy_edit.py`, `test_vg03…`, VG07–VG12 **not run** |
+| V08 | Preserve/change instructions first; masks/part selection/exact locks deferred and disclosed | partial | `core/variants.py` (`Enforcement`, `Constraint`) | enforcement preview table (UI) **open** |
+| V09 | Defaults: set = 6 x 4; quick single = 1 x 4 | done | `core/variants.py` (`DEFAULT_ROWS`, `DEFAULT_CANDIDATES`) | `test_vd03…`, `test_vd01_vd02…` |
+| V10 | One exact source version per Job; multiple views allowed; multi-source deferred | done | `core/variants.py` (`SourceBinding`), `services/variant_refs.py` | `test_vd06…`, `test_vg04…` |
+| V11 | Simple Group by family in library; flat default; no family-management app | done | `routers/library.py`, `storage/index.py`, `web/src/screens/AssetsGrouped.tsx` | `test_api_families.py`, `e2e::test_library_group_by_family_toggle_persists_in_url` |
+| V12 | Jobs -> Batches + stage-first scheduling; owner decision: one Job = one asset, Jobs grouped in a Batch | done (deviates from guide, by owner decision) | `services/variant_jobs.py`, `coordinator/**` | `test_vd03…`, `test_vs01…`–`test_vs04…`, `test_vr01…` |
+| V13 | One project-wide style; no per-family/per-variant styles | partial | style hash conflict check in `services/variant_jobs.py` (snapshot style hashes; project-style revisions not implemented) | `test_api_variants.py` (409 `style_source_conflict`) |
+| V14 | Preserve source and previous results; no cascading regeneration on new source versions | done | source bound to exact version/sha256 | `test_vd06…`, `test_vm01…`, `test_vg06…` |
+| V15 | Resemblance, change adherence, set diversity = advisory QA; no auto reject/regenerate/publish/merge | done | `stages/qa_compare.py`, `stages/diversity.py`, `services/diversity.py` | `test_api_variant_qa.py` (VQ01–VQ06) |
+| V16 | Style-LoRA registration/stacking/training out of scope; speed presets independent | done (not implemented by design) | `stages/generate.py` (edit path refuses style LoRA, no speed LoRA) | `test_vg01…` |
+
+Not run / open: real GPU acceptance VG07–VG12 (in progress); real Docker; egress-blocked run with the edit model; export
+manifest variant extension (needs shared exporter, Jobs/Batches Phase 3).
