@@ -114,7 +114,7 @@ class Registry:
         if owned:
             backfill_names(store)  # projects from before authoritative name records
         index = AssetIndex(self.settings.instance_dir / "index" / f"{project_id}.sqlite")
-        if index.count() == 0 and store.list_ids("manifests"):
+        if index.needs_rebuild() or (index.count() == 0 and store.list_ids("manifests")):
             index.rebuild(store)
         return ProjectContext(project_id, cfg.project.name, root, store, index, writer if owned else None,
                               not owned, owner)

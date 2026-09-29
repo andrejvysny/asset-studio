@@ -1,3 +1,48 @@
+# TODO — Asset Variants & Families + Claude Design v2 UI (milestone 2026-09-29)
+
+Spec: owner guide "AssetStudio — Asset Variants and Families" (baseline 60ff832; started at 0310b08).
+Design: Claude Design project d7c3ecf3 "Asset Studio v2.dc.html". Owner decisions: design wins on Job granularity
+(one Job = one asset; Create variants -> N one-item Jobs + draft Batch sharing one VariantPlan); full design UI now,
+refs + Conservative/Creative real; Qwen-Image-Edit-2511 download + GPU spike approved; commit per green phase.
+Baseline: lint clean, 130 tests pass.
+
+## Phase A — domain, families, library index, publication
+- [x] core/variants.py (methods, intents, transforms, rows, SourceBinding, VariantPlan/Draft/Context, Derivation,
+      capabilities, row validation); domain: AssetFamily, manifest.family_id, version.derivation, Job.variant/direct,
+      JobItem.references/enhance_preset; id prefixes
+- [x] storage: families store + source attach (CAS), family-aware publication (new asset joins family, derivation,
+      origin=derived), no duplicate publish of same accepted build
+- [x] index: family_id + family name search, family filter, server-side group-by-family pagination, rebuild
+- [x] library API: asset detail family/derivation, families GET/PATCH, assets ?family=&group_by=family
+- [x] processing: GLB parent-transform scale (bounds, anchors, preservation checks), raster resize/pad, single-view
+      source render (no montage), tests VT01–VT08
+## Phase B — variant drafts -> Jobs (+ direct vertical slice)
+- [ ] source binding/eligibility preflight (capabilities endpoint, reasons), source references (renders/2D prep)
+- [ ] drafts CRUD (revision), create-jobs: plan freeze, family resolve, N one-item Jobs + draft Batch, idempotent
+- [ ] direct build route (no prompt/candidates; confirmation binds numeric transform), final sizing helper
+- [ ] tests VD01–VD13, VP01–VP06, VL01–VL09, VT09–VT13 (fake engines)
+## Phase C — planning, references, style
+- [ ] draft-scoped VLM tasks: analyze source, suggest rows (never overwrite manual rows)
+- [ ] preserve/change contract + enforcement preview; style/source conflict + ack
+- [ ] Job references (upload/library, note, crop) + Conservative/Creative enhancement (aux enhance v2)
+## Phase D — image editing (Qwen-Image-Edit-2511)
+- [x] lock entry qwen_image_edit_2511 (fp8mixed, Comfy-Org @f68ace8), download started
+- [x] edit graph + bindings (template 0.11.69 non-Lightning); canary: source conditioning verified, ~130 s/edit @40 steps, GPU0 peak 24.07 GB, alpha must be composited on declared bg
+- [ ] ImageEditRequest, workflow registry, controlled upload, edit graph + bindings, fake edit engine
+- [ ] GPU spike: conditioning canary, VRAM/RAM, offline, T2I<->edit switch (VG01–VG12)
+## Phase E — generative variants + QA
+- [ ] generate stage edit mode (source-conditioned, never sibling), rounds (approve from any set)
+- [ ] variant QA dims (resemblance/change/style), diversity report on selection, final sizing after rebuild
+- [ ] recovery tests VR01–VR08, scheduling VS01–VS04
+## Phase F — UI to design v2 + delivery
+- [ ] Assets group-by-family + family filter; Asset detail family/derivation + New variant/Create variants
+- [ ] Create variants wizard; Job detail (3 tabs, rounds, refs, variant card, direct card, retry menu, stepper)
+- [ ] Jobs list (group-by, pills, batch/rnd, run standalone); Batches (new, gates, 3-tab detail inline review)
+- [ ] New Job single asset; Shot list one Job per row + Batch toggle
+- [ ] e2e, docs (SPEC, README, architecture, acceptance), real GPU acceptance (pine + non-plant + icon + direct)
+
+---
+# Previous milestone (Jobs/Batches) — Phases 3–6 still open
 # TODO — Jobs, Batches, delivery, project style (milestone 2026-09-29)
 
 Spec: owner handoff "AssetStudio — Jobs, Batch Execution, Library Delivery and Project Style" (baseline 60ff832).

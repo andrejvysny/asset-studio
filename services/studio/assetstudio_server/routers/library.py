@@ -1,7 +1,7 @@
 """Assets, versions, artifacts, imports, shot list."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from assetstudio_core.domain import AssetManifest
 from assetstudio_core.ids import derived_id, validate_id
@@ -32,9 +32,39 @@ def categories(ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
 def assets(ctx: ProjectContext = Depends(project), category_id: str | None = None, kind: str | None = None,
            origin: str | None = None, q: str | None = Query(default=None, max_length=200),
            planned: bool = True, limit: int = Query(default=60, ge=1, le=500),
-           offset: int = Query(default=0, ge=0)) -> dict[str, Any]:
+           offset: int = Query(default=0, ge=0), family_id: str | None = None,
+           group_by: Literal["family"] | None = None, cursor: str | None = None) -> dict[str, Any]:
+    if family_id:
+        validate_id(family_id, "fam")
     return lib.list_assets(ctx, category_id=category_id, kind=kind, origin=origin, q=q, show_planned=planned,
-                           limit=limit, offset=offset)
+                           limit=limit, offset=offset, family_id=family_id, group_by=group_by, cursor=cursor)
+
+
+@router.get("/families")
+def families(ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
+    return lib.families_list(ctx)
+
+
+@router.get("/families/{family_id}")
+def family(family_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
+    validate_id(family_id, "fam")
+    return lib.family_detail(ctx, family_id)
+
+
+class PatchFamily(BaseModel):
+    expected_revision: int
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=2000)
+
+
+@router.patch("/families/{family_id}")
+def patch_family(family_id: str, req: PatchFamily, ctx: ProjectContext = Depends(project),
+                 s: Studio = Depends(studio)) -> dict[str, Any]:
+    ctx.require_writable()
+    validate_id(family_id, "fam")
+    out = lib.rename_family(ctx, family_id, req.expected_revision, req.name, req.description)
+    s.events.publish("library", project_id=ctx.id)
+    return out
 
 
 @router.get("/assets/{asset_id}")

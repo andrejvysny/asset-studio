@@ -15,6 +15,7 @@ from assetstudio_core.domain import AssetManifest, AssetVersion, PointerChange, 
 from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import Kind, Origin
 
+from .families import require_family_kind
 from .project import ProjectStore, manifest_key, version_key
 from .repo import Conflict, IntegrityError, NotFound, StorageError
 
@@ -72,6 +73,7 @@ class NewAsset:
     origin: Origin
     category_id: str | None
     tags: list[str] = field(default_factory=list)
+    family_id: str | None = None  # joins this family at the publication point (same-kind check before any write)
 
 
 @dataclass
@@ -88,6 +90,7 @@ class PublishRequest:
     details: dict[str, Any] = field(default_factory=dict)  # sources/config/models/engine/qa/validation/licence
     note: str = ""
     kind: Kind | None = None  # the produced kind: must equal the target asset's kind (checked at commit)
+    derivation: dict[str, Any] | None = None  # immutable lineage stored on the new version record
 
 
 @dataclass
@@ -136,6 +139,8 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
             raise KindMismatch(f"a {req.kind.value} result cannot become a version of a {kind.value} asset")
         if problems := check_roles(kind, set(req.artifacts)):
             raise RoleContractViolation("; ".join(problems))
+        if req.new_asset is not None and req.new_asset.family_id is not None:
+            require_family_kind(store, req.new_asset.family_id, kind)  # before any write
         if req.new_asset is not None:
             reserve_name(store, req.new_asset.name_id, asset_id)
 
@@ -156,7 +161,7 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
                 validation=req.details.get("validation", {}), licence=req.details.get("licence", {}),
                 publication={"op_id": req.op_id, "idempotency_key": req.idempotency_key, "published_at": now,
                              "expected_previous_version": req.expected_current_version},
-                note=req.note,
+                note=req.note, derivation=req.derivation,
             )
             store.create(version_key(asset_id, version_id), version)
         else:
@@ -177,7 +182,8 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
             assert na is not None
             new = AssetManifest(asset_id=asset_id, name_id=na.name_id, display_name=na.display_name, kind=na.kind,
                                 origin=req.origin, category_id=na.category_id, tags=na.tags, created_at=now,
-                                current_version_id=version_id, versions=[ref], pointer_log=pointer)
+                                current_version_id=version_id, versions=[ref], pointer_log=pointer,
+                                family_id=na.family_id)
             store.create(manifest_key(asset_id), new)
         else:
             assert token is not None

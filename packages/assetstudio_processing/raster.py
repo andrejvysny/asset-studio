@@ -5,10 +5,10 @@ Arrays are uint8: RGB (H, W, 3), RGBA (H, W, 4), masks (H, W).
 from __future__ import annotations
 
 import io
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from scipy import ndimage
 
 from .metrics import _srgb_to_lab
@@ -106,3 +106,81 @@ def tile_preview(rgb: np.ndarray, n: int = 3, max_px: int = 1024) -> np.ndarray:
     im = Image.fromarray(tiled)
     im.thumbnail((max_px, max_px), Image.Resampling.LANCZOS)
     return np.asarray(im)
+
+
+def resize_keep_aspect(rgba: np.ndarray, max_w: int, max_h: int, resample: str) -> np.ndarray:
+    """Fit inside the box, no crop or distortion; may upscale. Lanczos is premultiplied (no dark halos)."""
+    h, w = rgba.shape[:2]
+    s = min(max_w / w, max_h / h)
+    nw, nh = min(max_w, max(1, round(w * s))), min(max_h, max(1, round(h * s)))
+    if (nw, nh) == (w, h):
+        return rgba
+    if resample == "nearest":
+        return np.asarray(Image.fromarray(rgba, "RGBA").resize((nw, nh), Image.Resampling.NEAREST))
+    if resample != "lanczos":
+        raise RasterError(f"unknown resample {resample}")
+    return resize_rgba(rgba, nw, nh)
+
+
+def _background(background: str) -> tuple[int, int, int, int] | None:
+    if background in ("transparent", "source_edge"):
+        return None
+    try:
+        r, g, b = (int(background[i:i + 2], 16) for i in (1, 3, 5))
+    except ValueError as e:
+        raise RasterError("background must be transparent, source_edge or #rrggbb") from e
+    return r, g, b, 255
+
+
+def pad_canvas(rgba: np.ndarray, width: int, height: int, placement: str,
+               background: str) -> tuple[np.ndarray, dict[str, Any]]:
+    """Explicit canvas, content never scaled or cropped. Returns (canvas, {content_bounds [x,y,w,h], pivot [x,y]})."""
+    h, w = rgba.shape[:2]
+    if w > width or h > height:
+        raise RasterError("content larger than canvas; resize first")
+    x = 0 if placement == "top_left" else (width - w) // 2
+    y = height - h if placement == "bottom_center" else 0 if placement == "top_left" else (height - h) // 2
+    if background == "source_edge":
+        ys = np.clip(np.arange(height) - y, 0, h - 1)
+        xs = np.clip(np.arange(width) - x, 0, w - 1)
+        out = rgba[ys[:, None], xs[None, :]].copy()
+    else:
+        out = np.empty((height, width, 4), dtype=np.uint8)
+        out[:] = _background(background) or (0, 0, 0, 0)
+    out[y:y + h, x:x + w] = rgba
+    pivot = [x + w // 2, y + h] if placement == "bottom_center" else [x + w // 2, y + h // 2]
+    return out, {"content_bounds": [x, y, w, h], "pivot": pivot}
+
+
+def _decode_oriented(data: bytes) -> np.ndarray:
+    from .images import inspect_image
+
+    try:
+        inspect_image(data, ("PNG", "JPEG", "WEBP"))  # pixel cap + verified decode before any transform
+    except ValueError as e:
+        raise RasterError(str(e)) from e
+    with Image.open(io.BytesIO(data)) as im:
+        return np.asarray(ImageOps.exif_transpose(im).convert("RGBA"))
+
+
+def apply_raster_transform(data: bytes, transform: Any) -> tuple[bytes, dict[str, Any]]:
+    """Decode (EXIF orientation applied to the derivative only), resize or pad, encode PNG. Input bytes untouched."""
+    from assetstudio_core.variants import PadCanvas, RasterTransform, ResizeKeepAspect
+    from pydantic import TypeAdapter, ValidationError
+
+    if not isinstance(transform, (ResizeKeepAspect, PadCanvas)):
+        try:
+            transform = TypeAdapter(RasterTransform).validate_python(transform)
+        except ValidationError as e:
+            raise RasterError(f"invalid raster transform: {e}") from e
+    src = _decode_oriented(data)
+    h, w = src.shape[:2]
+    meta: dict[str, Any] = {"op": transform.op, "input_size": [w, h], "resample": None, "background": None}
+    if isinstance(transform, ResizeKeepAspect):
+        out = resize_keep_aspect(src, transform.max_width, transform.max_height, transform.resample)
+        meta.update(resample=transform.resample, content_bounds=[0, 0, out.shape[1], out.shape[0]])
+    else:
+        out, info = pad_canvas(src, transform.width, transform.height, transform.placement, transform.background)
+        meta.update(background=transform.background, **info)
+    meta["output_size"] = [out.shape[1], out.shape[0]]
+    return to_png(out), meta

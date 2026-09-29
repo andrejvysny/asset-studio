@@ -1,7 +1,9 @@
 assetstudio:
   base_path: /models
   is_default: true
-  diffusion_models: checkpoints/qwen-image-2512/split_files/diffusion_models
+  diffusion_models: |
+    checkpoints/qwen-image-2512/split_files/diffusion_models
+    checkpoints/qwen-image-edit-2511/split_files/diffusion_models
   text_encoders: checkpoints/qwen-image-2512/split_files/text_encoders
   vae: checkpoints/qwen-image-2512/split_files/vae
   loras: |

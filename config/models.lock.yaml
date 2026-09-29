@@ -81,6 +81,24 @@ models:
       split_files/vae/qwen_image_vae.safetensors:
         size: 253806246
         sha256: a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f
+  qwen_image_edit_2511:
+    repo: Comfy-Org/Qwen-Image-Edit_ComfyUI
+    revision: f68ace85e60b4a02a323e394253731947657b7d2
+    local_dir: checkpoints/qwen-image-edit-2511
+    licence: Apache-2.0 (Qwen/Qwen-Image-Edit-2511 model card)
+    licence_status: cleared
+    roles:
+    - image.edit
+    service: comfyui
+    gated: false
+    optional: true
+    # Text encoder + VAE are the qwen_image_2512 files (same qwen_2.5_vl_7b_fp8_scaled / qwen_image_vae).
+    shares: [qwen_image_2512]
+    hash_source: hub LFS sha256 (api tree) 2026-09-29
+    files:
+      split_files/diffusion_models/qwen_image_edit_2511_fp8mixed.safetensors:
+        size: 20533762817
+        sha256: c9fdc158e46d3b61ef75f21ae866ca2fe808bf4a53643120d1c1e87c19280a4e
   qwen_image_2512_lightning:
     repo: lightx2v/Qwen-Image-2512-Lightning
     revision: a52649c9d0f6e1a248bff13f0df33bb8a2abdb52

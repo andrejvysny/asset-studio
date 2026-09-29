@@ -5,7 +5,9 @@ Screen arrays are (H, W); triangles are rasterised at pixel centres, nearest dep
 from __future__ import annotations
 
 import io
+import json
 import math
+import struct
 
 import numpy as np
 import trimesh
@@ -125,3 +127,50 @@ def glb_stats(data: bytes) -> dict[str, object]:
     pts = np.concatenate([np.asarray(m.vertices) for m in meshes]) if meshes else np.zeros((1, 3))
     return {"triangles": int(tri), "vertices": int(sum(len(m.vertices) for m in meshes)), "components": comps,
             "extents": (pts.max(0) - pts.min(0)).round(5).tolist(), "meshes": len(meshes)}
+
+
+RENDERER_ID = "assetstudio.cpu_lambert.v1"
+REFERENCE_VIEWS: dict[str, tuple[float, float]] = {"three_quarter": (-45, 20), "rear": (135, 20), "side": (90, 10)}
+
+
+def _material_flags(data: bytes) -> tuple[bool, bool]:
+    """(alpha mode MASK/BLEND used, doubleSided used) from the GLB JSON; the shader ignores both."""
+    try:
+        jlen = struct.unpack_from("<I", data, 12)[0]
+        mats = json.loads(data[20:20 + jlen]).get("materials") or []
+    except (struct.error, ValueError, AttributeError):
+        return False, False
+    return (any(m.get("alphaMode") in ("MASK", "BLEND") for m in mats),
+            any(m.get("doubleSided") for m in mats))
+
+
+def render_view(data: bytes, yaw_deg: float, pitch_deg: float, size: int = 1024,
+                background: tuple[int, int, int] = (200, 200, 200), margin: float = 0.08) -> tuple[bytes, dict]:
+    """One neutral object view (flat background, no floor/shadow) framed by the bounding sphere plus margin.
+
+    Meant as image-edit conditioning, not a faithful material preview: warnings list what the shader ignores.
+    """
+    meshes = _load(data)
+    if not meshes:
+        raise ValueError("no triangles to render")
+    pts = np.concatenate([np.asarray(m.vertices) for m in meshes])
+    center = (pts.min(0) + pts.max(0)) / 2
+    radius = float(np.linalg.norm(pts - center, axis=1).max()) or 1.0
+    scale = size * (0.5 - margin) / radius
+    color = np.tile(np.array(background, dtype=np.float32), (size, size, 1))
+    depth = np.full((size, size), -np.inf)
+    rot = _camera(math.radians(yaw_deg), math.radians(pitch_deg))
+    for m in meshes:
+        _draw(m, rot, scale, center, size, color, depth)
+    out = io.BytesIO()
+    Image.fromarray(np.clip(color, 0, 255).astype(np.uint8)).save(out, "PNG", optimize=True)
+    alpha, double = _material_flags(data)
+    flags = (("alpha_mode_ignored", alpha), ("double_sided_ignored", double),
+             ("texture_missing", not any(_texture(m)[0] is not None for m in meshes)))
+    return out.getvalue(), {"yaw": yaw_deg, "pitch": pitch_deg, "size": size, "background": list(background),
+                            "renderer": RENDERER_ID, "shading": "simplified Lambert, base colour texture only",
+                            "warnings": [w for w, on in flags if on]}
+
+
+def reference_views(data: bytes, size: int = 1024) -> dict[str, tuple[bytes, dict]]:
+    return {name: render_view(data, yaw, pitch, size) for name, (yaw, pitch) in REFERENCE_VIEWS.items()}

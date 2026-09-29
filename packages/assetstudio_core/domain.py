@@ -76,6 +76,7 @@ class AssetManifest(Record):
     versions: list[VersionRef] = []
     pointer_log: list[PointerChange] = []
     revision: int = 1
+    family_id: str | None = None  # the ONLY family-membership authority (at most one family per asset)
 
     def version(self, version_id: str) -> VersionRef | None:
         return next((v for v in self.versions if v.version_id == version_id), None)
@@ -102,6 +103,23 @@ class AssetVersion(Record):
     licence: dict[str, Any] = {}
     publication: dict[str, Any]
     note: str = ""
+    derivation: dict[str, Any] | None = None  # variants.Derivation (immutable lineage of a variant version)
+
+
+class AssetFamily(Record):
+    """A project-local, same-kind group of independent assets. Holds metadata + the anchor it started from;
+    membership is AssetManifest.family_id (no member list here that could drift)."""
+
+    id: str
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    kind: Kind
+    anchor_asset_id: str
+    anchor_version_id: str
+    created_at: str
+    updated_at: str
+    revision: int = 1
+    created_by_op: str
 
 
 class ShotItem(BaseModel):
@@ -141,6 +159,8 @@ class Job(Record):
     config_revision: int
     revision: int = 1
     archived_at: str | None = None
+    variant: dict[str, Any] | None = None  # variants.VariantContext when created by New variant / Create variants
+    direct: bool = False  # direct transform: no prompt, candidates or approval; one deterministic result
 
 
 class Batch(Record):
@@ -219,6 +239,9 @@ class JobItem(JobScoped):
     shot_id: str | None = None
     target_asset_id: str | None = None
     snapshot_sha: str
+    references: list[dict[str, Any]] = []  # JobReference: {id, artifact_id, sha256, origin, note, crop, label}
+    references_revision: int = 0  # bumps on every reference change (prompt confirmation binds it)
+    enhance_preset: Literal["conservative", "creative"] = "conservative"
     revision: int = 1
     prompt_revisions: list[str] = []
     current_prompt: str | None = None

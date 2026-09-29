@@ -9,6 +9,8 @@ PREFIXES = {
     "ref", "style", "qrs",
     # Jobs/Batches milestone. `bat` stays valid: legacy production batches ARE Jobs (never new grouping Batches).
     "job", "bch", "brn", "wav", "stk", "pas", "att", "sty", "san", "xpl", "xrn", "cmd", "sel", "upl", "aud",
+    # Variants/families milestone.
+    "fam", "vdr", "vpl", "srs", "vsa", "div", "row", "jrf",
 }
 JOB_PREFIXES = ("job", "bat")
 _ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32, lowercase

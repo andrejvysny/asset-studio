@@ -1,0 +1,29 @@
+# Qwen-Image-Edit-2511 source-conditioned editing (adapted from ComfyUI template image_qwen_image_edit_2511,
+# templates 0.11.69, non-Lightning path: 40 steps, cfg 4, AuraFlow shift 3.1, CFGNorm 1, index_timestep_zero).
+# The source image MUST reach node 8/9 image1 AND the VAEEncode latent (node 7 feeds all three): `conditioning`
+# lists the edges the adapter asserts are connected before every submit.
+id: comfyui.qwen_edit_2511
+version: 1
+kind: image_edit
+graph: image.edit.qwen2511.api.json
+inputs:
+  positive: {node: "8", input: prompt}
+  negative: {node: "9", input: prompt}
+  seed: {node: "13", input: seed}
+  steps: {node: "13", input: steps}
+  cfg: {node: "13", input: cfg}
+  filename_prefix: {node: "15", input: filename_prefix}
+  source_image: {node: "6", input: image}
+optional: {}
+conditioning:
+  - {from: "6", to: "7", input: image}
+  - {from: "7", to: "8", input: image1}
+  - {from: "7", to: "9", input: image1}
+  - {from: "7", to: "12", input: pixels}
+  - {from: "12", to: "13", input: latent_image}
+models:
+  - {node: "1", input: unet_name, model: qwen_image_edit_2511}
+  - {node: "2", input: clip_name, model: qwen_image_2512}
+  - {node: "3", input: vae_name, model: qwen_image_2512}
+outputs:
+  image: {node: "15", kind: images}
