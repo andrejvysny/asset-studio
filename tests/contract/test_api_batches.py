@@ -209,14 +209,3 @@ def test_preview_best_and_mixed_kinds_and_shot_claims(api: Api) -> None:
     assert statuses[sid] == "in_batch"
     planned = api.get(f"/api/v1/projects/{pid}/assets")
     assert planned["total"] == 0 and planned["planned_total"] == 1
-
-
-def test_3d_build_blocked_with_reason(api: Api) -> None:
-    pid = setup_project(api)
-    bid = create(api, pid, ["Crate"], "batch-3d-1", category="props")["batch"]["id"]
-    d = detail(api, pid, bid)
-    assert d["recipe"]["build_available"] is False and "DINOv3" in d["recipe"]["build_blocked_reason"]
-    r = api.raw("POST", f"/api/v1/projects/{pid}/batches/{bid}:build-approved", json={
-        "idempotency_key": "build-3d-1", "items": [{"item_id": d["items"][0]["id"], "approval_id": "dec_x",
-                                                    "expected_item_revision": 1}]})
-    assert r.status_code == 422 and r.json()["error"]["code"] == "build_unavailable"

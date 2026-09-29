@@ -66,7 +66,8 @@ export interface CandidateView { id: string; index: number; artifact_id: string;
 export interface PromptRev { id: string; number: number; origin: string; description: string; template: string;
   positive: string; negative: string; original_brief: string; enhancer: Record<string, Json> | null }
 export interface BuildRunView { id: string; status: string; result: "valid" | "invalid" | "validation_unavailable" | null;
-  artifacts: Record<string, string>; validation: { ok?: boolean; checks?: { id: string; ok: boolean; detail?: string }[] };
+  artifacts: Record<string, string>; inputs: Record<string, Json>;
+  validation: { ok?: boolean; checks?: { id: string; ok: boolean; detail?: string; advisory?: boolean }[] };
   error: string | null }
 export interface ItemView {
   id: string; name: string; brief: string; revision: number; category_id: string | null; shot_id: string | null;

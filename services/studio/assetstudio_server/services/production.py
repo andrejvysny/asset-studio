@@ -6,7 +6,7 @@ from typing import Any
 from assetstudio_core.domain import AssetManifest, BatchItem
 from assetstudio_core.inheritance import name_parts
 from assetstudio_core.naming import render_name, variant_letters
-from assetstudio_core.recipes import RECIPES
+from assetstudio_core.recipes import RECIPES, validate_parameters
 from assetstudio_storage.project import manifest_key
 from pydantic import BaseModel, Field
 
@@ -15,6 +15,7 @@ from ..registry import ProjectContext
 from ..studio import Studio
 from .prompts import ItemRef, _outcome
 from .records import load_batch, load_build, load_item, mutate_item, set_task
+from .runtime import build_readiness
 
 
 class BuildItem(ItemRef):
@@ -23,6 +24,19 @@ class BuildItem(ItemRef):
 
 class BuildApproved(BaseModel):
     items: list[BuildItem] = Field(min_length=1, max_length=200)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+REEXPORT_KEYS = ("exporter", "texture_size", "triangles", "remesh")
+
+
+class ReexportItem(ItemRef):
+    build_run_id: str
+    overrides: dict[str, Any] = Field(default={}, max_length=len(REEXPORT_KEYS))
+
+
+class Reexport(BaseModel):
+    items: list[ReexportItem] = Field(min_length=1, max_length=200)
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
@@ -41,8 +55,9 @@ def build_approved(studio: Studio, ctx: ProjectContext, batch_id: str, req: Buil
     ctx.require_writable()
     batch, _ = load_batch(ctx.store, batch_id)
     recipe = RECIPES[batch.recipe_id]
-    if recipe.build is None:
-        raise ApiError(422, "build_unavailable", f"{recipe.label}: {recipe.build_blocked_reason}")
+    gate = build_readiness(studio, recipe.id)
+    if gate["state"] != "ready":
+        raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
     if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
         return prior
     results, eligible = [], []
@@ -58,21 +73,65 @@ def build_approved(studio: Studio, ctx: ProjectContext, batch_id: str, req: Buil
         results.append(out)
         if out["ok"]:
             eligible.append({"item_id": b.item_id, "approval_id": b.approval_id})
-    op_public = None
     lane = "gpu1" if "birefnet" in recipe.build_models else "cpu"  # may need segmentation when QA had no mask
-    if eligible:
-        op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="build", lane=lane,
-                                             affinity=f"build.{recipe.build}",
-                                             payload={"batch_id": batch_id, "items": eligible},
-                                             idempotency_key=req.idempotency_key, hold=True)
-        if created:
-            for e in eligible:
-                mutate_item(studio, ctx, batch_id, e["item_id"], lambda x: set_task(x, "build", op.id, "queued"))
-            studio.journal.release(op.id)
-        op_public = op.public()
-    response = {"results": results, "operation": op_public}
+    response = {"results": results,
+                "operation": _enqueue_build(studio, ctx, batch_id, recipe, eligible, req.idempotency_key, lane)}
     studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
     return response
+
+
+def reexport(studio: Studio, ctx: ProjectContext, batch_id: str, req: Reexport) -> dict[str, Any]:
+    """New build runs from stored raw intermediates with changed export parameters; TRELLIS.2 is not resampled."""
+    ctx.require_writable()
+    batch, _ = load_batch(ctx.store, batch_id)
+    recipe = RECIPES[batch.recipe_id]
+    if recipe.build != "model3d":
+        raise ApiError(422, "reexport_unsupported", f"{recipe.label} builds have no raw intermediate to re-export")
+    gate = build_readiness(studio, recipe.id)
+    if gate["state"] != "ready":
+        raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
+    for it in req.items:
+        if bad := [k for k in it.overrides if k not in REEXPORT_KEYS]:
+            raise ApiError(422, "invalid_parameters", f"not re-exportable: {bad}; allowed {list(REEXPORT_KEYS)}")
+        if errors := validate_parameters(recipe, it.overrides):
+            raise ApiError(422, "invalid_parameters", "; ".join(f"{k}: {m}" for k, m in errors))
+    if (prior := studio.journal.command_result(req.idempotency_key, req.model_dump(mode="json"))) is not None:
+        return prior
+    results, eligible = [], []
+    for r in req.items:
+        run, _ = load_build(ctx.store, batch_id, r.build_run_id)
+
+        def check(item: BatchItem, r: ReexportItem = r, run: Any = run) -> None:
+            if run.item_id != item.id or "raw" not in run.artifacts:
+                raise ApiError(409, "no_raw", "that build has no stored raw intermediate for this item")
+            if item.approval != run.inputs.get("approval_id") or item.regen_requested:
+                raise ApiError(409, "stale_approval", "the approval changed since that build; build again")
+            if item.tasks.get("build") and item.tasks["build"].state in ("queued", "running"):
+                raise ApiError(409, "busy", "a build is already running")
+        out = _outcome(studio, ctx, batch_id, r.item_id, check, r.expected_item_revision)
+        results.append(out)
+        if out["ok"]:
+            eligible.append({"item_id": r.item_id, "approval_id": run.inputs["approval_id"],
+                             "reexport_from": run.id, "overrides": r.overrides})
+    response = {"results": results, "operation": _enqueue_build(studio, ctx, batch_id, recipe, eligible,
+                                                                  req.idempotency_key, "gpu1")}
+    studio.journal.record_command(req.idempotency_key, req.model_dump(mode="json"), response)
+    return response
+
+
+def _enqueue_build(studio: Studio, ctx: ProjectContext, batch_id: str, recipe: Any, eligible: list[dict[str, Any]],
+                   key: str, lane: str) -> dict[str, Any] | None:
+    if not eligible:
+        return None
+    op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="build", lane=lane,
+                                         affinity=f"build.{recipe.build}",
+                                         payload={"batch_id": batch_id, "items": eligible},
+                                         idempotency_key=key, hold=True)
+    if created:
+        for e in eligible:
+            mutate_item(studio, ctx, batch_id, e["item_id"], lambda x: set_task(x, "build", op.id, "queued"))
+        studio.journal.release(op.id)
+    return op.public()
 
 
 def publish_target(ctx: ProjectContext, item: BatchItem, taken: set[str]) -> dict[str, Any]:

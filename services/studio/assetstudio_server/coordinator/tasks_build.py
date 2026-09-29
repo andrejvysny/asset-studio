@@ -27,6 +27,9 @@ from .builds import BUILDS, BuildFailed, run_build
 from .runner import TaskEnv
 from .tasks_prompt import _items_error
 
+# Kept on the build run (re-export, provenance) but not shipped as version files: raw TRELLIS output is ~100-300 MB.
+INTERMEDIATE_ROLES = ("raw", "cutout", "mask")
+
 
 def build(env: TaskEnv) -> dict[str, Any]:
     batch_id = env.op.payload["batch_id"]
@@ -46,7 +49,7 @@ def build(env: TaskEnv) -> dict[str, Any]:
         if fn is None:
             raise RuntimeError(f"no build implementation {recipe.build}")
         try:
-            run = run_build(env, batch_id, item, entry["approval_id"], recipe.build or "", fn)
+            run = run_build(env, batch_id, item, entry, recipe.build or "", fn)
         except BuildFailed as e:
             mutate_item(env.studio, env.ctx, batch_id, item.id,
                         lambda x, e=e: set_task(x, "build", env.op.id, "failed", str(e)[:300]))
@@ -82,7 +85,8 @@ def _details(env: TaskEnv, batch_id: str, item: BatchItem, run: BuildRun) -> dic
     return {
         "sources": {"batch_id": batch_id, "item_id": item.id, "shot_id": item.shot_id, "prompt_revision_id": prompt.id,
                     "candidate_set_id": cset.id, "candidate_id": b["candidate_id"], "approval_id": decision.id,
-                    "build_run_id": run.id, "positive": prompt.positive, "negative": prompt.negative},
+                    "build_run_id": run.id, "positive": prompt.positive, "negative": prompt.negative,
+                    "intermediates": {k: v for k, v in run.artifacts.items() if k in INTERMEDIATE_ROLES}},
         "config_snapshot_sha": item.snapshot_sha,
         "models": models,
         "engine": {k: v for k, v in cset.generation.items() if k not in ("models",)},
@@ -92,7 +96,8 @@ def _details(env: TaskEnv, batch_id: str, item: BatchItem, run: BuildRun) -> dic
                                        "override_reason": decision.override_reason,
                                        "failed": decision.failed_checks, "missing": decision.missing_checks},
         "validation": run.validation,
-        "licence": licence_summary(env.studio.settings.config_dir, used, cset.generation),
+        "licence": licence_summary(env.studio.settings.config_dir, used, cset.generation,
+                                   run.inputs.get("components")),
     }
 
 
@@ -107,7 +112,8 @@ def publish_pass(env: TaskEnv) -> dict[str, Any]:
         mutate_item(env.studio, env.ctx, batch_id, item.id, lambda x: set_task(x, "publish", env.op.id, "running"))
         snap = store.read_snapshot(item.snapshot_sha)
         req = PublishRequest(
-            op_id=f"{env.op.id}.{item.id}", idempotency_key=env.op.idempotency_key, artifacts=run.artifacts,
+            op_id=f"{env.op.id}.{item.id}", idempotency_key=env.op.idempotency_key,
+            artifacts={k: v for k, v in run.artifacts.items() if k not in INTERMEDIATE_ROLES},
             preview_role="preview", origin=Origin.generated, asset_id=entry["asset_id"],
             new_asset=None if entry["asset_id"] else NewAsset(entry["name_id"], item.name, Kind(snap["recipe"]["kind"]),
                                                              Origin.generated, item.category_id),

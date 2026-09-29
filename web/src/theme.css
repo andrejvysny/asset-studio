@@ -88,6 +88,7 @@ textarea.input { font: 400 14px/1.55 var(--sans); padding: 11px 12px; resize: ve
 .banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 7px; font-size: 12.5px; }
 .banner.bad { background: oklch(0.72 0.14 25 / 0.1); border: 1px solid oklch(0.72 0.14 25 / 0.3); color: #e3c9c4; }
 .banner.note { background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+.banner.warn { background: oklch(0.8 0.13 80 / 0.1); border: 1px solid oklch(0.8 0.13 80 / 0.3); color: #e6d8b8; }
 .error { color: var(--bad); font: 500 12px var(--mono); white-space: pre-wrap; }
 .stripes { background: repeating-linear-gradient(135deg, #1d1e20 0 7px, #232427 7px 14px); }
 .thumb { aspect-ratio: 1; width: 100%; object-fit: contain; display: block; background: #1b1c1e; }

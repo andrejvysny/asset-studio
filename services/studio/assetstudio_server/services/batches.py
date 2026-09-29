@@ -194,9 +194,11 @@ def item_view(ctx: ProjectContext, batch: Batch, item: BatchItem, build_availabl
     }
 
 
-def batch_detail(ctx: ProjectContext, batch_id: str) -> dict[str, Any]:
+def batch_detail(ctx: ProjectContext, batch_id: str, build: dict[str, Any]) -> dict[str, Any]:
+    """`build` is the live readiness of the recipe's build step (services.runtime.build_readiness)."""
     batch, _ = load_batch(ctx.store, batch_id)
     recipe = RECIPES[batch.recipe_id]
+    available = build["state"] == "ready"
     items = load_items(ctx.store, batch)
     snap = ctx.store.read_snapshot(items[0].snapshot_sha) if items else None
     return {
@@ -204,10 +206,11 @@ def batch_detail(ctx: ProjectContext, batch_id: str) -> dict[str, Any]:
         "seed_family": batch.seed_family,
         "config_revision": batch.config_revision,
         "recipe": {"id": recipe.id, "label": recipe.label, "build_label": KINDS[recipe.kind].build_label,
-                   "build_available": recipe.build is not None, "build_blocked_reason": recipe.build_blocked_reason,
+                   "build_available": available, "build_blocked_reason": build["reason"] if not available else "",
+                   "build_state": build["state"],
                    "generation_available": recipe.generation is not None,
                    "generation_blocked_reason": recipe.generation_blocked_reason,
                    "stages": [s.__dict__ for s in recipe.stages]},
         "locked_template": snap["template"] if snap else recipe.template,
-        "items": [item_view(ctx, batch, it, recipe.build is not None) for it in items],
+        "items": [item_view(ctx, batch, it, available) for it in items],
     }

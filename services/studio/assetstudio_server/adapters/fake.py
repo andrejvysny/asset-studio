@@ -8,7 +8,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
-from .base import EngineUnavailable, JobStatus, T2IRequest
+from .base import EngineRejected, EngineUnavailable, JobStatus, T2IRequest
 
 
 def _png(seed: int, w: int, h: int, label: str) -> bytes:
@@ -118,6 +118,55 @@ class FakeAux:
         out = io.BytesIO()
         mask.save(out, "PNG")
         return {"mask_png": out.getvalue(), "meta": {"model": "simulated"}}
+
+    def unload(self, owner_token: str) -> dict[str, Any]:
+        self.calls.append("unload")
+        if isinstance(self.unload_response, Exception):
+            raise self.unload_response
+        self.loaded = False
+        return self.unload_response or {"loaded": False, "owner_token": owner_token}
+
+
+class FakeWorker3d:
+    """SIMULATED 3D worker: a textured sphere, never a reconstruction. Same byte contract as the real worker."""
+
+    name = "worker3d"
+    simulated = True
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.loaded = False
+        self.unload_response: dict[str, Any] | Exception | None = None
+
+    def health(self) -> dict[str, Any]:
+        return {"reachable": True, "ok": True, "missing_models": [], "exporters": {"clean": True, "research": False},
+                "loaded": {"trellis2": self.loaded}, "simulated": True}
+
+    def generate(self, *, image_rgba: bytes, seed: int, pipeline_type: str) -> tuple[bytes, dict[str, Any]]:
+        self.calls.append("generate")
+        self.loaded = True
+        raw = b"SIMULATED-RAW:" + hashlib.sha256(image_rgba + seed.to_bytes(8, "big")).digest()
+        return raw, {"engine": "simulated", "seed": seed, "pipeline_type": pipeline_type, "raw_faces": 0}
+
+    def export(self, *, raw: bytes, exporter: str, decimation_target: int, texture_size: int,
+               remesh: bool) -> tuple[bytes, dict[str, Any]]:
+        import numpy as np
+        import trimesh
+
+        self.calls.append(f"export:{exporter}")
+        if not raw.startswith(b"SIMULATED-RAW:"):
+            raise EngineRejected("invalid raw intermediate")
+        sphere = trimesh.creation.icosphere(subdivisions=2 if decimation_target < 1000 else 3)
+        uv = np.stack([np.arctan2(sphere.vertices[:, 1], sphere.vertices[:, 0]) / (2 * np.pi) + 0.5,
+                       sphere.vertices[:, 2] * 0.5 + 0.5], -1)
+        shade = raw[14] if len(raw) > 14 else 128
+        tex = Image.new("RGB", (64, 64), (shade, 120, 200 - shade // 2))
+        sphere.visual = trimesh.visual.TextureVisuals(
+            uv=uv, material=trimesh.visual.material.PBRMaterial(baseColorTexture=tex))
+        return sphere.export(file_type="glb"), {"exporter": exporter, "faces_out": int(len(sphere.faces)),
+                                                "decimation_target": decimation_target, "texture_size": 64,
+                                                "remesh": remesh, "simulated": True,
+                                                "licence": "SIMULATED", "limitations": []}
 
     def unload(self, owner_token: str) -> dict[str, Any]:
         self.calls.append("unload")

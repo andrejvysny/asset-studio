@@ -13,9 +13,11 @@ def load_licences(config_dir: Path) -> dict[str, dict[str, Any]]:
     return (load_yaml((config_dir / "licences.yaml").read_bytes()) or {}).get("components", {})
 
 
-def licence_summary(config_dir: Path, models_used: list[str], generation: dict[str, Any]) -> dict[str, Any]:
+def licence_summary(config_dir: Path, models_used: list[str], generation: dict[str, Any],
+                    build_components: list[str] | None = None) -> dict[str, Any]:
     table = load_licences(config_dir)
     ids = ["comfyui", *models_used] if generation.get("engine") == "comfyui" else list(models_used)
+    ids += [c for c in build_components or [] if c not in ids]
     if generation.get("speed_lora"):
         ids.append("qwen_image_2512_lightning")
     comps = [{"id": i, **table.get(i, {"name": i, "licence": "unknown", "status": "unknown"})} for i in ids]

@@ -13,3 +13,7 @@ services:
     userns_mode: keep-id
     devices: ["nvidia.com/gpu=${GPU_AUX_ID:-1}"]
     environment: {HOME: /tmp}
+  worker3d:
+    userns_mode: keep-id
+    devices: ["nvidia.com/gpu=${GPU_AUX_ID:-1}"]
+    environment: {HOME: /tmp}

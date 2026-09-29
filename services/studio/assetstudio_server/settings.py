@@ -29,6 +29,7 @@ class Settings:
         for p in os.environ.get("STUDIO_PROJECT_ROOTS", "~/AssetStudio").split(":") if p])
     comfy_url: str = field(default_factory=lambda: os.environ.get("COMFY_URL", "http://127.0.0.1:8188"))
     aux_url: str = field(default_factory=lambda: os.environ.get("AUX_URL", "http://127.0.0.1:8001"))
+    worker3d_url: str = field(default_factory=lambda: os.environ.get("WORKER3D_URL", "http://127.0.0.1:8003"))
     # "comfyui" (real), "fake" (clearly-labelled simulation for tests/demo) or "none" (library-only).
     engine: str = field(default_factory=lambda: os.environ.get("STUDIO_ENGINE", "comfyui"))
     gpu_ids: dict[str, str] = field(default_factory=lambda: {

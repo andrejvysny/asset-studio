@@ -47,8 +47,21 @@ Defaults (open Qs): derived material maps off; atlas pow2 = param, default off; 
 - [x] B7 docs: SPEC record, acceptance, README, TODO
 - [ ] material tileability: generated materials fail seam gate (ratio ≈4) — decide: seamless-tiling step vs. tiling-capable model/LoRA vs. project threshold
 
+## Phase 3 — 3D (DINOv3 access granted 2026-09-29)
+Decisions: GPU1 HTTP worker `worker3d` (not ComfyUI-native); clean exporter default (no NVIDIA NC code; torch UV rasteriser
+replaces nvdiffrast in to_glb); opt-in research exporter (upstream nvdiffrast, build arg) → licence not_cleared.
+- [x] verify HF access, download DINOv3 @ lock revision, record sha256, `models verify --full` all ok
+- [x] licence audit: nvdiffrast v0.4.0 + nvdiffrec = research/eval only; TRELLIS.2, CuMesh, FlexGEMM, o-voxel = MIT
+- [x] services/worker3d: /health /generate (→ safe npz raw) /export (clean|research → GLB) /unload (owner ack); previews rendered on Studio CPU
+- [x] clean exporter: torch UV-space rasteriser; nvdiffrast stub in default image
+- [x] Studio: Worker3dClient + fake, GPU1 ownership aux↔3d, model3d build (mask reuse → cutout → generate → export → validate → preview)
+- [x] re-export from raw (F03), triangle budget requested/effective/actual, licence provenance per exporter
+- [x] compose: worker3d on GPU1; remove legacy trellis_worker + compose.legacy-3d.yml
+- [x] tests: contract (fake worker), GPU: real 3D batch, clean vs research exporter on same raw
+- [x] docs (architecture, installation, README, SPEC record, acceptance)
+- [ ] follow-up: GC/retention for raw intermediates (Phase 4); research exporter through a Studio run (needs research image deployed)
+
 ## Later phases
-- Phase 3: native ComfyUI TRELLIS.2 worker (needs DINOv3 access), 3D build/re-export, mesh processing
 - Phase 4: S3 backend + conformance, GC plan/execute, retention expiry, export targets (files/Godot/Git)
 - Phase 5: icon/sprite/material/sheet/vfx builds + frame import/packing
 - Phase 6: release validation, offline test, accessibility audit

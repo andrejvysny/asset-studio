@@ -139,7 +139,7 @@ models:
     licence_status: cleared
     roles:
     - 3d.image_to_mesh
-    service: comfy-3d
+    service: worker3d
     gated: false
     optional: false
     hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
@@ -212,7 +212,7 @@ models:
     licence_status: cleared
     roles:
     - 3d.ss_decoder
-    service: comfy-3d
+    service: worker3d
     gated: false
     optional: false
     hash_source: hub LFS sha256 for weights; small non-LFS files (configs, remote code) hashed at local audit 2026-09-28
@@ -231,20 +231,20 @@ models:
     licence_status: review
     roles:
     - 3d.image_encoder
-    service: comfy-3d
+    service: worker3d
     gated: true
     optional: false
-    hash_source: 'pending: gated repo access awaiting approval; refresh with `assetstudio models lock --refresh dinov3_vitl16`'
+    hash_source: hub LFS sha256 for weights (matches local); small non-LFS files hashed at local audit 2026-09-29 after gated access was granted
     files:
       config.json:
         size: 745
-        sha256: null
+        sha256: 135ecd23e34a70b6fbed8b083fdecb319b7e3a54e3d849258bbe4ddcf1783bb5
       model.safetensors:
         size: 1212559808
-        sha256: null
+        sha256: dcb2e45127cccbf1601e5f42fef165eea275c8e5213197e8dcf3f48822718179
       preprocessor_config.json:
         size: 585
-        sha256: null
+        sha256: 960c41d1f3a7778b936365769a2d90550b318a6c0a53a0296957adacfe5e0dd7
 loras:
   lightning_8step:
     model: qwen_image_2512_lightning

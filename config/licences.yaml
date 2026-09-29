@@ -8,6 +8,9 @@ components:
   qwen3_vl_8b_instruct:      {name: "Qwen3-VL-8B-Instruct", scope: weights, licence: Apache-2.0, status: cleared, note: "Prompt enhancement + advisory QA; does not produce artifacts"}
   birefnet:                  {name: "BiRefNet (ZhengPeng7)", scope: weights, licence: MIT, status: cleared}
   trellis2:                  {name: "TRELLIS.2-4B", scope: weights, licence: MIT, status: cleared}
-  dinov3_vitl16:             {name: "DINOv3 ViT-L/16", scope: weights, licence: "DINOv3 License", status: review, note: "Gated; access pending; audit terms before commercial use"}
-  nvdiffrast:                {name: "nvdiffrast v0.4.0 (legacy trellis-worker only)", scope: runtime, licence: "NVIDIA Source Code License (NC)", status: not_cleared, note: "Not reachable from any default Studio recipe"}
+  trellis_image_large:       {name: "TRELLIS-image-large (sparse-structure decoder used by TRELLIS.2)", scope: weights, licence: MIT, status: cleared}
+  dinov3_vitl16:             {name: "DINOv3 ViT-L/16", scope: weights, licence: "DINOv3 License", status: review, note: "Gated (access granted 2026-09-29); image encoder for TRELLIS.2; audit terms before commercial use"}
+  trellis2_runtime:          {name: "TRELLIS.2 code + o-voxel @75fbf01, CuMesh @12289e1, FlexGEMM @6dd94a8", scope: runtime, licence: MIT, status: cleared}
+  exporter_clean:            {name: "AssetStudio GLB exporter (o-voxel to_glb port, PyTorch UV rasteriser)", scope: runtime, licence: MIT, status: cleared, note: "Default; ships no NVIDIA non-commercial code"}
+  nvdiffrast:                {name: "nvdiffrast v0.4.0 (opt-in research exporter)", scope: runtime, licence: "NVIDIA Source Code License (1-Way Commercial): research/evaluation only", status: not_cleared, note: "Only in worker images built with RESEARCH_EXPORTER=1 and only when a recipe selects exporter=research"}
   model_viewer:              {name: "@google/model-viewer", scope: ui, licence: Apache-2.0, status: cleared}

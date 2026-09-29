@@ -11,6 +11,7 @@ from ..journal import IdempotencyConflict
 from ..registry import ProjectContext
 from ..services import batches as bsvc
 from ..services import production, prompts, review
+from ..services import runtime as runtime_svc
 from ..studio import Studio
 from .deps import project, studio
 
@@ -44,8 +45,9 @@ def create(req: bsvc.CreateBatch, ctx: ProjectContext = Depends(project), s: Stu
 
 
 @router.get("/{batch_id}")
-def detail(batch_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
-    return bsvc.batch_detail(ctx, batch_id)
+def detail(batch_id: str, ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
+    batch, _ = bsvc.load_batch(ctx.store, batch_id)
+    return bsvc.batch_detail(ctx, batch_id, runtime_svc.build_readiness(s, batch.recipe_id))
 
 
 @router.post("/{batch_id}:enhance")
@@ -64,6 +66,12 @@ def edit_prompts(batch_id: str, req: prompts.EditPrompts, ctx: ProjectContext = 
 def confirm(batch_id: str, req: prompts.ConfirmAndGenerate, ctx: ProjectContext = Depends(project),
             s: Studio = Depends(studio)) -> JSONResponse:
     return _accepted(_idem(lambda: prompts.confirm_and_generate(s, ctx, batch_id, req)))
+
+
+@router.post("/{batch_id}:reexport")
+def reexport(batch_id: str, req: production.Reexport, ctx: ProjectContext = Depends(project),
+             s: Studio = Depends(studio)) -> JSONResponse:
+    return _accepted(_idem(lambda: production.reexport(s, ctx, batch_id, req)))
 
 
 @router.post("/{batch_id}:mark-regenerate")

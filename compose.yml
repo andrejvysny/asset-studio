@@ -1,6 +1,7 @@
 # AssetStudio — Docker baseline (Linux + Docker + NVIDIA Container Toolkit).
 # Podman: `docker compose` -> `podman-compose -f compose.yml -f compose.podman.yml` (see Makefile COMPOSE).
-# GPU0: comfyui (image generation). GPU1: aux (text/VLM/segmentation), time-shared under Studio ownership.
+# GPU0: comfyui (image generation). GPU1: aux (text/VLM/segmentation) + worker3d (TRELLIS.2), time-shared under
+# Studio ownership (explicit unload acknowledgements).
 name: assetstudio
 
 x-gpu0: &gpu0
@@ -27,6 +28,7 @@ services:
     environment:
       COMFY_URL: http://comfyui:8188
       AUX_URL: http://aux:8001
+      WORKER3D_URL: ${WORKER3D_URL-http://worker3d:8003}   # set empty to disable 3D (GPU1 then only hosts aux)
       STUDIO_ENGINE: ${STUDIO_ENGINE:-comfyui}
       GPU_IMAGE_ID: ${GPU_IMAGE_ID:-0}
       GPU_AUX_ID: ${GPU_AUX_ID:-1}
@@ -55,6 +57,22 @@ services:
     image: localhost/assetstudio-aux:dev
     restart: unless-stopped
     shm_size: 2g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    networks: [internal]                             # no egress, no host port
+
+  worker3d:
+    <<: *gpu1
+    build:
+      context: .
+      dockerfile: services/worker3d/Dockerfile
+      args: {RESEARCH_EXPORTER: "${RESEARCH_EXPORTER:-0}"}
+    image: localhost/assetstudio-worker3d:${RESEARCH_EXPORTER_TAG:-dev}
+    restart: unless-stopped
+    shm_size: 8g
     environment:
       <<: *offline
       IDLE_UNLOAD_S: "300"

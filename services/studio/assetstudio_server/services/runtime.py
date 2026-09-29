@@ -42,10 +42,39 @@ def aux_health(studio: Studio) -> dict[str, Any]:
     return _cached(f"aux:{id(studio)}", 5.0, studio.aux.health)
 
 
+def worker3d_health(studio: Studio) -> dict[str, Any]:
+    if studio.worker3d is None:
+        return {"reachable": False, "problems": ["no 3D worker configured (WORKER3D_URL)"]}
+    return _cached(f"w3d:{id(studio)}", 5.0, studio.worker3d.health)
+
+
+def _build_state(r: Any, build_missing: list[str], w3d: dict[str, Any]) -> dict[str, Any]:
+    if r.build is None:
+        state = "missing_models" if build_missing else "unsupported_configuration"
+        return {"state": state, "reason": r.build_blocked_reason, "missing": build_missing}
+    if build_missing:
+        return {"state": "missing_models", "reason": f"missing: {', '.join(build_missing)}", "missing": build_missing}
+    if r.build == "model3d" and not (w3d.get("reachable") and w3d.get("ok")):
+        problems = w3d.get("problems") or [f"missing in worker: {', '.join(w3d.get('missing_models') or [])}"
+                                           if w3d.get("reachable") else "3D worker unreachable"]
+        return {"state": "engine_unavailable", "reason": "; ".join(problems)}
+    return {"state": "ready", "reason": ""}
+
+
+def build_readiness(studio: Studio, recipe_id: str) -> dict[str, Any]:
+    """Live build gate for one recipe (models present + worker ready), used by batch views and build commands."""
+    r = RECIPES[recipe_id]
+    models = model_statuses(studio)
+    # Simulated workers load no weights, so model files cannot gate them (outputs are labelled SIMULATED).
+    missing = [] if studio.simulated else [k for k in r.build_models if not (models.get(k) and models[k].ready)]
+    return _build_state(r, missing, worker3d_health(studio) if r.build == "model3d" else {})
+
+
 def recipe_readiness(studio: Studio) -> list[dict[str, Any]]:
     models = model_statuses(studio)
     eng = engine_check(studio)
     aux = aux_health(studio)
+    w3d = worker3d_health(studio)
     out = []
     for r in RECIPES.values():
         gen_missing = [k for k in r.generation_models if not (models.get(k) and models[k].ready)]
@@ -59,14 +88,7 @@ def recipe_readiness(studio: Studio) -> list[dict[str, Any]]:
         else:
             gen = {"state": "experimental" if studio.simulated else "ready",
                    "reason": "SIMULATED engine" if studio.simulated else ""}
-        if r.build is None:
-            state = "missing_models" if build_missing else "unsupported_configuration"
-            build = {"state": state, "reason": r.build_blocked_reason, "missing": build_missing}
-        elif build_missing:
-            build = {"state": "missing_models", "reason": f"missing: {', '.join(build_missing)}",
-                     "missing": build_missing}
-        else:
-            build = {"state": "ready", "reason": ""}
+        build = _build_state(r, build_missing, w3d)
         qa_missing = [k for k in r.qa_models if not (models.get(k) and models[k].ready)]
         qa = {"state": "ready" if aux.get("reachable") and not qa_missing else "degraded",
               "reason": "" if aux.get("reachable") and not qa_missing else
@@ -102,7 +124,7 @@ def worker_gpus(studio: Studio, eng: dict[str, Any], aux: dict[str, Any]) -> lis
 def runtime(studio: Studio, coordinator: Any) -> dict[str, Any]:
     models = model_statuses(studio)
     licences = load_licences(studio.settings.config_dir)
-    eng, aux = engine_check(studio), aux_health(studio)
+    eng, aux, w3d = engine_check(studio), aux_health(studio), worker3d_health(studio)
     gpus = nvidia_smi() or ([] if studio.simulated else worker_gpus(studio, eng, aux))
     lane_by_index = {v: k for k, v in studio.settings.gpu_ids.items()}
     return {
@@ -120,6 +142,14 @@ def runtime(studio: Studio, coordinator: Any) -> dict[str, Any]:
              "url": "SIMULATED (no aux service contacted)" if studio.simulated else studio.settings.aux_url,
              "reachable": aux.get("reachable", False), "ready": aux.get("reachable", False),
              "loaded": aux.get("loaded"), "problems": aux.get("problems", []), "simulated": studio.simulated},
+            {"name": "worker3d", "role": "TRELLIS.2 image→3D · GLB export · GPU1",
+             "url": "SIMULATED (no 3D worker contacted)" if studio.simulated else (studio.settings.worker3d_url
+                                                                                   or "disabled"),
+             "reachable": w3d.get("reachable", False), "ready": bool(w3d.get("reachable") and w3d.get("ok")),
+             "loaded": w3d.get("loaded"), "exporters": w3d.get("exporters"),
+             "problems": w3d.get("problems", []) or (
+                 [f"missing models: {', '.join(w3d['missing_models'])}"] if w3d.get("missing_models") else []),
+             "simulated": studio.simulated},
         ],
         "lanes": {k: v.public() for k, v in studio.lanes.items()},
         "coordinator": coordinator.status() if coordinator is not None else None,

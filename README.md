@@ -28,7 +28,7 @@ Library-only use (no GPUs/models): `STUDIO_ENGINE=none`. Demo/test mode with a c
 | Projects, schema inheritance, snapshots, shot list, import (PNG/JPEG/GLB, frame sequences, material bundles), versions, publication | working |
 | Batches: enhance → confirm → candidates + advisory QA → approve / regenerate → build → accept → publish | working |
 | Concept art build (approved original → final) | working |
-| 3D build (TRELLIS.2) | blocked: DINOv3 access pending; native worker is Phase 3 |
+| 3D build: BiRefNet → TRELLIS.2 + DINOv3 → GLB (clean exporter, no NVIDIA NC code), re-export from raw | working |
 | Sprite (cut-out, canvas, pivot), icon (sized variants), material (base colour + seam gate) builds | working |
 | Sprite sheet / VFX flipbook | atlas from imported frame sequences; no generation (no verified local temporal model) |
 | S3 storage, GC, export targets (files / Godot / Git) | Phase 4 |

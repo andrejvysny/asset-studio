@@ -34,6 +34,9 @@ Inside containers use `docker compose exec studio assetstudio …` (Podman: `pod
 
 - The ComfyUI UI at `http://127.0.0.1:8188` is an advanced tool. Running your own heavy graphs there competes with the
   Studio scheduler for GPU0; pause production work first.
-- `compose.legacy-3d.yml` starts the old research TRELLIS worker (non-commercial exporter). No Studio recipe calls it.
+- 3D: `worker3d` shares GPU1 with `aux` under Studio ownership (explicit unload acks). DINOv3 is gated: accept the
+  licence on Hugging Face, put `HF_TOKEN` in `.env`, then `make models` + `make verify-full`. Set `WORKER3D_URL=` (empty)
+  to run without 3D. The research exporter (NVIDIA nvdiffrast, evaluation only) needs a separate image:
+  `RESEARCH_EXPORTER=1 RESEARCH_EXPORTER_TAG=research make PODMAN=1 build` and the same variables for `up`.
 - Moving a project: stop the Studio, copy the project root, `project register` on the new host. Model weights are not
   part of a project.

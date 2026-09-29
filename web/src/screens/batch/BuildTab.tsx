@@ -1,11 +1,13 @@
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { OutputView } from "../../components/outputs";
-import { Bar, BAD, ErrorLine, INFO, NONE, OK } from "../../components/ui";
+import { Bar, BAD, ErrorLine, INFO, NONE, OK, WARN } from "../../components/ui";
 import { artifactUrl, key, P, send } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
 import { ActionBar, type TabProps } from "./BatchWorkspace";
+import { ReexportDialog } from "./ReexportDialog";
 
 export function BuildTab({ batch, reload }: TabProps) {
   const { id } = useProject();
@@ -17,10 +19,11 @@ export function BuildTab({ batch, reload }: TabProps) {
   const active = rows.find((r) => r.id === sp.get("item")) ?? rows[0];
   const accepted = batch.items.filter((i) => i.accepted_build);
   const built = batch.items.filter((i) => i.build?.result === "valid");
-  if (!batch.recipe.build_available) {
-    return <div className="banner bad">{batch.recipe.build_label} build is not available for this recipe:{" "}
-      {batch.recipe.build_blocked_reason}. Approved candidates are kept; build them once the capability is enabled.</div>;
-  }
+  const [reexporting, setReexporting] = useState(false);
+  const blocked = !batch.recipe.build_available && (
+    <div className="banner bad">{batch.recipe.build_label} build is not available right now:{" "}
+      {batch.recipe.build_blocked_reason}. Approved candidates and earlier builds are kept.</div>);
+  if (blocked && rows.length === 0) return blocked;
   const accept = (itemId: string, run: string, rev: number, on: boolean) => void act.run(async () => {
     const res = await send<{ results: { ok: boolean; message?: string }[] }>("POST", `${base}:accept-builds`, {
       idempotency_key: key(), items: [{ item_id: itemId, build_run_id: run, expected_item_revision: rev, accept: on }] });
@@ -30,6 +33,7 @@ export function BuildTab({ batch, reload }: TabProps) {
   const view = active?.build;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {blocked}
       {rows.length === 0 ? <div className="empty">Nothing built yet. Approve candidates, then run the build from Approve.</div> : (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(320px,440px)", gap: 16, alignItems: "start" }}>
           <div className="table">
@@ -66,13 +70,16 @@ export function BuildTab({ batch, reload }: TabProps) {
               <OutputView key={view?.id ?? "none"} project={id} roles={view?.artifacts ?? {}} alt={`${active.name} final`} />
               <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
                 <span className="label">Structural validation (mandatory)</span>
-                {(view?.validation.checks ?? []).map((c) => <div key={c.id} className="row" style={{ gap: 8 }}>
-                  <span className="dot" style={{ background: c.ok ? OK : BAD }} />
-                  <span className="mono grow" style={{ fontSize: 11 }}>{c.id}</span>
-                  <span className="sub">{c.ok ? "ok" : "FAIL"} {c.detail ?? ""}</span></div>)}
+                {(view?.validation.checks ?? []).map((c) => <div key={c.id} className="row" style={{ gap: 8, alignItems: "baseline" }}>
+                  <span className="dot" style={{ background: c.ok ? OK : c.advisory ? WARN : BAD, flex: "none" }} />
+                  <span className="mono" style={{ fontSize: 11, flex: "none" }}>{c.id}</span>
+                  <span className="sub" style={{ flex: 1, minWidth: 0, textAlign: "right", overflowWrap: "anywhere" }}>
+                    {c.ok ? "ok" : c.advisory ? "advisory" : "FAIL"} {c.detail ?? ""}</span></div>)}
               </div>
               <div className="row" style={{ padding: "9px 12px", flexWrap: "wrap" }}>
-                <button className="btn" disabled title="Re-export from raw applies to 3D (Phase 3)">Re-export</button>
+                <button className="btn" disabled={!view?.artifacts.raw || !batch.recipe.build_available || act.busy}
+                  title={view?.artifacts.raw ? "New GLB from the stored TRELLIS.2 output" : "Only 3D builds keep a raw intermediate"}
+                  onClick={() => setReexporting(true)}>Re-export…</button>
                 <button className="btn" disabled={!active.legal.mark_regenerate} onClick={() => nav(`/p/${id}/batches/${batch.id}/approve?item=${active.id}`)}>
                   Back to candidates</button>
               </div>
@@ -80,6 +87,8 @@ export function BuildTab({ batch, reload }: TabProps) {
           )}
         </div>
       )}
+      {reexporting && active?.build && <ReexportDialog base={base} itemId={active.id} runId={active.build.id}
+        revision={active.revision} onClose={() => setReexporting(false)} onDone={() => { setReexporting(false); reload(); }} />}
       <ErrorLine error={act.error} />
       <ActionBar note={`${built.length} built · ${accepted.length} accepted`}
         sub="Only accepted, structurally valid results can be published. Rejected results keep their candidate set.">

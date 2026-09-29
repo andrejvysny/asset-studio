@@ -87,13 +87,35 @@ def test_every_screen_renders(page, studio_url: str, screen: str, heading: str) 
     pid = _project(studio_url)
     page.goto(f"/p/{pid}/{screen}")
     expect(page.get_by_role("heading", name=heading, exact=True)).to_be_visible(timeout=10000)
-    expect(page.get_by_text("SIMULATED ENGINE")).to_be_visible()
+    expect(page.get_by_text("SIMULATED ENGINE", exact=True)).to_be_visible()
     shot(page, f"screen-{screen}")
     assert not [e for e in page.errors if "favicon" not in e], page.errors  # type: ignore[attr-defined]
 
 
-def test_3d_batch_shows_blocked_build(page, studio_url: str) -> None:
+def test_3d_build_and_reexport(page, studio_url: str) -> None:
     pid = _project(studio_url)
     page.goto(f"/p/{pid}/batches/new?cat=containers")
-    expect(page.get_by_text(re.compile("build step is not available"))).to_be_visible(timeout=10000)
-    shot(page, "08-new-batch-3d-blocked")
+    page.get_by_label("briefs").fill("Supply crate: small wooden supply crate")
+    page.locator("label.field", has_text="Name").locator("input").fill("Props round 1")
+    page.get_by_role("button", name=re.compile(r"Create batch \+ enhance 1 prompts")).click()
+    expect(page.get_by_label("prompt Supply crate")).to_have_value(re.compile("simulated enhancement"), timeout=15000)
+    page.get_by_role("button", name=re.compile(r"Confirm 1 prompts \+ generate")).click()
+    expect(page.get_by_text("1/1 items have candidates.")).to_be_visible(timeout=20000)
+    page.get_by_role("link", name=re.compile("Approve")).first.click()
+    expect(page.get_by_label("candidate inspector")).to_be_visible(timeout=10000)
+    page.keyboard.press("1")
+    if page.get_by_role("dialog").is_visible():
+        page.get_by_role("button", name="Approve anyway").click()
+    page.get_by_role("button", name=re.compile(r"for 1 approved")).click()
+    expect(page.get_by_role("button", name="Accept", exact=True)).to_be_visible(timeout=15000)
+    expect(page.get_by_text("triangle_budget")).to_be_visible()
+    expect(page.locator("model-viewer")).to_be_attached(timeout=15000)
+    shot(page, "08-3d-build")
+    page.get_by_role("button", name="Re-export…").click()
+    page.locator("label.field", has_text="Texture").locator("select").select_option("1024")
+    page.get_by_role("button", name="Re-export", exact=True).click()
+    expect(page.get_by_role("dialog")).to_be_hidden(timeout=10000)
+    expect(page.get_by_role("button", name="Accept", exact=True)).to_be_visible(timeout=15000)
+    shot(page, "09-3d-reexport")
+    assert not [e for e in page.errors if "favicon" not in e], page.errors  # type: ignore[attr-defined]
+    assert page.external == [], f"offline violation: {page.external}"  # type: ignore[attr-defined]

@@ -31,12 +31,17 @@ class BuildInput:
     source: Artifact
     data: bytes
     params: dict[str, Any]
+    snap: dict[str, Any] = field(default_factory=dict)
+    reexport: dict[str, Any] | None = None  # {"from_run": BuildRun, "overrides": {...}}: reuse stored raw output
     roles: dict[str, str] = field(default_factory=dict)
     checks: list[dict[str, Any]] = field(default_factory=list)
     meta: dict[str, Any] = field(default_factory=dict)
+    components: list[str] = field(default_factory=list)  # licence-table ids of what produced the outputs
 
-    def check(self, check_id: str, ok: bool, detail: str = "") -> bool:
-        self.checks.append({"id": check_id, "ok": bool(ok), **({"detail": detail} if detail else {})})
+    def check(self, check_id: str, ok: bool, detail: str = "", advisory: bool = False) -> bool:
+        """Advisory checks are reported but never make a build invalid (e.g. advisory triangle budgets)."""
+        self.checks.append({"id": check_id, "ok": bool(ok), **({"detail": detail} if detail else {}),
+                            **({"advisory": True} if advisory else {})})
         return bool(ok)
 
     def add_png(self, role: str, arr: np.ndarray, meta: dict[str, Any] | None = None) -> str:
@@ -96,16 +101,24 @@ def _open_run(env: TaskEnv, batch_id: str, item: BatchItem, approval_id: str, bu
     return run, store.create(build_key(batch_id, run_id), run)
 
 
-def run_build(env: TaskEnv, batch_id: str, item: BatchItem, approval_id: str, build: str, fn: BuildFn) -> BuildRun:
+def run_build(env: TaskEnv, batch_id: str, item: BatchItem, entry: dict[str, Any], build: str,
+              fn: BuildFn) -> BuildRun:
     """One BuildRun per (op, item); re-running a finished op returns the recorded result unchanged."""
     store = env.ctx.store
+    approval_id = entry["approval_id"]
     bound = load_decision(store, batch_id, approval_id).bound
     run, token = _open_run(env, batch_id, item, approval_id, build, bound)
     if run.status == "succeeded":
         return run
     source = store.artifact(bound["artifact_id"])
+    snap = store.read_snapshot(item.snapshot_sha)
+    reexport = None
+    if entry.get("reexport_from"):
+        prior = store.get(build_key(batch_id, entry["reexport_from"]), BuildRun)[0]
+        reexport = {"from_run": prior, "overrides": entry.get("overrides", {})}
+        run.inputs = {**run.inputs, "reexport_of": prior.id, "overrides": entry.get("overrides", {})}
     inp = BuildInput(env, batch_id, item, bound, source, store.artifact_bytes(source.id),
-                     dict(store.read_snapshot(item.snapshot_sha)["parameters"]))
+                     {**snap["parameters"], **(reexport or {}).get("overrides", {})}, snap, reexport)
     if inp.check("hash_matches_approval", source.sha256 == bound["image_sha256"]):
         try:
             fn(inp)
@@ -117,9 +130,12 @@ def run_build(env: TaskEnv, batch_id: str, item: BatchItem, approval_id: str, bu
             raise
     if inp.meta:
         inp.add_json("meta", {"build": build, **inp.meta})
-    ok = all(c["ok"] for c in inp.checks)
+    required = [c for c in inp.checks if not c.get("advisory")]
+    ok = all(c["ok"] for c in required)
     run.artifacts = inp.roles
-    run.validation = {"ok": ok, "checks": inp.checks, "required": [c["id"] for c in inp.checks]}
+    if inp.components:
+        run.inputs = {**run.inputs, "components": inp.components}
+    run.validation = {"ok": ok, "checks": inp.checks, "required": [c["id"] for c in required]}
     run.status, run.result, run.updated_at = "succeeded", "valid" if ok else "invalid", now_iso()
     store.replace(build_key(batch_id, run.id), run, token)
     return run

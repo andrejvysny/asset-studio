@@ -17,7 +17,6 @@ Branch `refactor/assetstudio-core` (uncommitted working tree, based on f5ca95c).
 | Real 3D candidate QA (masks + VLM), ad hoc script | see below | real | pass (10/10 coverage) |
 | Real BiRefNet `/cutout` + acknowledged `/unload` | ad hoc | real | pass (1.7 s, 1024² mask) |
 | Docker (not Podman) deployment | — | — | **not run** (Docker not installed) |
-| 3D build (TRELLIS.2) | — | — | **not run**: blocked, DINOv3 access pending |
 
 ## Real-stack run (tests/gpu/test_acceptance.py)
 
@@ -63,9 +62,31 @@ Real-stack run (`test_sprite_icon_material_real_stack`, Lightning 8-step, 1024²
   usually not tileable as-is (see limitations).
 - `assetstudio storage verify <project>`: 0 problems.
 
+## Phase 3 — 3D (2026-09-29)
+
+| Suite | Command | Engine | Result |
+|---|---|---|---|
+| Model closure incl. DINOv3 (gated access granted, locked revision) | `make verify-full` | — | 7/7 sha256 verified |
+| Licence audit at pinned refs | manual (LICENSE files) | — | nvdiffrast v0.4.0 + nvdiffrec: research/evaluation only; TRELLIS.2/o-voxel, CuMesh, FlexGEMM: MIT |
+| Clean image contains no nvdiffrast (stub raises on use); rasteriser full-square coverage, Σbary = 1 | in-container smoke test | real GPU1 | pass |
+| Contract: 3D build (raw/cutout/model/preview/meta, budget requested→effective→actual, QA-mask reuse, licence components), re-export reuses raw without resampling, blocked without worker, intermediates not published | `uv run pytest tests/contract/test_api_model3d.py` | SIMULATED worker | 3 pass |
+| Browser: 3D build view (model-viewer, advisory budget), re-export dialog → new valid build | `make e2e` | SIMULATED | pass (suite 16/16) |
+| Clean vs research rasteriser on the same real mesh + UV unwrap (2048², ~99.5k faces) | ad hoc in research image | real | coverage 51.295 % vs 51.293 % · same triangle 99.45 % · position p99 Δ 6e-8, 14 texels > 1e-3, 0 > 1e-2 · 0.14 s vs 0.006 s |
+| **Real stack: 3D batch through the Studio** | `uv run pytest tests/gpu/test_model3d.py -m gpu` | real | **1 pass (4 m 17 s)** |
+
+Real run (`test_model3d_real_stack`, wooden supply crate, category budget 2 000–40 000 triangles): real enhancement →
+2 Lightning candidates → QA with BiRefNet masks + VLM → approve → build 211 s end-to-end (TRELLIS.2 `1024_cascade`
+sampling 154 s incl. first load, 20.4 M raw faces, peak VRAM 11.3 GB; clean export 15 s) → **valid**: self-contained GLB,
+UVs, base-colour + metallic/roughness textures, 37 712 triangles (within budget), 1 geometric component; QA mask reused;
+GPU1 handed aux → worker3d with acknowledged unload → re-export at 1024² texture in 18 s reusing the same raw → accept →
+publish (licence `review`: DINOv3 licence + Lightning LoRA; `exporter_clean` cleared; no nvdiffrast) →
+`storage verify` 0 problems.
+
 ## Known limitations (this release)
 
-- 3D builds, re-export and mesh processing: Phase 3 (needs DINOv3 approval; no fallback model by decision).
+- 3D: upstream CuMesh simplification is not deterministic (same raw → e.g. 99 808 vs 99 221 faces); upstream export
+  always fills holes < 0.03 perimeter. Raw intermediates are ~100–300 MB each (retention `raw`; GC is Phase 4).
+- 3D: research exporter validated directly in its image, not through a Studio run (the deployed worker is the clean image).
 - Sprite sheet / VFX: no generation (no verified local temporal model); built only from imported frame sequences.
 - Material builds publish base colour only; derived PBR maps are not generated (import a bundle for full map sets).
 - Real generated materials usually fail the seam gate (observed ratio ≈ 4 vs limit 2): no tiling step exists yet, so a

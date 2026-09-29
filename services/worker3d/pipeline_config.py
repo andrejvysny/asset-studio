@@ -1,8 +1,7 @@
-"""Rewrite TRELLIS.2 pipeline.json to local absolute paths so nothing is fetched from HF.
+"""Rewrite TRELLIS.2 pipeline.json to local absolute paths so nothing is fetched from Hugging Face.
 
-Upstream references microsoft/TRELLIS-image-large, facebook/dinov3 and briaai/RMBG-2.0 (gated,
-CC BY-NC). We point rembg at the MIT ZhengPeng7/BiRefNet; it is never used anyway since we
-always feed an RGBA cut-out.
+Upstream references microsoft/TRELLIS-image-large, facebook/dinov3 and briaai/RMBG-2.0 (CC BY-NC). rembg is
+pointed at the MIT BiRefNet path and never used: the Studio always sends an RGBA cut-out.
 """
 from __future__ import annotations
 

@@ -4,7 +4,8 @@
 
 ```
 browser ──HTTP/SSE──> studio (FastAPI) ── coordinator lanes ──> comfyui (GPU0)   stock nodes, versioned graph
-                         │                                   └─> aux (GPU1)      enhance / VLM QA / BiRefNet
+                         │                                   ├─> aux (GPU1)      enhance / VLM QA / BiRefNet
+                         │                                   └─> worker3d (GPU1) TRELLIS.2 + DINOv3, GLB export
                          ├── ProjectStore ──> project root (portable: YAML + JSON + blobs/sha256)
                          ├── AssetIndex (SQLite, instance dir, rebuildable)
                          └── Journal (SQLite, instance dir, live operations + command idempotency)
@@ -20,6 +21,7 @@ The core imports no FastAPI, CUDA or ComfyUI.
 | `packages/assetstudio_processing` | safe image inspection, thumbnails, mask/palette metrics, GLB container + mesh validation |
 | `services/studio/assetstudio_server` | API routers, services, coordinator + task handlers, engine adapters, runtime/model verification, CLI |
 | `services/prompt_service` | aux inference service (bytes in, results out; no files, no product state) |
+| `services/worker3d` | TRELLIS.2 sampling → pickle-free `.npz` raw; GLB export (clean or research rasteriser); stateless |
 
 ## Source of truth
 
@@ -52,6 +54,22 @@ selected rows only; history is never overwritten.
 - GPU1 ownership: every worker not verified-released must acknowledge `/unload` with `{loaded: false, owner_token}`.
   Timeouts, resets, HTTP errors, malformed bodies or `loaded: true` leave ownership **unknown** and block dispatch
   until an operator runs the lane reset (Runtime screen).
+
+## 3D path (model3d.default)
+
+approved candidate → foreground mask (QA mask reused when its lineage is the approved artifact, else BiRefNet on GPU1)
+→ RGBA cut-out → `worker3d /generate` (TRELLIS.2 `1024_cascade` by default, DINOv3 image encoder) → raw intermediate
+stored as a `raw` artifact (retention `raw`) → `worker3d /export` → GLB → structural checks (container, reload, finite
+vertices, indices, UVs, base-colour texture) + advisory triangle budget (requested → effective → actual) → CPU preview
+(4 views, `assetstudio_processing.render`) → final human accept → publish. Raw/cut-out/mask stay on the build run
+(`sources.intermediates` in the version record) and are not shipped as version files. **Re-export** (`:reexport`)
+creates a new build run from the stored raw with changed exporter/texture/triangles/remesh — no resampling.
+
+Exporters: `clean` (default) is a port of o-voxel `to_glb` whose texture-space rasteriser is plain PyTorch; the image
+contains no NVIDIA non-commercial code (a stub satisfies o_voxel's import). `research` uses upstream nvdiffrast v0.4.0
+(research/evaluation-only licence), exists only in images built with `RESEARCH_EXPORTER=1`, and marks the version
+licence `not_cleared`. On a real mesh the two agree on 99.46 % of texel→triangle assignments and to 6e-8 at p99 in
+surface position (differences are edge tie-breaks); see `docs/acceptance.md`.
 
 ## Security posture
 

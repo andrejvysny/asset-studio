@@ -47,7 +47,7 @@ addopts = "-p no:cacheprovider"
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["web", "comfyui/custom_nodes", "services/trellis_worker"]
+extend-exclude = ["web", "comfyui/custom_nodes", "services/worker3d"]  # py3.10 image: linted separately (make lint)
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]

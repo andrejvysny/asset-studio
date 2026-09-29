@@ -14,6 +14,7 @@ from assetstudio_processing.raster import (
 )
 
 from .common import BuildInput, foreground_mask
+from .model3d import model3d
 
 
 def _preview(inp: BuildInput, png: bytes) -> None:
@@ -95,4 +96,4 @@ def material(inp: BuildInput) -> None:
                     derived_maps="not generated: no verified local PBR derivation")
 
 
-BUILDS = {"passthrough": passthrough, "sprite": sprite, "icon": icon, "material": material}
+BUILDS = {"passthrough": passthrough, "sprite": sprite, "icon": icon, "material": material, "model3d": model3d}

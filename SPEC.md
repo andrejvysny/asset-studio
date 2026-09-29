@@ -217,3 +217,7 @@ portable data; self-hosted generation; offline local acceptance; recoverable fai
 | 2026-09-29 | Material builds publish the approved base colour + tiling preview only; derived PBR maps are not generated (no verified local derivation). Full map sets come from material-bundle imports with explicit per-file roles. |
 | 2026-09-29 | Material seam check = wrap-edge ΔE ÷ neighbour ΔE (`seam_max_ratio`, default 2.0), structural and not overridable. |
 | 2026-09-29 | Sprite/icon cut-outs reuse the QA mask only when its lineage is the approved candidate artifact; otherwise the build segments on GPU1 (build op runs on the gpu1 lane). Sprite pivot default `bottom_center`; atlas power-of-two is a parameter (default off). |
+| 2026-09-29 | DINOv3 access granted; weights downloaded at the locked revision and hash-verified. |
+| 2026-09-29 | 3D runs in a stateless GPU1 HTTP worker (`worker3d`), not a second ComfyUI: same ownership/ack contract as aux, no product state. |
+| 2026-09-29 | F01: default GLB exporter ships no NVIDIA non-commercial code (PyTorch UV rasteriser in an o-voxel `to_glb` port). Upstream nvdiffrast exporter is opt-in (`RESEARCH_EXPORTER=1`, `exporter: research`) and recorded `not_cleared`. |
+| 2026-09-29 | Raw TRELLIS.2 output is stored as a pickle-free `.npz` artifact (retention `raw`, ~100–300 MB) for re-export; intermediates are not version files. `cutout_padding`/`cleanup` params removed (TRELLIS.2 re-crops to alpha; upstream cleanup is not switchable), `remesh`/`exporter`/`pipeline_type`/`triangles` added. |
