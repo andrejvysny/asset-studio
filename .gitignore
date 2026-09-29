@@ -17,6 +17,7 @@ web/dist/
 web/node_modules/
 web/tsconfig.tsbuildinfo
 tests/e2e/artifacts/
+tests/gpu/artifacts/variants/
 # ComfyUI runtime state (advanced UI user data)
 comfyui/user/
 projects/*
