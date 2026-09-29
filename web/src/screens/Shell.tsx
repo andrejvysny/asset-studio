@@ -8,7 +8,8 @@ import { ProjectContext } from "../lib/project";
 const NAV: ([string, string] | [string, string, (s: Summary) => string | number])[] = [
   ["h", "Library"], ["assets", "Assets", (s) => s.counts.assets], ["shots", "Shot list", (s) => s.counts.shots],
   ["h", "Production"],
-  ["batches", "Batches", (s) => (s.waiting.batches ? `${s.waiting.batches} waiting` : s.counts.batches)],
+  ["jobs", "Jobs", (s) => (s.waiting.jobs ? `${s.waiting.jobs} waiting` : s.counts.jobs)],
+  ["batches", "Batches", (s) => (s.counts.active_batches ? `${s.counts.active_batches} active` : s.counts.batches)],
   ["h", "Project"], ["schema", "Schema", (s) => s.counts.categories], ["pipelines", "Pipelines", (s) => s.counts.recipes],
   ["qa", "QA rules"], ["style", "Style"], ["storage", "Storage", (s) => s.storage.state], ["export", "Export"],
   ["runtime", "Runtime"],
@@ -56,9 +57,12 @@ export function Shell() {
             {s ? `${s.storage.root.split("/").slice(-1)[0]} · ${s.storage.state === "read_only" ? "read-only" : "local"}` : "…"}
           </button>
           <button className="chip-top" style={{ background: "#202124", fontFamily: "var(--sans)", fontSize: 12 }}
-            onClick={() => nav(`/p/${project}/batches`)}
-            title={(s?.waiting.detail ?? []).map((d) => `${d.alias}: ${d.next_action}`).join("\n") || "nothing waiting"}>
-            <span className="count-badge">{s?.waiting.batches ?? 0}</span>waiting on you
+            onClick={() => nav(`/p/${project}/jobs`)}
+            title={s ? [`prompts ${s.waiting.by_gate.prompts ?? 0} · candidates ${s.waiting.by_gate.approve ?? 0} · `
+              + `builds ${s.waiting.by_gate.build ?? 0} · publish ${s.waiting.by_gate.publish ?? 0}`,
+              ...s.waiting.detail.map((d) => `${d.alias}: ${d.next_action}`)].join("\n") : ""}>
+            <span className="count-badge">{s?.waiting.jobs ?? 0}</span>Jobs waiting on you
+            {s?.counts.active_batches ? ` · ${s.counts.active_batches} active Batch${s.counts.active_batches > 1 ? "es" : ""}` : ""}
           </button>
           <button className="row" style={{ gap: 10, font: "500 11px var(--mono)", color: "var(--muted)" }}
             onClick={() => nav(`/p/${project}/runtime`)} aria-label="GPU status">

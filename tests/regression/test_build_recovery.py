@@ -148,11 +148,11 @@ def _wait_state(api: Api, state: str) -> str:
 
     end = time.monotonic() + 10
     while time.monotonic() < end:
-        ops = api.studio.journal.list(states=(state,))
-        if ops:
-            return ops[0].id
+        tasks = api.studio.journal.tasks.list(states=(state,))
+        if tasks:
+            return tasks[0].id
         time.sleep(0.05)
-    raise AssertionError(f"no {state} op")
+    raise AssertionError(f"no {state} task")
 
 
 def _meta(api: Api, pid: str, build: dict) -> Any:

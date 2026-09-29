@@ -16,12 +16,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ..coordinator.runner import release_cancelled
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..services import runtime as runtime_svc
-from ..services.batches import list_batches
+from ..services.jobs import list_jobs
 from ..services.library import category_tree
+from ..services.runs import list_batches
 from ..services.shotlist import shot_statuses
 from ..services.storage import storage_view, test_storage
 from ..studio import Studio
@@ -60,20 +60,28 @@ def register_project(req: RegisterProject, s: Studio = Depends(studio)) -> dict[
 
 @router.get("/projects/{project_id}/summary")
 def summary(ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
-    batches = list_batches(ctx)
+    jobs = list_jobs(s, ctx)
+    batches = list_batches(s, ctx)
     shots = shot_statuses(ctx)
     cfg, _ = ctx.config()
+    waiting = [j for j in jobs if j["waiting_on_user"]]
+    active_batches = [b for b in batches if b["latest_run"] and b["latest_run"]["status"] in
+                      ("running", "paused", "waiting_for_review")]
     return {
         "id": ctx.id, "name": ctx.name, "read_only": ctx.read_only, "owner": ctx.owner, "simulated": s.simulated,
         "storage": {"backend": "local", "state": "read_only" if ctx.read_only else "local", "root": str(ctx.root)},
         "counts": {"assets": ctx.index.count(), "planned": sum(1 for x in shots if x["status"] in
                                                              ("planned", "in_batch")),
-                   "shots": len(shots), "batches": len(batches), "categories": len(cfg.categories),
+                   "shots": len(shots), "jobs": len(jobs), "batches": len(batches),
+                   "active_batches": len(active_batches), "categories": len(cfg.categories),
                    "recipes": len(RECIPES)},
-        "waiting": {"batches": sum(1 for b in batches if b["waiting_on_user"]),
-                    "items": sum(b["counts"]["items"] for b in batches if b["waiting_on_user"]),
-                    "detail": [{"batch_id": b["id"], "alias": b["alias"], "next_action": b["next_action"]}
-                               for b in batches if b["waiting_on_user"]]},
+        # A Job waiting at a gate is counted once, whether or not its Batch also waits (no double counting).
+        "waiting": {"jobs": len(waiting), "batches": len(waiting),
+                    "items": sum(j["counts"]["items"] for j in waiting),
+                    "by_gate": {g: sum(j["by_stage"].get(g, 0) for j in waiting)
+                                for g in ("prompts", "approve", "build", "publish")},
+                    "detail": [{"job_id": j["id"], "batch_id": j["id"], "alias": j["alias"],
+                                "next_action": j["next_action"]} for j in waiting]},
     }
 
 
@@ -229,25 +237,77 @@ def get_operation(op_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
 
 
 @router.post("/operations/{op_id}:cancel")
-def cancel_operation(op_id: str, request: Request, s: Studio = Depends(studio)) -> dict[str, Any]:
+def cancel_operation(op_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
+    """v1 route. Stage task ids (stk_) are cancelled as tasks; legacy op ids keep the journal semantics."""
+    if op_id.startswith("stk_"):
+        return cancel_task(op_id, s)
     op = s.journal.request_cancel(op_id)
     if op is None:
         raise ApiError(404, "unknown_operation", op_id)
-    if op.state == "cancelled":
-        release_cancelled(s, op)
-    s.events.publish("operation", project_id=op.project_id, batch_id=op.batch_id, op_id=op.id)
+    s.events.publish("operation", project_id=op.project_id, op_id=op.id)
     return op.public()
 
 
 @router.post("/operations/{op_id}:retry")
 def retry_operation(op_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
+    if op_id.startswith("stk_"):
+        return retry_task(op_id, s)
     op = s.journal.get(op_id)
     if op is None:
         raise ApiError(404, "unknown_operation", op_id)
     if op.state not in ("failed", "blocked") or not s.journal.requeue(op_id, ("failed", "blocked")):
         raise ApiError(409, "not_retryable", f"operation is {s.journal.get(op_id).state}")  # type: ignore[union-attr]
-    s.events.publish("operation", project_id=op.project_id, batch_id=op.batch_id, op_id=op.id)
+    s.events.publish("operation", project_id=op.project_id, op_id=op.id)
     return s.journal.get(op_id).public()  # type: ignore[union-attr]
+
+
+# --- v2 stage tasks + model passes -------------------------------------------------------------------------------
+v2 = APIRouter(prefix="/api/v2", tags=["tasks"])
+
+
+@v2.get("/tasks")
+def list_tasks(project_id: str | None = None, job_id: str | None = None, run_id: str | None = None,
+               item_id: str | None = None, active: bool = False, s: Studio = Depends(studio)) -> dict[str, Any]:
+    states = ("queued", "running", "blocked", "reconciling") if active else None
+    return {"tasks": [t.public() for t in s.journal.tasks.list(project_id=project_id, job_id=job_id, run_id=run_id,
+                                                               item_id=item_id, states=states)]}
+
+
+@v2.get("/tasks/{task_id}")
+def get_task(task_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
+    t = s.journal.tasks.get(task_id)
+    if t is None:
+        raise ApiError(404, "unknown_task", task_id)
+    return t.public()
+
+
+@v2.post("/tasks/{task_id}:cancel")
+def cancel_task(task_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
+    t = s.journal.tasks.get(task_id)
+    if t is None:
+        raise ApiError(404, "unknown_task", task_id)
+    s.journal.tasks.request_cancel([task_id])
+    s.events.publish("task", project_id=t.project_id, job_id=t.job_id, item_id=t.item_id, task_id=t.id)
+    return s.journal.tasks.get(task_id).public()  # type: ignore[union-attr]
+
+
+@v2.post("/tasks/{task_id}:retry")
+def retry_task(task_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
+    """Same logical inputs again (never a regeneration); cancelled tasks are not resurrected."""
+    t = s.journal.tasks.get(task_id)
+    if t is None:
+        raise ApiError(404, "unknown_task", task_id)
+    if not s.journal.tasks.retry(task_id):
+        raise ApiError(409, "not_retryable", f"task is {t.state} (control {t.control})")
+    s.events.publish("task", project_id=t.project_id, job_id=t.job_id, item_id=t.item_id, task_id=t.id)
+    return s.journal.tasks.get(task_id).public()  # type: ignore[union-attr]
+
+
+@v2.get("/passes")
+def list_passes(lane: str | None = None, limit: int = Query(default=50, le=500),
+                s: Studio = Depends(studio)) -> dict[str, Any]:
+    """Model passes with measured load deltas where the worker reports them (null = unavailable, never 0)."""
+    return {"passes": s.journal.tasks.passes(lane=lane, limit=limit)}
 
 
 @router.get("/events")

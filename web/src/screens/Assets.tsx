@@ -56,8 +56,8 @@ export function Assets() {
       <section className="content">
         <PageHead sub={current ? current.path : "all categories"} title={current ? current.label : "All assets"}>
           <button className="btn" onClick={() => setImporting(true)}>Import files</button>
-          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/batches/new${cat ? `?cat=${cat}` : ""}`)}>
-            New batch</button>
+          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/jobs/new${cat ? `?cat=${cat}` : ""}`)}>
+            New Job</button>
         </PageHead>
         <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
           <input className="input" aria-label="search" value={q} placeholder="Search name, id, tag…"
@@ -82,7 +82,7 @@ export function Assets() {
             {d.total === 0 && d.planned.length === 0 ? (
               <Empty>{d.all_assets_total === 0
                 ? <>No assets yet. <button className="btn-link" onClick={() => setImporting(true)}>Import files</button>
-                  or <Link to={`/p/${id}/batches/new`}>start a batch</Link>.</>
+                  or <Link to={`/p/${id}/jobs/new`}>create a Job</Link>.</>
                 : "Nothing matches these filters."}</Empty>
             ) : (
               <div className="grid-cards">
@@ -103,7 +103,7 @@ export function Assets() {
                 ))}
                 {planned && d.planned.map((s) => (
                   <Link key={s.id} className="card planned"
-                    to={s.membership ? `/p/${id}/batches/${s.membership.batch_id}` : `/p/${id}/shots`}>
+                    to={s.membership ? `/p/${id}/jobs/${s.membership.batch_id}` : `/p/${id}/shots`}>
                     <div className="media" style={{ flexDirection: "column", gap: 4 }}>
                       <span className="sub" style={{ fontSize: 10 }}>planned</span>
                       <span className="sub" style={{ fontSize: 10, color: s.membership ? INFO : "var(--faint)" }}>

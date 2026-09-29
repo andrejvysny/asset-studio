@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import time
 
+from assetstudio_server.adapters.base import T2IRequest, engine_prompt_id
 from assetstudio_server.adapters.fake import FakeAux, FakeEngine
 from assetstudio_server.studio import build_studio
 
@@ -14,7 +15,7 @@ def test_queued_work_survives_restart(make_api, tmp_path) -> None:
     api = make_api(coordinator=False)
     pid = setup_project(api)
     bid = create(api, pid, ["A", "B"], "batch-restart-1")["batch"]["id"]
-    assert [o.state for o in api.studio.journal.list()] == ["queued"]
+    assert [(t.stage, t.state) for t in api.studio.journal.tasks.list()] == [("enhance", "queued")] * 2
     api.c.__exit__(None, None, None)
     api2 = make_api(coordinator=True)
     api2.wait_ops()
@@ -32,15 +33,17 @@ def test_running_op_is_reconciled_not_duplicated(make_api, tmp_path) -> None:
     api.post(f"/api/v1/projects/{pid}/batches/{bid}:edit-prompts", {"items": [
         {"item_id": item["id"], "expected_item_revision": item["revision"], "description": "a barrel"}]})
     confirm_all(api, pid, bid, "confirm-recon-1")
-    op = api.studio.journal.claim_next("gpu0", "old-instance", None)
-    assert op is not None and op.state == "running"
+    task = api.studio.journal.tasks.list(states=("queued",))[0]
+    assert api.studio.journal.tasks.claim(task.id, "pas_old")  # the old process was running it ...
+    for key in ("0", "1"):  # ... and had already submitted two of four prompts when it died
+        engine.submit(_req(engine_prompt_id(task.id, key)))
     api.c.__exit__(None, None, None)
     api2 = make_api(coordinator=True, studio=build_studio(make_settings(tmp_path), engine, aux))
     api2.wait_ops()
-    op2 = api2.studio.journal.get(op.id)
-    assert op2.state == "succeeded" and op2.progress.get("reconciled_after_restart") is True
+    t2 = api2.studio.journal.tasks.get(task.id)
+    assert t2.state == "succeeded" and t2.progress.get("reconciled_after_restart") == 1
     assert len(detail(api2, pid, bid)["items"][0]["candidate_set"]["candidates"]) == 4
-    assert sum(1 for c in engine.calls if c[0] == "submit") == 4
+    assert sum(1 for c in engine.calls if c[0] == "submit") == 4  # the two submitted ones were reconciled
 
 
 def test_lost_submit_ack_reconciled_by_prompt_id(make_api, tmp_path) -> None:
@@ -52,9 +55,9 @@ def test_lost_submit_ack_reconciled_by_prompt_id(make_api, tmp_path) -> None:
     api.wait_ops()
     confirm_all(api, pid, bid, "confirm-lost-1")
     deadline = time.monotonic() + 10
-    while time.monotonic() < deadline and not api.studio.journal.list(states=("blocked",)):
+    while time.monotonic() < deadline and not api.studio.journal.tasks.list(states=("blocked",)):
         time.sleep(0.05)
-    blocked = api.studio.journal.list(states=("blocked",))
+    blocked = api.studio.journal.tasks.list(states=("blocked",))
     assert blocked and blocked[0].error["retryable"] is True
     item = detail(api, pid, bid)["items"][0]
     assert item["tasks"]["generate"]["state"] == "blocked"
@@ -78,3 +81,8 @@ def test_cancel_queued_generation_releases_items(make_api) -> None:
     assert res["state"] == "cancelled"
     item = detail(api, pid, bid)["items"][0]
     assert item["tasks"]["generate"]["state"] == "cancelled" and item["legal"]["confirm"] is True
+
+
+def _req(prompt_id: str) -> T2IRequest:
+    return T2IRequest(prompt_id=prompt_id, positive="p", negative="", seed=1, width=64, height=64, steps=1, cfg=1.0,
+                      filename_prefix="x")

@@ -38,10 +38,10 @@ def _png(path: Path, w: int, h: int, color: tuple[int, int, int, int]) -> Path:
 
 def test_sprite_build_shows_cutout_and_pivot(page, studio_url: str) -> None:
     pid = _kinds_project(studio_url)
-    page.goto(f"/p/{pid}/batches/new?cat=sprites")
+    page.goto(f"/p/{pid}/jobs/new?cat=sprites")
     page.get_by_label("briefs").fill("Brass lantern: small brass lantern")
     page.locator("label.field", has_text="Name").locator("input").fill("Sprites round 1")
-    page.get_by_role("button", name=re.compile(r"Create batch \+ enhance 1 prompts")).click()
+    page.get_by_role("button", name=re.compile(r"Save and run \(enhance 1 prompts\)")).click()
     expect(page.get_by_label("prompt Brass lantern")).to_have_value(re.compile("simulated enhancement"), timeout=15000)
     page.get_by_role("button", name=re.compile(r"Confirm 1 prompts \+ generate")).click()
     expect(page.get_by_text("1/1 items have candidates.")).to_be_visible(timeout=20000)

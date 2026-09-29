@@ -14,7 +14,7 @@ Owner decisions: commit per green phase on master; task state journal-only; work
 - [x] ids (job/bch/brn/stk/pas/att/...), domain v2 (Job/JobItem/Batch/BatchRun, v1 compat readers)
 - [x] verified blobs (dedup reuse, reads, containment) H07 RI13 RI14
 - [x] journal: scoped commands H06, conditional requeue, cancel intent kept H04, lane epochs
-- [ ] journal StageTasks/attempts/passes/reservations H05 → Phase 2
+- [x] journal StageTasks/passes/command intents H05 (one-owner-per-item-family instead of a reservations table)
 - [x] publication: role contracts, authoritative names, receipts IM01 IM02 RI16
 - [x] imports replay-safe + upload ids + decoded budgets H08 H17 RI15 IM04 IM05
 - [x] BuildRun checkpoints + attach-at-create + isolated preview H01 H15 RI07–RI09
@@ -23,14 +23,16 @@ Owner decisions: commit per green phase on master; task state journal-only; work
 - [x] raw_npz CPU validation H13 IM06; rasterizer winner + tiling H14 IM07 (make test-worker3d)
 - [x] aux: exec id, lease, drain
 - [x] bounded auto-retry H16, lane survives bugs RI17
-- [ ] full failure taxonomy per StageTask → Phase 2
+- [x] failure taxonomy per StageTask (coordinator/errors.py)
 
 ## Phase 2 — Jobs + Batch execution
-- [ ] Job services (save-only create), Batch groups, run planner, runs + waves
-- [ ] StageTasks per stage, planner/passes/runner, coalescing, downstream reconciliation
-- [ ] v2 routers + v1 adapters, SSE ids
-- [ ] web: Jobs rename, Batches screens, nav, redirects, Runtime passes
-- [ ] tests JB01–JB16, RI04, IM10, e2e multi-Job
+- [x] Job services (save-only create), Batch groups, run planner, runs + waves
+- [x] StageTasks per stage, pass runner, coalescing, fairness, atomic downstream, startup reconciliation
+- [x] v2 routers (jobs, batches, runs, tasks, passes) + v1 adapters; SSE events carry job/run ids
+- [x] CLI: jobs list, batches plan/start, operations inspect/retry/cancel (via the running Studio)
+- [x] web: Jobs rename, Batches screens (list/detail/plan/run view with waves), nav, legacy redirects, Runtime passes
+- [x] tests JB01–JB16, RI04, RI05, IM10, e2e multi-Job (tests/e2e/test_ui_batches.py)
+- [ ] OpenAPI typegen (EX14) → Phase 6
 - [ ] >>> STOP for owner review <<<
 
 ## Phase 3 — library delivery + comparison (after review)

@@ -4,7 +4,7 @@ import { get } from "./api";
 
 export interface Loaded<T> { data: T | null; error: string | null; reload: () => void }
 
-type Listener = (e: { type: string; project_id?: string; batch_id?: string }) => void;
+type Listener = (e: { type: string; project_id?: string; batch_id?: string; job_id?: string; run_id?: string }) => void;
 const listeners = new Set<Listener>();
 let source: EventSource | null = null;
 
@@ -38,17 +38,19 @@ export function useChanges(match: (e: Parameters<Listener>[0]) => boolean, onCha
 }
 
 /** GET JSON; reload on matching change events, plus a slow polling fallback. Keeps last good data on errors. */
-export function useApi<T>(path: string | null, opts: { pollMs?: number; project?: string; batch?: string } = {}):
+export function useApi<T>(path: string | null, opts: { pollMs?: number; project?: string; job?: string } = {}):
   Loaded<T> {
-  const { pollMs = 0, project, batch } = opts;
+  const { pollMs = 0, project, job } = opts;
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((t) => t + 1), []);
   const pathRef = useRef(path);
 
-  useChanges((e) => project !== undefined && e.project_id === project && (!batch || !e.batch_id || e.batch_id === batch),
-    reload);
+  useChanges((e) => {
+    const eventJob = e.job_id ?? e.batch_id;  // v1 item events name the Job `batch_id`
+    return project !== undefined && e.project_id === project && (!job || !eventJob || eventJob === job);
+  }, reload);
 
   useEffect(() => {
     if (pathRef.current !== path) {

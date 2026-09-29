@@ -36,6 +36,20 @@ export function Runtime() {
         })}
       </div>
       <div>
+        <div className="label" style={{ marginBottom: 8 }}>Recent model passes (stage work grouped by model residency across Jobs)</div>
+        {!d.coordinator?.passes.length ? <div className="empty">No passes yet.</div> : (
+          <div className="table">
+            {d.coordinator.passes.map((p) => <div key={p.id} className="td" style={{ gridTemplateColumns: "60px minmax(220px,1.6fr) 60px 60px minmax(160px,1fr) 150px 90px", minWidth: 860 }}>
+              <span className="mono" style={{ fontSize: 11.5 }}>{p.lane}</span>
+              <span className="mono ellipsis" style={{ fontSize: 11 }} title={p.residency}>{p.residency}</span>
+              <span className="sub">{p.task_ids.length} tasks</span><span className="sub">{p.jobs.length} Jobs</span>
+              <span className="sub" title="measured worker load counters; ComfyUI exposes none (shown as unavailable)">
+                loads: {p.measured.model_loads ? Object.entries(p.measured.model_loads).map(([k, v]) => `${k} +${v}`).join(" · ") : "unavailable"}</span>
+              <span className="sub" style={{ color: p.close_reason?.startsWith("resource") ? BAD : undefined }}>{p.close_reason ?? "running"}{p.measured.switched ? " · switched" : ""}</span>
+              <span className="sub">{relTime(p.started_at)}</span></div>)}
+          </div>)}
+      </div>
+      <div>
         <div className="label" style={{ marginBottom: 8 }}>Services</div>
         <div className="table">
           {d.services.map((s) => <div key={s.name} className="td" style={{ gridTemplateColumns: "140px minmax(200px,1fr) 110px minmax(160px,1fr)", minWidth: 700 }}>

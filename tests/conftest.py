@@ -52,14 +52,16 @@ class Api:
         return self.c.request(method, path, headers={**HEADERS, **kw.pop("headers", {})}, **kw)
 
     def wait_ops(self, timeout: float = 20.0) -> None:
-        """Wait until no operation is queued/running (simulated engine finishes quickly)."""
+        """Wait until no stage task is queued/running (simulated engines finish quickly; blocked = settled)."""
         end = time.monotonic() + timeout
+        active: list[Any] = []
         while time.monotonic() < end:
-            active = self.studio.journal.list(states=("held", "queued", "running", "reconciling", "cancel_requested"))
+            active = [t for t in self.studio.journal.tasks.list(states=("queued", "running", "reconciling"))
+                      if t.control == "run"]
             if not active:
                 return
             time.sleep(0.05)
-        raise AssertionError(f"operations still active: {[(o.kind, o.state) for o in active]}")
+        raise AssertionError(f"tasks still active: {[(t.stage, t.state, t.item_id) for t in active]}")
 
 
 @pytest.fixture

@@ -104,6 +104,53 @@ def cmd_project_restore_verify(s: Settings, a: argparse.Namespace) -> int:
     return 0 if rep.ok else 1
 
 
+def _api(method: str, path: str, body: dict | None = None) -> object:
+    """Production commands go through the running Studio (its command layer), never direct file mutations."""
+    import os
+
+    import httpx
+
+    base = os.environ.get("STUDIO_URL", "http://127.0.0.1:8190").rstrip("/")
+    try:
+        r = httpx.request(method, f"{base}{path}", json=body, headers={"x-assetstudio": "1"}, timeout=60)
+    except httpx.HTTPError as e:
+        print(f"Studio not reachable at {base} ({type(e).__name__}); start it or set STUDIO_URL", file=sys.stderr)
+        raise SystemExit(2) from e
+    if r.status_code >= 400:
+        print(r.text, file=sys.stderr)
+        raise SystemExit(1)
+    return r.json()
+
+
+def cmd_jobs_list(_: Settings, a: argparse.Namespace) -> int:
+    for j in _api("GET", f"/api/v2/projects/{a.project}/jobs")["jobs"]:  # type: ignore[index]
+        print(f"{j['id']}  {j['alias']:8} {j['kind']:12} {j['counts']['items']:3} items  {j['next_action']:24} "
+              f"{j['title']}{'  (in run ' + j['active_run'] + ')' if j['active_run'] else ''}")
+    return 0
+
+
+def cmd_batches_plan(_: Settings, a: argparse.Namespace) -> int:
+    _print(_api("POST", f"/api/v2/projects/{a.project}/batches/{a.batch}:plan", {}))
+    return 0
+
+
+def cmd_batches_start(_: Settings, a: argparse.Namespace) -> int:
+    import secrets
+
+    _print(_api("POST", f"/api/v2/projects/{a.project}/batches/{a.batch}:start", {
+        "plan_id": a.plan_id, "plan_sha256": a.plan_sha256, "idempotency_key": a.key or f"cli-{secrets.token_hex(8)}"}))
+    return 0
+
+
+def cmd_operations(_: Settings, a: argparse.Namespace) -> int:
+    """Stage tasks (stk_...) through the v2 task API."""
+    if a.sub == "inspect":
+        _print(_api("GET", f"/api/v2/tasks/{a.task}"))
+    else:
+        _print(_api("POST", f"/api/v2/tasks/{a.task}:{a.sub}"))
+    return 0
+
+
 def cmd_storage_reindex(s: Settings, a: argparse.Namespace) -> int:
     s.ensure()
     ctx = Registry(s).get(a.project)
@@ -169,6 +216,25 @@ def main(argv: list[str] | None = None) -> int:
         sp = st.add_parser(name)
         sp.add_argument("project")
         sp.set_defaults(fn=fn)
+    jb = sub.add_parser("jobs").add_subparsers(dest="sub", required=True)
+    jl = jb.add_parser("list")
+    jl.add_argument("project")
+    jl.set_defaults(fn=cmd_jobs_list)
+    bt = sub.add_parser("batches").add_subparsers(dest="sub", required=True)
+    bp = bt.add_parser("plan", help="frozen run plan (no inference)")
+    bp.add_argument("project")
+    bp.add_argument("batch")
+    bp.set_defaults(fn=cmd_batches_plan)
+    bs = bt.add_parser("start", help="start a planned run (idempotent per plan)")
+    for arg in ("project", "batch", "plan_id", "plan_sha256"):
+        bs.add_argument(arg)
+    bs.add_argument("--key", help="idempotency key (default: random)")
+    bs.set_defaults(fn=cmd_batches_start)
+    op = sub.add_parser("operations").add_subparsers(dest="sub", required=True)
+    for name in ("inspect", "retry", "cancel"):
+        o = op.add_parser(name)
+        o.add_argument("task")
+        o.set_defaults(fn=cmd_operations)
     args = p.parse_args(argv)
     if args.cmd == "serve":
         from .main import run

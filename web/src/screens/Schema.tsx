@@ -186,7 +186,7 @@ export function Schema() {
         {errors.map((e, i) => <div key={i} className={e.message === "valid" ? "sub" : "error"}>{e.path ? `${e.path}: ` : ""}{e.message}</div>)}
         <ErrorLine error={act.error} />
         <div className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>Empty fields inherit from the parent category.
-          Changing a spec affects new batches only; existing batches and published versions keep the snapshot they were made with.</div>
+          Changing a spec affects new Jobs only; existing Jobs and published versions keep the snapshot they were made with.</div>
       </section>
     </div>
   );

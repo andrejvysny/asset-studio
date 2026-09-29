@@ -52,17 +52,18 @@ def _effective_kind(ctx_cfg: Any, s: ShotItem) -> str | None:
 
 
 def shot_statuses(ctx: ProjectContext) -> list[dict[str, Any]]:
-    from .batches import list_batch_ids
+    from .jobs import job_ids
 
     shots, _ = ctx.store.read_shotlist()
     cfg, _ = ctx.config()
     membership: dict[str, dict[str, Any]] = {}
-    for bid in list_batch_ids(ctx):
-        batch, _ = load_job(ctx.store, bid)
-        for item in load_items(ctx.store, batch):
+    for jid in job_ids(ctx):
+        job, _ = load_job(ctx.store, jid)
+        for item in load_items(ctx.store, job):
             if not item.shot_id or item.cancelled:
                 continue
-            rec = {"batch_id": batch.id, "batch_alias": batch.alias, "item_id": item.id,
+            rec = {"job_id": job.id, "job_alias": job.alias, "batch_id": job.id, "batch_alias": job.alias,
+                   "item_id": item.id,
                    "published": item.published.model_dump() if item.published else None}
             prev = membership.get(item.shot_id)
             if prev is None or (rec["published"] and not prev["published"]):

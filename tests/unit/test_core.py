@@ -132,7 +132,7 @@ def test_mask_metrics_and_palette_scope() -> None:
     rgb[:5] = (0, 0, 255)
     cov = metrics.reserved_coverage(rgb, [("#0000ff", 8.0)], None)
     assert cov["#0000ff"] == 0.5
-    from assetstudio_server.coordinator.tasks_qa import reserved_colours
+    from assetstudio_server.coordinator.stages.qa import reserved_colours
     style = {"palette": [{"hex": "#0000FF", "reserved": True, "allowed_kinds": ["icon"], "allowed_categories": [],
                           "tolerance_delta_e": 8.0}]}
     base = {"style": style, "category_chain": []}

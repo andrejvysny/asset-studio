@@ -30,14 +30,13 @@ class ApprovalRequest:
 
 
 def check_binding(item: JobItem, cset: CandidateSet | None, qa: QaEvaluation | None,
-                  req: ApprovalRequest, blob_sha: str | None) -> dict[str, Any]:
+                  req: ApprovalRequest, blob_sha: str | None, build_busy: bool = False) -> dict[str, Any]:
     """Validates that the request names exactly the current reviewable bytes. Returns the decision payload."""
     if item.revision != req.expected_item_revision:
         raise ReviewError("stale_item", f"item changed (revision {item.revision}); reload the review")
     if item.cancelled:
         raise ReviewError("item_cancelled", "item is cancelled")
-    if item.accepted_build is not None or (item.current_build and item.tasks.get("build")
-                                           and item.tasks["build"].state in ("queued", "running")):
+    if item.accepted_build is not None or build_busy:
         raise ReviewError("build_in_progress", "a build is running or accepted for this item")
     if cset is None or item.current_set != req.candidate_set_id or cset.id != req.candidate_set_id:
         raise ReviewError("stale_set", f"candidate set {req.candidate_set_id} is not current ({item.current_set})")

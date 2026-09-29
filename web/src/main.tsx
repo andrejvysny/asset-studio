@@ -7,15 +7,18 @@ import "./theme.css";
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { createBrowserRouter, Navigate, RouterProvider, useRouteError } from "react-router-dom";
+import { createBrowserRouter, Navigate, RouterProvider, useParams, useRouteError } from "react-router-dom";
 
 import { AssetDetail } from "./screens/AssetDetail";
 import { Assets } from "./screens/Assets";
-import { Batches } from "./screens/Batches";
-import { BatchWorkspace } from "./screens/batch/BatchWorkspace";
+import { BatchDetail } from "./screens/batches/BatchDetail";
+import { Batches } from "./screens/batches/Batches";
+import { RunView } from "./screens/batches/RunView";
+import { JobWorkspace } from "./screens/job/JobWorkspace";
+import { Jobs } from "./screens/Jobs";
 import { Export } from "./screens/Export";
 import { Home } from "./screens/Home";
-import { NewBatch } from "./screens/NewBatch";
+import { NewJob } from "./screens/NewJob";
 import { Pipelines } from "./screens/Pipelines";
 import { QaRules } from "./screens/QaRules";
 import { Runtime } from "./screens/Runtime";
@@ -31,6 +34,14 @@ function RouteError() {
     <pre className="error">{err?.message ?? String(err)}</pre><a href="/">Back to start</a></div>;
 }
 
+/** Old deep links used /batches/<id> for what is now a Job. Only a KNOWN Job id prefix (bat_/job_) redirects;
+ * grouping Batches have their own bch_ ids, so nothing is guessed from an ambiguous path. */
+function BatchOrLegacyJob() {
+  const { project = "", batchId = "", tab } = useParams();
+  if (/^(bat|job)_/.test(batchId)) return <Navigate to={`/p/${project}/jobs/${batchId}${tab ? `/${tab}` : ""}`} replace />;
+  return <BatchDetail />;
+}
+
 const router = createBrowserRouter([
   { path: "/", element: <Home />, errorElement: <RouteError /> },
   {
@@ -42,10 +53,15 @@ const router = createBrowserRouter([
       { path: "assets", element: <Assets /> },
       { path: "assets/:assetId", element: <AssetDetail /> },
       { path: "shots", element: <ShotList /> },
+      { path: "jobs", element: <Jobs /> },
+      { path: "jobs/new", element: <NewJob /> },
+      { path: "jobs/:jobId", element: <JobWorkspace /> },
+      { path: "jobs/:jobId/:tab", element: <JobWorkspace /> },
       { path: "batches", element: <Batches /> },
-      { path: "batches/new", element: <NewBatch /> },
-      { path: "batches/:batchId", element: <BatchWorkspace /> },
-      { path: "batches/:batchId/:tab", element: <BatchWorkspace /> },
+      { path: "batches/new", element: <Navigate to="../jobs/new" replace /> },
+      { path: "batches/:batchId", element: <BatchOrLegacyJob /> },
+      { path: "batches/:batchId/:tab", element: <BatchOrLegacyJob /> },
+      { path: "runs/:runId", element: <RunView /> },
       { path: "schema", element: <Schema /> },
       { path: "pipelines", element: <Pipelines /> },
       { path: "qa", element: <QaRules /> },

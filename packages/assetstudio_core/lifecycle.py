@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .domain import BuildRun, JobItem
+from .domain import BuildRun, JobItem, TaskRef
 
 StageName = Literal["prompts", "candidates", "approve", "build", "publish", "done", "cancelled"]
 TAB_ORDER: tuple[StageName, ...] = ("prompts", "candidates", "approve", "build", "publish")
@@ -20,32 +20,36 @@ class ItemStage:
     failed: bool = False
 
 
-def _task(item: JobItem, name: str) -> str | None:
-    t = item.tasks.get(name)
+def _task(tasks: dict[str, TaskRef], name: str) -> str | None:
+    t = tasks.get(name)
     return t.state if t else None
 
 
-def item_stage(item: JobItem, build: BuildRun | None) -> ItemStage:
+def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] | None = None) -> ItemStage:
+    """`tasks`: per-family task view from the journal (legacy items fall back to their recorded refs)."""
+    tasks = item.tasks if tasks is None else tasks
     if item.cancelled:
         return ItemStage("cancelled", "cancelled", False, False)
     if item.published is not None and item.accepted_build is None:
         return ItemStage("done", "published", False, False)
     if item.accepted_build is not None:
-        pub = _task(item, "publish")
+        pub = _task(tasks, "publish")
         if pub in ACTIVE:
             return ItemStage("publish", "publishing", False, True)
         if item.published is not None:
             return ItemStage("done", "published", False, False)
         return ItemStage("publish", "ready to publish", True, False, failed=pub == "failed")
     if item.current_build is not None and build is not None:
-        if build.status in ACTIVE:
-            return ItemStage("build", build.status, False, True)
+        if build.status in ACTIVE or _task(tasks, "build") in ACTIVE:
+            return ItemStage("build", "building", False, True)
+        if build.status == "blocked":
+            return ItemStage("build", "build blocked", True, False, failed=True)
         if build.status == "succeeded" and build.result == "valid":
             return ItemStage("build", "ready for final review", True, False)
         return ItemStage("build", f"build {build.status}", True, False, failed=True)
     if item.approval is not None and not item.regen_requested:
         return ItemStage("build", "approved", True, False)
-    gen = _task(item, "generate")
+    gen = _task(tasks, "generate")
     if item.prompt_confirmed is not None and item.prompt_confirmed == item.current_prompt and (
             item.current_set is None or gen in ACTIVE):
         if gen in ACTIVE:
@@ -53,11 +57,11 @@ def item_stage(item: JobItem, build: BuildRun | None) -> ItemStage:
         return ItemStage("candidates", "generation failed" if gen == "failed" else "not generated", True, False,
                          failed=gen == "failed")
     if item.current_set is not None:
-        qa = _task(item, "qa")
+        qa = _task(tasks, "qa")
         if item.regen_requested:
             return ItemStage("approve", "marked for regeneration", True, False)
         return ItemStage("approve", "QA running" if qa in ACTIVE else "undecided", True, qa in ACTIVE)
-    enh = _task(item, "enhance")
+    enh = _task(tasks, "enhance")
     if enh in ACTIVE:
         return ItemStage("prompts", "enhancing", False, True)
     if item.current_prompt is None:
@@ -66,8 +70,9 @@ def item_stage(item: JobItem, build: BuildRun | None) -> ItemStage:
     return ItemStage("prompts", "edited" if item.prompt_confirmed is None else "confirmed", True, False)
 
 
-def aggregate(items: list[JobItem], builds: dict[str, BuildRun]) -> dict:
-    stages = {i.id: item_stage(i, builds.get(i.current_build or "")) for i in items}
+def aggregate(items: list[JobItem], builds: dict[str, BuildRun],
+              tasks: dict[str, dict[str, TaskRef]] | None = None) -> dict:
+    stages = {i.id: item_stage(i, builds.get(i.current_build or ""), (tasks or {}).get(i.id)) for i in items}
     live = [i for i in items if not i.cancelled]
     n = len(live)
     count = {

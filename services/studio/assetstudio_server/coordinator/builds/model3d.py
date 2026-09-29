@@ -1,7 +1,9 @@
-"""model3d build: approved image -> cut-out -> TRELLIS.2 raw -> GLB bake -> checks on the delivered file -> preview.
+"""model3d build stages: segment (GPU1 BiRefNet, or CPU when the QA mask is reusable) -> sample (GPU1 TRELLIS.2)
+-> bake (GPU1 GLB export) -> finalize (CPU: checks on the delivered file, preview).
 
-Every stage commits a checkpoint. Recovery resumes the missing stage: a failed bake with a durable raw never calls
-TRELLIS.2 again, and a re-export reuses the stored raw of an earlier run. Worker executions are reconciled by id.
+Each stage is its own task, so several approved 3D items are segmented, then sampled, then baked in grouped passes.
+Every stage commits a checkpoint: a failed bake with a durable raw never calls TRELLIS.2 again, and a re-export
+reuses the stored raw of an earlier run. Worker executions are reconciled by id.
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ from assetstudio_processing.raster import apply_mask, to_png
 from assetstudio_processing.render import glb_stats, preview_png
 
 from ...adapters.base import EngineUnavailable, ExecutionCancelled, ExecutionFailed, ExecutionLost
-from ..runner import Blocked, Cancelled
+from ..errors import Blocked, Cancelled
 from .common import BuildFailed, BuildInput, foreground_mask
 
 EXPORT_RANGE = (1_000, 2_000_000)  # what the worker accepts
@@ -46,8 +48,8 @@ def target_triangles(inp: BuildInput) -> dict[str, Any]:
 def _worker(inp: BuildInput) -> tuple[Any, int]:
     w = inp.env.studio.worker3d
     if w is None:
-        raise BuildFailed("no 3D worker configured (WORKER3D_URL)", "resource_unavailable")
-    return w, inp.env.studio.lanes["gpu1"].acquire("worker3d")
+        raise Blocked("no 3D worker configured (WORKER3D_URL)", "worker3d_unconfigured", operator=True)
+    return w, inp.env.epoch("worker3d")
 
 
 def _execute(inp: BuildInput, stage: str, op: str, params: dict[str, Any], body: bytes) -> tuple[bytes, dict, str]:
@@ -81,7 +83,7 @@ def _preflight(inp: BuildInput) -> None:
                           "current recipe before building", "legacy_recipe")
     w = inp.env.studio.worker3d
     if w is None:
-        raise BuildFailed("no 3D worker configured (WORKER3D_URL)", "resource_unavailable")
+        raise Blocked("no 3D worker configured (WORKER3D_URL)", "worker3d_unconfigured", operator=True)
     health = w.health()
     exporter = inp.params["exporter"]
     if health.get("reachable") is False:
@@ -90,18 +92,19 @@ def _preflight(inp: BuildInput) -> None:
         raise BuildFailed(f"exporter {exporter!r} is not installed in the 3D worker", "exporter_unavailable")
 
 
-def _segment(inp: BuildInput) -> str:
-    if (cp := inp.done("segment")) is not None:
+def segment(inp: BuildInput) -> str:
+    if (cp := inp.done("segment")) is not None and cp.outputs.get("cutout"):
         return cp.outputs["cutout"]
-    cutout = to_png(apply_mask(load_rgb_array(inp.data), foreground_mask(inp)))
+    cutout = to_png(apply_mask(load_rgb_array(inp.data), foreground_mask(inp, allow_compute=True)))
     art = inp.env.ctx.store.register_artifact(cutout, "cutout", "image/png", lineage=[inp.source.id],
                                               artifact_id=inp.artifact_id("cutout"))
-    inp.checkpoint("segment", {"cutout": art.id}, inputs={"source_sha256": inp.source.sha256},
+    inp.checkpoint("segment", {"cutout": art.id, **({"mask": m} if (m := inp.meta.get("mask", {}).get(
+        "artifact_id")) else {})}, inputs={"source_sha256": inp.source.sha256},
                    identities={"mask": inp.meta.get("mask", {})})
     return art.id
 
 
-def _sample(inp: BuildInput) -> str:
+def sample(inp: BuildInput) -> str:
     """Stage output: a verified, durable raw intermediate. Reused from a checkpoint or an earlier run."""
     store = inp.env.ctx.store
     if inp.reexport:
@@ -113,7 +116,8 @@ def _sample(inp: BuildInput) -> str:
     if (cp := inp.done("sample")) is not None:
         inp.meta["generation"] = {**cp.receipt, "resumed_from_checkpoint": True}
         return cp.outputs["raw"]
-    cutout_id = _segment(inp)
+    _preflight(inp)
+    cutout_id = segment(inp)
     seed = int(inp.bound.get("seed") or 0) % 2**31
     params = {"seed": seed, "pipeline_type": inp.params["pipeline_type"]}
     raw, meta, eid = _execute(inp, "sample", "generate", params, store.artifact_bytes(cutout_id))
@@ -134,33 +138,48 @@ def _sample(inp: BuildInput) -> str:
     return art.id
 
 
-def model3d(inp: BuildInput) -> None:
-    info = inspect_image(inp.data, ("PNG", "JPEG"))
-    inp.check("decode", True, f"{info.format} {info.width}x{info.height}")
-    _preflight(inp)
-    raw_id = _sample(inp)
-    inp.roles["raw"] = raw_id
+def bake(inp: BuildInput) -> str:
+    if (cp := inp.done("bake")) is not None:
+        return cp.outputs["model"]
+    raw_id = sample(inp) if inp.reexport else inp.done("sample").outputs["raw"]  # type: ignore[union-attr]
+    if inp.reexport:
+        _preflight(inp)
     budget = target_triangles(inp)
     exporter = inp.params["exporter"]
     store = inp.env.ctx.store
-    if (cp := inp.done("bake")) is not None:
-        model_id, meta = cp.outputs["model"], cp.receipt
-    else:
-        params = {"exporter": exporter, "decimation_target": budget["effective"],
-                  "texture_size": int(inp.params["texture_size"]), "remesh": bool(inp.params["remesh"])}
-        glb, meta, eid = _execute(inp, "bake", "export", params, store.artifact_bytes(raw_id))
-        model_id = store.register_artifact(glb, "model", "model/gltf-binary", lineage=[raw_id],
-                                           meta={"exporter": exporter}, source={"export": meta},
-                                           artifact_id=inp.artifact_id("model", eid)).id
-        inp.checkpoint("bake", {"model": model_id}, inputs={"raw": raw_id}, settings=params,
-                       identities={"exporter": exporter, "licence": meta.get("licence")},
-                       receipt={**meta, "execution_id": eid})
-        inp.env.studio.worker3d.ack(eid)  # type: ignore[union-attr]
-    inp.roles["model"] = model_id
-    glb = store.artifact_bytes(model_id)  # validate the delivered file itself (verified read)
+    params = {"exporter": exporter, "decimation_target": budget["effective"],
+              "texture_size": int(inp.params["texture_size"]), "remesh": bool(inp.params["remesh"])}
+    glb, meta, eid = _execute(inp, "bake", "export", params, store.artifact_bytes(raw_id))
+    model_id = store.register_artifact(glb, "model", "model/gltf-binary", lineage=[raw_id],
+                                       meta={"exporter": exporter}, source={"export": meta},
+                                       artifact_id=inp.artifact_id("model", eid)).id
+    inp.roles["raw"] = raw_id
+    inp.checkpoint("bake", {"model": model_id}, inputs={"raw": raw_id}, settings={**params, "budget": budget},
+                   identities={"exporter": exporter, "licence": meta.get("licence")},
+                   receipt={**meta, "execution_id": eid})
+    inp.env.studio.worker3d.ack(eid)  # type: ignore[union-attr]
+    return model_id
+
+
+def finalize(inp: BuildInput) -> None:
+    """CPU: every required check runs on the delivered GLB bytes (verified read); preview after, isolated."""
+    info = inspect_image(inp.data, ("PNG", "JPEG"))
+    inp.check("decode", True, f"{info.format} {info.width}x{info.height}")
+    bake_cp, sample_cp = inp.done("bake"), inp.done("sample")
+    assert bake_cp is not None
+    model_id = bake_cp.outputs["model"]
+    store = inp.env.ctx.store
+    glb = store.artifact_bytes(model_id)
+    budget = bake_cp.settings.get("budget") or target_triangles(inp)
     _validate(inp, glb, budget)
+    inp.roles["model"] = model_id
+    inp.roles["raw"] = bake_cp.inputs["raw"]
     inp.preview = lambda: preview_png(glb)
-    inp.meta.update(export=meta, budget=budget)
+    reused = inp.reexport["from_run"].id if inp.reexport else None
+    inp.meta.update(export=bake_cp.receipt, budget=budget,
+                    generation={"reused_raw_from": reused} if reused else (sample_cp.receipt if sample_cp else {}),
+                    mask=((inp.done("segment") or bake_cp).identities or {}).get("mask", {}))
+    exporter = bake_cp.settings.get("exporter", inp.params["exporter"])
     inp.components = ["birefnet", "trellis2", "trellis_image_large", "dinov3_vitl16", "trellis2_runtime",
                       "exporter_clean" if exporter == "clean" else "nvdiffrast"]
 

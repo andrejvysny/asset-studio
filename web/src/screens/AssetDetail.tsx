@@ -131,7 +131,7 @@ export function AssetDetail() {
           </div>
         </div>
         <div className="row" style={{ flexWrap: "wrap" }}>
-          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/batches/new?target=${m.asset_id}&kind=${m.kind}${m.category_id ? `&cat=${m.category_id}` : ""}&name=${encodeURIComponent(m.display_name)}`)}>
+          <button className="btn btn-primary" onClick={() => nav(`/p/${id}/jobs/new?target=${m.asset_id}&kind=${m.kind}${m.category_id ? `&cat=${m.category_id}` : ""}&name=${encodeURIComponent(m.display_name)}`)}>
             New version…</button>
           <button className="btn" disabled title="Export targets arrive in Phase 4">Export current</button>
         </div>

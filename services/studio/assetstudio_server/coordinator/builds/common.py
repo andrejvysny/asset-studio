@@ -11,20 +11,16 @@ from assetstudio_core.canonical import canonical_json, now_iso
 from assetstudio_core.domain import Artifact, BuildRun, Checkpoint, JobItem
 from assetstudio_core.ids import derived_id
 from assetstudio_processing import metrics
-from assetstudio_processing.images import ImageRejected
-from assetstudio_processing.raster import RasterError, to_png
+from assetstudio_processing.raster import to_png
 
-from ...adapters.base import EngineRejected, EngineUnavailable
-from ...services.records import build_key, load_decision, load_qa, mutate_item
-from ..runner import Blocked, Cancelled, TaskEnv
+from ...adapters.base import EngineRejected
+from ...services.records import build_key, load_decision, load_item, load_qa, mutate_item
+from ..errors import Blocked, ItemFailed
+from ..runner import TaskEnv
 
 
-class BuildFailed(Exception):
-    """Unrecoverable input problem for this item (not a structural-validation failure)."""
-
-    def __init__(self, message: str, code: str = "build_failed") -> None:
-        super().__init__(message)
-        self.code = code
+class BuildFailed(ItemFailed):
+    """Unrecoverable problem for this item's build (not a structural-validation failure)."""
 
 
 @dataclass
@@ -106,38 +102,51 @@ class BuildInput:
 BuildFn = Callable[[BuildInput], None]
 
 
-def foreground_mask(inp: BuildInput) -> np.ndarray:
-    """Reuse the QA mask when it was computed from exactly the approved bytes; otherwise segment now (GPU1)."""
+def foreground_mask(inp: BuildInput, allow_compute: bool = False) -> np.ndarray:
+    """Mask for the approved bytes: this run's segment checkpoint, else the QA mask when it was computed from
+    exactly these bytes, else (GPU1 segment stage only) segment now."""
     store = inp.env.ctx.store
-    qa_id = inp.bound.get("qa_evaluation_id")
-    mask_id = load_qa(store, inp.batch_id, qa_id).evaluators.get("mask_artifact_id") if qa_id else None
+    if (cp := inp.done("segment")) is not None and cp.outputs.get("mask"):
+        inp.meta["mask"] = cp.identities.get("mask") or {"artifact_id": cp.outputs["mask"], "source": "segment"}
+        return metrics.mask_array(store.artifact_bytes(cp.outputs["mask"]))
+    mask_id = reusable_qa_mask(inp.env.ctx, inp.batch_id, inp.bound, inp.source)
     if mask_id:
-        mask_art = store.artifact(mask_id)
-        if mask_art.lineage == [inp.source.id] and inp.source.sha256 == inp.bound["image_sha256"]:
-            inp.meta["mask"] = {"artifact_id": mask_id, "source": "qa_reused"}
-            return metrics.mask_array(store.artifact_bytes(mask_id))
+        inp.meta["mask"] = {"artifact_id": mask_id, "source": "qa_reused"}
+        return metrics.mask_array(store.artifact_bytes(mask_id))
+    if not allow_compute:
+        raise ItemFailed("no reusable foreground mask and no segmentation stage ran for this build", "internal")
     aux = inp.env.studio.aux
     if aux is None:
-        raise BuildFailed("no segmentation service configured", "resource_unavailable")
-    epoch = inp.env.studio.lanes["gpu1"].acquire("aux")
+        raise Blocked("no segmentation service configured", "aux_unconfigured", operator=True)
     try:
-        res = aux.cutout(image=inp.data, epoch=epoch)
-    except (EngineUnavailable, EngineRejected) as e:
-        raise BuildFailed(f"segmentation unavailable: {e}", "resource_unavailable") from e
+        res = aux.cutout(image=inp.data, epoch=inp.env.epoch("aux"))
+    except EngineRejected as e:
+        raise ItemFailed(f"segmentation rejected the approved image: {e}", "input_invalid") from e
     art = store.register_artifact(res["mask_png"], "mask", "image/png", lineage=[inp.source.id],
                                   source={"model": res.get("meta", {})}, artifact_id=inp.artifact_id("mask"))
     inp.meta["mask"] = {"artifact_id": art.id, "source": "computed", "simulated": bool(aux.simulated)}
     return metrics.mask_array(res["mask_png"])
 
 
+def reusable_qa_mask(ctx: Any, job_id: str, bound: dict[str, Any], source: Artifact) -> str | None:
+    """The QA mask artifact id when it was computed from exactly the approved candidate bytes."""
+    qa_id = bound.get("qa_evaluation_id")
+    mask_id = load_qa(ctx.store, job_id, qa_id).evaluators.get("mask_artifact_id") if qa_id else None
+    if not mask_id:
+        return None
+    mask_art = ctx.store.artifact(mask_id)
+    ok = mask_art.lineage == [source.id] and source.sha256 == bound["image_sha256"]
+    return mask_id if ok else None
+
+
 RESUMABLE_STAGES = ("segment", "sample")  # upstream of the export settings: valid for any rebuild of the approval
 
 
-def _inherited(env: TaskEnv, batch_id: str, item: JobItem, approval_id: str) -> tuple[str | None, dict[str, Any]]:
+def _inherited(ctx: Any, job_id: str, item: JobItem, approval_id: str) -> tuple[str | None, dict[str, Any]]:
     """Durable upstream checkpoints of the latest unfinished attempt for the same approval (e.g. a raw from a run
     whose bake failed): an explicit rebuild resumes from them instead of resampling."""
     for rid in reversed(item.build_runs):
-        prior, _ = env.ctx.store.get_opt(build_key(batch_id, rid), BuildRun)
+        prior, _ = ctx.store.get_opt(build_key(job_id, rid), BuildRun)
         if prior is None or prior.inputs.get("approval_id") != approval_id or prior.kind != "build":
             continue
         if prior.status == "succeeded":
@@ -148,102 +157,90 @@ def _inherited(env: TaskEnv, batch_id: str, item: JobItem, approval_id: str) -> 
     return None, {}
 
 
-def _open_run(env: TaskEnv, batch_id: str, item: JobItem, entry: dict[str, Any], build: str,
-              bound: dict[str, Any]) -> tuple[BuildRun, str]:
-    """Create (or find) the run and attach it to the item's history NOW, so a failed attempt stays visible."""
-    store = env.ctx.store
-    run_id = derived_id("run", env.op.id, item.id)
-    existing, token = store.get_opt(build_key(batch_id, run_id), BuildRun)
+def create_run(studio: Any, ctx: Any, job_id: str, item: JobItem, approval_id: str, build: str, command_id: str,
+               reexport_from: str | None = None, overrides: dict[str, Any] | None = None) -> BuildRun:
+    """At command time: the run exists and is attached to the item BEFORE any stage runs (H01)."""
+    store = ctx.store
+    run_id = derived_id("run", command_id, item.id)
+    existing, _ = store.get_opt(build_key(job_id, run_id), BuildRun)
     if existing is None:
+        bound = load_decision(store, job_id, approval_id).bound
         now = now_iso()
-        run = BuildRun(id=run_id, item_id=item.id, job_id=batch_id, build=build,
-                       inputs={"approval_id": entry["approval_id"], "candidate_artifact_id": bound["artifact_id"],
+        run = BuildRun(id=run_id, item_id=item.id, job_id=job_id, build=build,
+                       inputs={"approval_id": approval_id, "candidate_artifact_id": bound["artifact_id"],
                                "image_sha256": bound["image_sha256"]},
-                       status="running", created_at=now, updated_at=now, op_id=env.op.id,
-                       kind="reexport" if entry.get("reexport_from") else "build",
-                       derived_from=entry.get("reexport_from"))
-        if entry.get("reexport_from"):
-            run.inputs = {**run.inputs, "reexport_of": entry["reexport_from"], "overrides": entry.get("overrides", {})}
+                       status="queued", created_at=now, updated_at=now, op_id=command_id,
+                       kind="reexport" if reexport_from else "build", derived_from=reexport_from)
+        if reexport_from:
+            run.inputs = {**run.inputs, "reexport_of": reexport_from, "overrides": overrides or {}}
         else:
-            resumed_from, checkpoints = _inherited(env, batch_id, item, entry["approval_id"])
+            resumed_from, checkpoints = _inherited(ctx, job_id, item, approval_id)
             if checkpoints:
                 run.checkpoints = checkpoints
                 run.artifacts = {k: v for cp in checkpoints.values() for k, v in cp.outputs.items()}
                 run.inputs = {**run.inputs, "resumed_from": resumed_from}
-        token = store.create(build_key(batch_id, run_id), run)
+        store.create_or_same(build_key(job_id, run_id), run)
         existing = run
-    assert token is not None
 
     def attach(x: JobItem) -> None:
         if run_id not in x.build_runs:
             x.build_runs.append(run_id)
         x.current_build = run_id
     if run_id not in item.build_runs or item.current_build != run_id:
-        mutate_item(env.studio, env.ctx, batch_id, item.id, attach)
-    return existing, token
+        mutate_item(studio, ctx, job_id, item.id, attach)
+    return existing
 
 
-def _fail(inp: BuildInput, message: str, code: str) -> None:
-    """Keep every already registered artifact (e.g. a durable raw) on the failed run before exposing failure."""
-    assert inp.run is not None
-    inp.run.status, inp.run.error = "failed", message[:300]
-    inp.run.validation = {**inp.run.validation, "failure_code": code}
-    inp.save()
-
-
-def run_build(env: TaskEnv, batch_id: str, item: JobItem, entry: dict[str, Any], build: str,
-              fn: BuildFn) -> BuildRun:
-    """One BuildRun per (op, item). A finished run returns unchanged; an interrupted/failed one resumes from its
-    committed checkpoints (a durable raw is never regenerated)."""
-    store = env.ctx.store
-    bound = load_decision(store, batch_id, entry["approval_id"]).bound
-    run, token = _open_run(env, batch_id, item, entry, build, bound)
-    if run.status == "succeeded":
-        return run
+def open_input(env: TaskEnv) -> BuildInput:
+    """BuildInput for the build stage task `env.task` (inputs: build_run_id)."""
+    t, store = env.task, env.ctx.store
+    run, token = store.get(build_key(t.job_id, t.inputs["build_run_id"]), BuildRun)
+    item, _ = load_item(store, t.job_id, t.item_id)
+    bound = load_decision(store, t.job_id, run.inputs["approval_id"]).bound
     source = store.artifact(bound["artifact_id"])
     snap = store.read_snapshot(item.snapshot_sha)
     reexport = None
-    if entry.get("reexport_from"):
-        prior = store.get(build_key(batch_id, entry["reexport_from"]), BuildRun)[0]
-        reexport = {"from_run": prior, "overrides": entry.get("overrides", {})}
-    run.status, run.error = "running", None
-    inp = BuildInput(env, batch_id, item, bound, source, store.artifact_bytes(source.id),
+    if run.derived_from and run.kind == "reexport":
+        prior = store.get(build_key(t.job_id, run.derived_from), BuildRun)[0]
+        reexport = {"from_run": prior, "overrides": run.inputs.get("overrides", {})}
+    inp = BuildInput(env, t.job_id, item, bound, source, store.artifact_bytes(source.id),
                      {**snap["parameters"], **(reexport or {}).get("overrides", {})}, snap, reexport,
                      roles=dict(run.artifacts), run=run, token=token)
-    inp.save()
-    if inp.check("hash_matches_approval", source.sha256 == bound["image_sha256"]):
-        try:
-            fn(inp)
-        except (RasterError, ImageRejected) as e:
-            inp.check("derive", False, str(e)[:300])
-        except BuildFailed as e:
-            _fail(inp, str(e), e.code)
-            raise
-        except Cancelled:
-            inp.run.status, inp.run.error = "cancelled", "cancelled by operator"
-            inp.save()
-            raise
-        except Blocked as e:  # resource unavailable: checkpoints stay; the next attempt resumes
-            inp.run.status, inp.run.error = "blocked", str(e)[:300]
-            inp.save()
-            raise
-        except Exception as e:
-            _fail(inp, f"{type(e).__name__}: {e}", "internal")
-            raise
+    if run.status not in ("running",):
+        run.status, run.error = "running", None
+        inp.save()
+    return inp
+
+
+def finish_run(inp: BuildInput, build: str) -> dict[str, Any]:
+    """Required checks decide validity; advisory ones are reported. Preview is rendered after, isolated."""
+    assert inp.run is not None
+    inp.check("hash_matches_approval", inp.source.sha256 == inp.bound["image_sha256"])
     if inp.meta:
         inp.add_json("meta", {"build": build, **inp.meta})
     required = [c for c in inp.checks if not c.get("advisory")]
     ok = all(c["ok"] for c in required)
     if inp.components:
-        run.inputs = {**run.inputs, "components": inp.components}
-    run.validation = {"ok": ok, "checks": inp.checks, "required": [c["id"] for c in required]}
-    run.status, run.result = "succeeded", "valid" if ok else "invalid"
+        inp.run.inputs = {**inp.run.inputs, "components": inp.components}
+    inp.run.validation = {"ok": ok, "checks": inp.checks, "required": [c["id"] for c in required]}
+    inp.run.status, inp.run.result = "succeeded", "valid" if ok else "invalid"
     inp.save()
     if ok and inp.preview is not None:
         render_preview(inp)
-    return run
+    return {"build_run_id": inp.run.id, "result": inp.run.result}
 
 
+def mark_run(env: TaskEnv, state: str, err: dict[str, Any]) -> None:
+    """Stage error hook: the run records the outcome and keeps every durable artifact/checkpoint."""
+    t, store = env.task, env.ctx.store
+    run, token = store.get(build_key(t.job_id, t.inputs["build_run_id"]), BuildRun)
+    if run.status == "succeeded":
+        return
+    run.status = {"failed": "failed", "cancelled": "cancelled"}.get(state, "blocked")  # type: ignore[assignment]
+    run.error = f"{t.stage}: {err.get('message', '')}"[:300]
+    run.validation = {**run.validation, "failure_code": err.get("code"), "failed_stage": t.stage}
+    run.updated_at = now_iso()
+    store.replace(build_key(t.job_id, run.id), run, token)
 def render_preview(inp: BuildInput) -> None:
     """A preview is a derivative of the delivered file: failure leaves the valid model available (retryable)."""
     assert inp.run is not None and inp.preview is not None

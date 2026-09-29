@@ -39,13 +39,13 @@ def test_onboarding_empty_state(page, studio_url: str) -> None:
 
 def test_full_concept_lifecycle(page, studio_url: str) -> None:
     pid = _project(studio_url)
-    page.goto(f"/p/{pid}/batches/new?cat=concept")
+    page.goto(f"/p/{pid}/jobs/new?cat=concept")
     expect(page.get_by_role("heading", name="What are you making?")).to_be_visible()
     page.get_by_label("briefs").fill("Tavern interior: warm tavern, long tables\nHarbour at dusk: small fishing harbour")
     page.locator("label.field", has_text="Name").locator("input").fill("Concept round 1")
-    shot(page, "01-new-batch")
-    page.get_by_role("button", name=re.compile(r"Create batch \+ enhance 2 prompts")).click()
-    expect(page).to_have_url(re.compile(r"/batches/(bat|job)_[a-z0-9]+"))
+    shot(page, "01-new-job")
+    page.get_by_role("button", name=re.compile(r"Save and run \(enhance 2 prompts\)")).click()
+    expect(page).to_have_url(re.compile(r"/jobs/job_[a-z0-9]+"))
     expect(page.get_by_label("prompt Tavern interior")).to_have_value(re.compile("simulated enhancement"), timeout=15000)
     shot(page, "02-prompts")
     page.get_by_role("button", name=re.compile(r"Confirm 2 prompts \+ generate")).click()
@@ -79,7 +79,7 @@ def test_full_concept_lifecycle(page, studio_url: str) -> None:
 
 
 @pytest.mark.parametrize("screen,heading", [
-    ("assets", "All assets"), ("shots", "Shot list"), ("batches", "Batches"), ("schema", "Concept"),
+    ("assets", "All assets"), ("shots", "Shot list"), ("jobs", "Jobs"), ("batches", "Batches"), ("schema", "Concept"),
     ("pipelines", "3D model"), ("qa", "3D model candidates checks"), ("style", "Style"), ("storage", "Storage"),
     ("export", "Export targets"), ("runtime", "Runtime"),
 ])
@@ -94,10 +94,10 @@ def test_every_screen_renders(page, studio_url: str, screen: str, heading: str) 
 
 def test_3d_build_and_reexport(page, studio_url: str) -> None:
     pid = _project(studio_url)
-    page.goto(f"/p/{pid}/batches/new?cat=containers")
+    page.goto(f"/p/{pid}/jobs/new?cat=containers")
     page.get_by_label("briefs").fill("Supply crate: small wooden supply crate")
     page.locator("label.field", has_text="Name").locator("input").fill("Props round 1")
-    page.get_by_role("button", name=re.compile(r"Create batch \+ enhance 1 prompts")).click()
+    page.get_by_role("button", name=re.compile(r"Save and run \(enhance 1 prompts\)")).click()
     expect(page.get_by_label("prompt Supply crate")).to_have_value(re.compile("simulated enhancement"), timeout=15000)
     page.get_by_role("button", name=re.compile(r"Confirm 1 prompts \+ generate")).click()
     expect(page.get_by_text("1/1 items have candidates.")).to_be_visible(timeout=20000)

@@ -1,5 +1,5 @@
-"""Build implementations keyed by Recipe.build."""
-from .common import BuildFailed, run_build
+"""Build implementations: image kinds derive on CPU (kinds.BUILDS); model3d runs as staged tasks."""
+from .common import BuildFailed
 from .kinds import BUILDS
 
-__all__ = ["BUILDS", "BuildFailed", "run_build"]
+__all__ = ["BUILDS", "BuildFailed"]

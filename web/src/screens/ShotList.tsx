@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Box, Empty, ErrorLine, INFO, Loading, OK, PageHead } from "../components/ui";
-import { type CategoryNode, key, KIND_LABEL, KINDS, type Kind, P, send, type ShotRow, upload } from "../lib/api";
+import { type CategoryNode, J, key, type Kind, KIND_LABEL, KINDS, P, send, type ShotRow, upload, V2 } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
 
@@ -36,19 +36,26 @@ export function ShotList() {
   const selected = rows.filter((r) => sel.has(r.id));
   const kinds = useMemo(() => [...new Set(selected.map((r) => r.effective_kind))], [selected]);
 
-  const createBatches = () => void act.run(async () => {
+  /** One Job per output kind (a Job holds one recipe); optionally group the new Jobs into one Batch. Save only. */
+  const createJobs = (asBatch: boolean) => void act.run(async () => {
     const groups = new Map<string, ShotRow[]>();
     selected.forEach((r) => groups.set(r.effective_kind ?? "?", [...(groups.get(r.effective_kind ?? "?") ?? []), r]));
-    let last = "";
+    const ids: string[] = [];
     for (const [kind, list] of groups) {
-      const out = await send<{ batch: { id: string } }>("POST", `${P(id)}/batches`, {
+      const out = await send<{ job: { id: string } }>("POST", J(id), {
         title: `${KIND_LABEL[kind as Kind] ?? kind} · ${list.length} from shot list`, idempotency_key: key(),
         kind, source: `shot list · ${list.length} rows`,
         items: list.map((r) => ({ name: r.name, brief: r.brief, category_id: r.category_id, kind: r.kind,
           shot_id: r.id, target_asset_id: r.target_asset_id })) });
-      last = out.batch.id;
+      ids.push(out.job.id);
     }
-    nav(groups.size === 1 ? `/p/${id}/batches/${last}` : `/p/${id}/batches`);
+    if (asBatch) {
+      const b = await send<{ batch: { id: string } }>("POST", `${V2(id)}/batches`, {
+        title: `Shot list · ${selected.length} rows`, job_ids: ids, idempotency_key: key() });
+      nav(`/p/${id}/batches/${b.batch.id}`);
+      return;
+    }
+    nav(ids.length === 1 ? `/p/${id}/jobs/${ids[0]}` : `/p/${id}/jobs`);
   });
 
   if (!shots.data) return shots.error ? <div className="content"><ErrorLine error={shots.error} /></div> : <Loading what="shot list" />;
@@ -71,12 +78,14 @@ export function ShotList() {
             setDrafts(null);
             shots.reload();
           })}>Save shot list</button></>}
-        {!dirty && <button className="btn btn-primary" disabled={!eligible || act.busy} onClick={createBatches}>
-          {selected.length === 0 ? "Select rows to batch" : kinds.length > 1 ? `Create ${kinds.length} batches (split by type)`
-            : `Create batch from ${selected.length}`}</button>}
+        {!dirty && <button className="btn btn-primary" disabled={!eligible || act.busy} onClick={() => createJobs(false)}>
+          {selected.length === 0 ? "Select rows for a Job" : kinds.length > 1 ? `Create ${kinds.length} Jobs (split by type)`
+            : `Create Job from ${selected.length}`}</button>}
+        {!dirty && kinds.length > 1 && <button className="btn" disabled={!eligible || act.busy} onClick={() => createJobs(true)}>
+          Create {kinds.length} Jobs as one Batch</button>}
       </PageHead>
       {selected.some((r) => r.status !== "planned") &&
-        <div className="banner note">Rows already in a batch or published cannot be batched again; deselect them.</div>}
+        <div className="banner note">Rows already in a Job or published cannot be added again; deselect them.</div>}
       {imp && (
         <div className="panel" style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="row"><span className="mono">{imp.filename}</span>

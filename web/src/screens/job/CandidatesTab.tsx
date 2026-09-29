@@ -4,15 +4,15 @@ import { Bar, ErrorLine, INFO, qaColor, taskColor } from "../../components/ui";
 import { artifactUrl, send } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
-import { ActionBar, type TabProps } from "./BatchWorkspace";
+import { ActionBar, type TabProps } from "./JobWorkspace";
 
-export function CandidatesTab({ batch, reload }: TabProps) {
+export function CandidatesTab({ job, reload }: TabProps) {
   const { id } = useProject();
   const nav = useNavigate();
   const act = useAction();
-  const gen = batch.items.map((i) => i.tasks.generate).filter(Boolean);
+  const gen = job.items.map((i) => i.tasks.generate).filter(Boolean);
   const running = gen.filter((t) => t && ["held", "queued", "running", "reconciling"].includes(t.state));
-  const totals = batch.items.reduce((acc, i) => {
+  const totals = job.items.reduce((acc, i) => {
     const t = i.tasks.generate;
     const total = t?.progress.total ?? i.candidate_set?.requested ?? 0;
     const done = i.candidate_set && !(t && ["queued", "running"].includes(t.state)) ? i.candidate_set.candidates.length : (t?.progress.done ?? 0);
@@ -26,7 +26,7 @@ export function CandidatesTab({ batch, reload }: TabProps) {
         <span className="sub">{totals.done}/{totals.total} candidates</span>
       </div>
       <div className="table">
-        {batch.items.map((it) => {
+        {job.items.map((it) => {
           const t = it.tasks.generate;
           const qa = it.tasks.qa;
           const cands = it.candidate_set && !(t && ["queued", "running"].includes(t.state)) ? it.candidate_set.candidates : [];
@@ -58,9 +58,9 @@ export function CandidatesTab({ batch, reload }: TabProps) {
       </div>
       <ErrorLine error={act.error} />
       <ActionBar note={running.length ? "Generating. You can leave this page; work continues on the server."
-        : `${batch.counts.candidates}/${batch.counts.items} items have candidates.`}
+        : `${job.counts.candidates}/${job.counts.items} items have candidates.`}
         sub="Candidates and QA are stored as soon as each item finishes. Completed items never resample.">
-        <button className="btn btn-primary" onClick={() => nav(`/p/${id}/batches/${batch.id}/approve`)}>Go to approve →</button>
+        <button className="btn btn-primary" onClick={() => nav(`/p/${id}/jobs/${job.id}/approve`)}>Go to approve →</button>
       </ActionBar>
     </div>
   );

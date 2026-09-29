@@ -14,6 +14,8 @@ from typing import Any
 from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.ids import new_id
 
+from .taskstore import TaskStore
+
 ACTIVE_STATES = ("held", "queued", "running", "cancel_requested", "reconciling")
 TERMINAL_STATES = ("succeeded", "failed", "cancelled")
 
@@ -95,6 +97,7 @@ class Journal:
                 self._db.executescript(f"BEGIN;{script}PRAGMA user_version={version}; COMMIT;")
         self._lock = threading.RLock()
         self.changed = threading.Condition(self._lock)
+        self.tasks = TaskStore(self._db, self._lock, self.changed)
 
     def close(self) -> None:
         self._db.close()

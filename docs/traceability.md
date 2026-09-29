@@ -11,21 +11,21 @@ stated); `partial` = see note; `open` = not yet. GPU/Docker evidence is recorded
 | H02 unload during export | done | `services/worker_common/lease.py` drain; worker3d/aux `/unload` | `unit/test_runtime_contracts.py::test_worker_lease_drain…` (RI10) |
 | H03 model3d v1 meaning changed | done | `recipes.legacy_variant`, recipe v2, command + build refusal | `contract/test_legacy_projects.py::test_legacy_model3d…` |
 | H04 cancel lost / undone | done (ops) | `journal.requeue` conditional, cancel kept across restart | `regression/test_cancel_retry.py` (RI01, RI02) |
-| H05 held-op crash gaps | open → Phase 2 | journal-authoritative StageTasks | RI04, RI05 |
+| H05 held-op crash gaps | done | journal-only StageTasks, command intents replayed at start, atomic complete+downstream | `contract/test_jobs_batches.py::test_crash_after_command_intent…` (RI04), `…::test_crash_between_candidate_commit…` (RI05) |
 | H06 idempotency aliasing | done | `scoped_commands (project, action, key)`, scoped op keys | `regression/test_imports_publication.py::test_same_key_in_two_projects…` (RI03) |
 | H07 corrupt dedup blobs | done | `local.verify_blob/read_blob_verified`, publication full verify, verified reads | `regression/test_integrity.py` (RI13, RI14) |
 | H08 import staging before receipt | done | `imports.commit` receipt → record → deferred cleanup, derived ids | `…::test_import_replay_after_failure_at_every_write` (RI15) |
 | H09 kinds/names not enforced | done | `core/contracts.py`, `publication.reserve_name` (`names/`), kind check | `…::test_publish_rejects_kind_mismatch_and_duplicate_name` (IM01, IM02) |
-| H10 provenance from current inventory | partial | execution receipts on checkpoints (3D); image/QA stages → Phase 2 | — |
+| H10 provenance from current inventory | partial | execution receipts on 3D checkpoints; task residency (exact lock identities) on candidate sets / prompts; full per-stage receipts → Phase 4 | — |
 | H11 references never sent to VLM | open → Phase 4 | style wizard, reference QA | ST01, ST10 |
 | H12 re-export target loses to category max | done | `model3d.target_triangles` precedence + clamp record | `…::test_reexport_target_beats_category_max` (RI18) |
 | H13 raw validated after CUDA | done | `assetstudio_processing/raw_npz.py` (shared with worker) | `tests/worker3d` (IM06, `make test-worker3d`) |
 | H14 rasterizer duplicate writes / huge face | done | `worker3d/rasterize.py` amax winner + row tiles | `tests/worker3d` (IM07) |
 | H15 preview failure fails build | done | `render_preview` isolated, `BuildRun.preview` | `…::test_preview_failure_keeps_valid_model` (RI09) |
-| H16 failure taxonomy / infinite retry | partial | bounded auto-retry; typed worker failure codes; full taxonomy → Phase 2 | `…::test_automatic_retries_are_bounded`, RI17 |
+| H16 failure taxonomy / infinite retry | done | `coordinator/errors.py` (item vs resource scope), bounded auto-retry with per-resource backoff | `regression/test_cancel_retry.py`, RI17 |
 | H17 multi-file import bounds/collisions | done | `atlas.preflight_decoded`, duplicate-name rejection, upload ids | IM04, IM05 |
 | H18 late exporter discovery | done | command-time + build preflight | `…::test_missing_exporter_rejected_before_sampling` |
-| H19 locks / Docker / typegen | open → Phase 6 / Phase 2 (typegen) | | EX11, EX14 |
+| H19 locks / Docker / typegen | open → Phase 6 | | EX11, EX14 |
 | RI06 lost submit | done (baseline) | ComfyUI deterministic ids; worker3d execution ids | `contract/test_recovery.py`, RI12 |
 | RI11 malformed/stale acks | done | `gpu.GpuLane` validates epoch/active/admitting/token | `unit/test_runtime_contracts.py` |
 | RI12 spooled result after restart | done | worker3d spool + `execute()` reconcile-by-id | `…::test_spooled_result_recovered…`, `…::test_lost_execution…` |
@@ -39,4 +39,29 @@ stated); `partial` = see note; `open` = not yet. GPU/Docker evidence is recorded
 | IM10 legacy Batch → Job | done (read) | `bat_` ids stay Job ids under `batches/`; new Jobs `job_` under `jobs/`; grouping Batches `bch_` |
 | IM11 backup/restore | partial | `assetstudio project backup / restore-verify`; migrate plan/apply → Phase 4 (style/config v2) |
 
-All other IDs (JB*, ST*, ML*, EX*) are open; see TODO.md phases.
+## Jobs, Batches, stage-first execution (JB)
+
+All in `tests/contract/test_jobs_batches.py` (SIMULATED engines with real load counters for aux/worker3d) unless noted.
+
+| ID | Status | Test |
+|---|---|---|
+| JB01 saving Jobs + Batch = no inference | done | `test_saving_jobs_and_batch_runs_no_inference`, e2e `test_ui_batches.py` |
+| JB02 membership copies nothing | done | `test_saving_jobs_and_batch_runs_no_inference` |
+| JB03 mixed kinds, split passes | done | `test_batch_start_groups_enhancement…`, `test_grouped_3d_builds…` |
+| JB04 same plan twice = one run; one owner per Job | done | `test_same_plan_twice_is_one_run…` |
+| JB05 one VLM residency for ≥3 Jobs | done (simulated counters) | `test_batch_start_groups_enhancement…` (vlm +1 load for 6 tasks of 3 Jobs) |
+| JB06 image residency across Jobs | done (simulated) | `test_cross_job_confirmation…` (one gpu0 pass, 5 tasks, 3 Jobs) |
+| JB07 profiles split passes | done | `test_different_speed_profiles_split_image_passes` |
+| JB08 no image task before confirmation | done | `test_batch_start_groups_enhancement…` |
+| JB09 waves bind selected revisions only | done | `test_cross_job_confirmation…` |
+| JB10 grouped QA + 3D stages | done | `test_cross_job_confirmation…` (one VLM QA pass), `test_grouped_3d_builds…` (one trellis + one bake pass) |
+| JB11 GPU1 never overlaps | done | `test_grouped_3d_builds…` (pass spans) |
+| JB12 isolated failure continues others | done | `test_grouped_3d_builds…` (1 failed, 5 valid, counts) |
+| JB13 membership change → later run | done | `test_membership_changes…` |
+| JB14 partial close, later run skips done work | done | `test_membership_changes…` |
+| JB15 fairness bound | done | `test_pass_fairness_bounds_consecutive_passes` |
+| JB16 loads ≠ grants; unavailable shown | done | pass `measured.model_loads` null for ComfyUI; lane grants separate |
+| IM10 legacy batches are Jobs | done | `test_legacy_batches_are_jobs_not_groups` |
+
+GPU evidence for JB05/JB06/JB10 on real models: **not run yet** (Phase 6 real-host scenario).
+All other IDs (ST*, ML*, EX*) are open; see TODO.md phases.

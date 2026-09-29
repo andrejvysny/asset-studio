@@ -8,7 +8,8 @@ browser ──HTTP/SSE──> studio (FastAPI) ── coordinator lanes ──> 
                          │                                   └─> worker3d (GPU1) TRELLIS.2 + DINOv3, GLB export
                          ├── ProjectStore ──> project root (portable: YAML + JSON + blobs/sha256)
                          ├── AssetIndex (SQLite, instance dir, rebuildable)
-                         └── Journal (SQLite, instance dir, live operations + command idempotency)
+                         └── Journal (SQLite, instance dir: stage tasks, model passes, command intents,
+                                      scoped idempotency, GPU lease epochs; backed up with the project)
 ```
 
 Dependency direction: `assetstudio_core` ← `assetstudio_storage` ← `assetstudio_processing` ← `assetstudio_server`.
@@ -28,42 +29,98 @@ The core imports no FastAPI, CUDA or ComfyUI.
 | Data | Where |
 |---|---|
 | project configuration | `studio.yaml` (revisioned; every edit names its expected revision) |
-| effective config per batch item | `config/revisions/<sha256>.json` (immutable snapshot) |
-| requested assets | `shotlist.yaml` (status derived from batches + publications) |
+| effective config per Job item | `config/revisions/<sha256>.json` (immutable snapshot) |
+| requested assets | `shotlist.yaml` (status derived from Jobs + publications) |
 | assets and versions | `manifests/<asset>.json` (current pointer, conditional update) + `versions/<asset>/<ver>.json` (immutable) |
 | bytes | `blobs/sha256/ab/cd/<sha256>` (immutable, deduplicated) + `artifacts/<id>.json` (role, lineage, provenance) |
-| batch history | `batches/<id>/{batch.json,items,prompts,candidates,qa,decisions,builds}` |
-| live dispatch | instance journal (SQLite, same host only) |
+| Job history | `jobs/<job_…>/{job.json,items,prompts,candidates,qa,decisions,builds}`; Jobs created before the rename keep their `bat_…` id under `batches/<bat_…>/{batch.json,…}` (read in place, never moved) |
+| Batches (groups of Jobs) | `execution_batches/<bch_…>/batch.json` (membership, revision, run ids) |
+| runs, plans, waves | `runs/<brn_…>.json` (frozen selection), `runs/plans/<sel_…>.json` (frozen, hashed), `waves/<wav_…>.json` |
+| readable names | `names/<name_id>.json` (atomic create-if-absent: authoritative uniqueness; the index is only a cache) |
+| publication / import receipts | `publications/<op>.json`, `imports/<imp>.json` (written before any cleanup) |
+| live dispatch | instance journal (SQLite, same host only): the ONLY authority for task state |
 | search | instance index (SQLite, rebuilt from manifests: `storage:rebuild-index`) |
+
+## Jobs, Batches, runs
+
+- **Job** = a configured production workflow of one or more items of one kind/recipe (formerly "batch"). Saving a
+  Job never starts inference. `Save and run` / `:run` starts a *standalone run* through the same planner.
+- **Batch** = a named group of Jobs of one project. It owns no item content, history, style or approvals; editing it
+  never starts inference and affects only the NEXT run.
+- **Run** = a frozen selection: `:plan` stores a hashed plan (what would be enhanced / waits at a gate / is excluded
+  and why); `:start` with that plan id + hash creates the run (id derived from the plan, so starting it twice yields
+  one run). Starting authorizes enhancement only, up to the first human gate.
+- **Waves** = gate actions on a run across Jobs (`:confirm-prompts`, `:approve-candidates`, `:build-approved`,
+  `:accept-builds`, `:publish`). Each binds the exact then-current revisions; every unit still gets its own immutable
+  decision record. Unselected rows stay where they are and can join a later wave or a later run.
+- A Job in an open run cannot be started elsewhere (409); its Job-level actions become scoped continuations of that run.
 
 ## Lifecycle
 
-Per item, never batch-wide: brief → enhanced prompt revision → **human confirms exact revision** → candidate set
+Per item, never Job-wide: brief → enhanced prompt revision → **human confirms exact revision** → candidate set
 (+ advisory QA) → **human approves exact candidate** (set id, candidate id, sha256 re-hashed from stored bytes, prompt
-revision, QA evaluation, item revision) → build run → **human accepts final result** (structural validation mandatory)
-→ publication (per asset, idempotent, derived ids). Regeneration creates a new prompt revision and candidate set for
-selected rows only; history is never overwritten.
+revision, QA evaluation, item revision) → build run (attached to the item when created) → **human accepts final
+result** (structural validation mandatory) → publication (per asset, idempotent, derived ids, receipt). Regeneration
+creates a new prompt revision and candidate set for selected rows only; history is never overwritten.
 
-## Scheduling and recovery
+## Scheduling (stage-first, model-aware, across Jobs)
 
-- One coordinator thread per lane (`gpu0`, `gpu1`, `cpu`); affinity-preferring claims (bounded streak).
-- Operations are journaled before dispatch (`held` → items marked → `queued`), so a claim never races item state.
-- ComfyUI prompts use deterministic UUIDs (`uuid5(op, item, idx)`): after a lost response or restart the handler looks
-  the prompt up in `/history` and `/queue` before any resubmission. Cancel = dequeue by id + targeted `/interrupt`.
-- On restart, `running` operations become `reconciling` and resume idempotently; blocked retryable work is retried.
-- GPU1 ownership: every worker not verified-released must acknowledge `/unload` with `{loaded: false, owner_token}`.
-  Timeouts, resets, HTTP errors, malformed bodies or `loaded: true` leave ownership **unknown** and block dispatch
-  until an operator runs the lane reset (Runtime screen).
+- Work is a **StageTask** per (item, stage, exact inputs): `enhance`, `generate`, `mask`, `qa_vlm`, `qa_finalize`,
+  `segment`, `sample`, `bake`, `finalize`, `derive`, `preview`, `publish`. Logical keys make creation idempotent.
+- Each task carries a **residency signature**: backend + exact model identities from the pinned lock + weight-changing
+  modifiers (e.g. `comfyui:qwen_image_2512@…|speed=lightning_8step@…`, `aux.vlm:…`, `worker3d.trellis:…`,
+  `worker3d.bake:clean`). Prompts, seeds, kinds, categories and Job ids are never part of it.
+- Lanes `gpu0`, `gpu1` (one thread each) and `cpu` (bounded pool) repeatedly pick a residency group of ready tasks
+  across ALL Jobs/runs and execute it as one **ModelPass** under one resource grant. A lone Batch never reloads a model
+  because it crossed a Job boundary. GPU0 and GPU1 run independently; GPU1 never overlaps two owners.
+- Coalescing: `mask`/`qa_vlm` wait for a window (8 tasks), until no generation is pending, or 45 s — so QA is one
+  BiRefNet pass and one VLM pass over many candidates instead of alternating models per candidate.
+- Fairness: at most 4 consecutive passes of one residency while others wait; ≤64 tasks and ≤30 min per pass;
+  boundaries fall between tasks, never inside one. 3D builds decompose into segment → sample → bake → finalize, so
+  approved 3D items of several Jobs are segmented, then sampled, then baked in grouped passes.
+- Evidence: each pass records its lane, residency, tasks, Jobs, close reason, and the worker's model-load counters
+  before/after (`aux`: vlm/birefnet, `worker3d`: trellis2). ComfyUI exposes no load counter: shown as *unavailable*.
+  Resource grants (lane history) are reported separately from model loads.
+
+## Recovery
+
+- **Journal is the only task authority.** Items store product outcomes only; the item view derives task state from
+  the journal (legacy items fall back to their recorded refs), so there is no item/journal dual-write gap.
+- **Commands**: validate + plan (no writes) → durable intent → idempotent effects (derived ids, logical task keys,
+  guarded item mutations) → recorded response. Intents left open by a crash are replayed at startup. Idempotency keys
+  are scoped by project + action and bound to the whole request (including target ids).
+- **Downstream**: a stage's success and its required follow-up tasks (e.g. generation → QA) commit in ONE journal
+  transaction; startup also repairs any succeeded task whose downstream is not marked created.
+- **Cancel/pause**: intent (`control`) is separate from execution state, survives restarts and is never cleared by a
+  retry; state transitions are conditional. Cancelling a run affects only its tasks. Pause admits nothing new.
+- **Retries**: explicit retry = same logical inputs; automatic retries of transiently blocked work are bounded
+  (6 attempts / 2 h) and back off per resource; an explicit retry bypasses the backoff.
+- **Failure scope** (`coordinator/errors.py`): invalid input/output → that item fails, others continue; engine
+  unavailable / ownership unknown → the resource blocks (pass stops, other lanes continue); corrupt artifact → blocks
+  dependants with an explicit repair action; unexpected exception → that task fails with its type, lane keeps serving.
+- **Engines**: ComfyUI prompts use deterministic ids (looked up before any resubmission). worker3d executions use
+  ids chosen and persisted by the Studio before submission; results are spooled on a persistent volume until the
+  Studio acknowledges durable ingestion; work that died with the worker is `lost` and needs an explicit new build.
+- **GPU1 ownership**: a grant uses a new monotonic epoch (persisted). Other workers must drain — stop admitting, wait
+  until NO GPU work is queued or running (sampling, export, transfers) — and acknowledge
+  `{loaded: false, active: 0, admitting: false, epoch, owner_token}`. Anything else (timeout, reset, malformed, stale
+  epoch, active work) leaves ownership unknown until an operator reset. Requests carry the epoch; stale ones get 409.
 
 ## 3D path (model3d.default)
 
 approved candidate → foreground mask (QA mask reused when its lineage is the approved artifact, else BiRefNet on GPU1)
-→ RGBA cut-out → `worker3d /generate` (TRELLIS.2 `1024_cascade` by default, DINOv3 image encoder) → raw intermediate
-stored as a `raw` artifact (retention `raw`) → `worker3d /export` → GLB → structural checks (container, reload, finite
+→ RGBA cut-out → worker3d `generate` execution (TRELLIS.2 `1024_cascade` by default, DINOv3 image encoder) → raw
+intermediate validated on CPU (`assetstudio_processing/raw_npz.py`, shared with the worker) and stored as a `raw`
+artifact (retention `raw`) → worker3d `export` execution → GLB → structural checks on the delivered bytes (container, reload, finite
 vertices, indices, UVs, base-colour texture) + advisory triangle budget (requested → effective → actual) → CPU preview
-(4 views, `assetstudio_processing.render`) → final human accept → publish. Raw/cut-out/mask stay on the build run
+(4 views, `assetstudio_processing.render`; a preview failure never invalidates the model and can be retried alone)
+→ final human accept → publish. Each stage commits a checkpoint on the BuildRun; building the same approval again
+after a failed attempt inherits its segment/sample checkpoints (no second TRELLIS.2 run). Raw/cut-out/mask stay on the build run
 (`sources.intermediates` in the version record) and are not shipped as version files. **Re-export** (`:reexport`)
-creates a new build run from the stored raw with changed exporter/texture/triangles/remesh — no resampling.
+creates a new build run from the stored raw (also of a failed attempt) with changed exporter/texture/triangles/remesh
+— no resampling. Triangle target precedence: re-export override > explicitly configured parameter > category budget
+maximum > recipe default, clamped only to the exporter range; min/max stay advisory checks. Snapshots written by
+a70232b (`model3d.default` v1 with other parameters) are refused with an explicit fork request.
 
 Exporters: `clean` (default) is a port of o-voxel `to_glb` whose texture-space rasteriser is plain PyTorch; the image
 contains no NVIDIA non-commercial code (a stub satisfies o_voxel's import). `research` uses upstream nvdiffrast v0.4.0

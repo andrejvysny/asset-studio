@@ -72,7 +72,7 @@ export function QaRules() {
             <button className="btn btn-primary" disabled={!dirty || act.busy} onClick={() => void act.run(async () => { await cfg.save(draft); setDraft(null); })}>
               Save rules</button>
             <button className="btn" disabled={!dirty} onClick={() => setDraft(clone(cfg.data!.config))}>Discard</button>
-            <span className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>Edits apply to new batches; existing evaluations keep the rules they ran with.</span>
+            <span className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>Edits apply to new Jobs; existing evaluations keep the rules they ran with.</span>
           </div>
           <ErrorLine error={act.error} />
         </>}

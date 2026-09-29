@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { ErrorLine, Loading, PageHead } from "../components/ui";
-import { type Json, key, KIND_LABEL, KINDS, type Kind, P, type RecipeInfo, send } from "../lib/api";
+import { J, type Json, key, KIND_LABEL, KINDS, type Kind, type RecipeInfo, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useConfig, useProject } from "../lib/project";
 
@@ -18,7 +18,7 @@ function show(v: Json): string {
   return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
 
-export function NewBatch() {
+export function NewJob() {
   const { id } = useProject();
   const nav = useNavigate();
   const [sp] = useSearchParams();
@@ -41,7 +41,7 @@ export function NewBatch() {
   if (!cfg.data) return <Loading what="configuration" />;
   return (
     <div className="content" style={{ maxWidth: 1080 }}>
-      <PageHead sub="New batch" title="What are you making?" />
+      <PageHead sub="New Job" title="What are you making?" />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
         {KINDS.map((k) => {
           const r = caps.data?.recipes.find((x) => x.kind === k);
@@ -97,17 +97,20 @@ export function NewBatch() {
           )}
         </div>
       </div>
-      <div className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 16, gap: 14 }}>
-        <button className="btn btn-primary" disabled={act.busy || items.length === 0 || !title.trim() || !!blocked}
-          onClick={() => void act.run(async () => {
-            const out = await send<{ batch: { id: string } }>("POST", `${P(id)}/batches`, {
-              title: title.trim(), category_id: cat, kind: catKind ? null : kind, idempotency_key: idem,
-              source: target ? "new version" : `pasted · ${items.length} lines`,
-              items: items.map((i) => ({ ...i, target_asset_id: target })) });
-            nav(`/p/${id}/batches/${out.batch.id}`);
-          })}>Create batch + enhance {items.length} prompts</button>
+      <div className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 16, gap: 14, flexWrap: "wrap" }}>
+        {([false, true] as const).map((run) => (
+          <button key={String(run)} className={`btn${run ? "" : " btn-primary"}`}
+            disabled={act.busy || items.length === 0 || !title.trim() || (run && !!blocked)}
+            onClick={() => void act.run(async () => {
+              const out = await send<{ job: { id: string } }>("POST", J(id), {
+                title: title.trim(), category_id: cat, kind: catKind ? null : kind, idempotency_key: idem, run,
+                source: target ? "new version" : `pasted · ${items.length} lines`,
+                items: items.map((i) => ({ ...i, target_asset_id: target })) });
+              nav(`/p/${id}/jobs/${out.job.id}`);
+            })}>{run ? `Save and run (enhance ${items.length} prompts)` : `Save Job (${items.length} items)`}</button>))}
         <span className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>
-          Enhances every brief with the local text model, then stops for your review. No images are generated yet.</span>
+          Save keeps the Job ready without loading any model — group it into a Batch to run several Jobs together.
+          Save and run enhances every brief with the local text model, then stops for your review.</span>
       </div>
       <ErrorLine error={act.error} />
     </div>

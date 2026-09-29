@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { Dialog, ErrorLine, OK, QaPill, qaColor, WARN } from "../../components/ui";
-import { artifactUrl, type CandidateView, type ItemView, key, P, send } from "../../lib/api";
+import { artifactUrl, type CandidateView, type ItemView, J, key, send } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
-import { ActionBar, type TabProps } from "./BatchWorkspace";
+import { ActionBar, type TabProps } from "./JobWorkspace";
 
 type Filter = "all" | "undecided" | "approved" | "regen";
 interface Proposal { item_id: string; name: string; candidate_set_id?: string; candidate_id?: string; image_sha256?: string;
@@ -21,12 +21,12 @@ function approvedCandidate(i: ItemView): string | null {
   return b?.candidate_id ?? null;
 }
 
-export function ApproveTab({ batch, reload }: TabProps) {
+export function ApproveTab({ job, reload }: TabProps) {
   const { id } = useProject();
   const nav = useNavigate();
   const [sp, setSp] = useSearchParams();
   const filter = (sp.get("filter") as Filter | null) ?? "all";
-  const rows = useMemo(() => batch.items.filter((i) => i.candidate_set && matches(filter, i)), [batch.items, filter]);
+  const rows = useMemo(() => job.items.filter((i) => i.candidate_set && matches(filter, i)), [job.items, filter]);
   const activeId = sp.get("item") ?? rows[0]?.id;
   const active = rows.find((r) => r.id === activeId) ?? rows[0];
   const focusIdx = Number(sp.get("cand") ?? "0");
@@ -35,7 +35,7 @@ export function ApproveTab({ batch, reload }: TabProps) {
   const [override, setOverride] = useState<{ item: ItemView; cand: CandidateView } | null>(null);
   const [reason, setReason] = useState("");
   const act = useAction();
-  const base = `${P(id)}/batches/${batch.id}`;
+  const base = `${J(id)}/${job.id}`;
   const setFocus = (item: string, cand: number) => setSp((p) => { const n = new URLSearchParams(p); n.set("item", item);
     n.set("cand", String(cand)); return n; }, { replace: true });
 
@@ -92,11 +92,11 @@ export function ApproveTab({ batch, reload }: TabProps) {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const approved = batch.items.filter((i) => i.approval && !i.regen_requested);
-  const regen = batch.items.filter((i) => i.regen_requested && !i.tasks.generate?.state.match(/queued|running/));
-  const undecided = batch.items.filter((i) => i.candidate_set && !i.approval && !i.regen_requested);
-  const buildable = batch.items.filter((i) => i.legal.build);
-  const counts: Record<Filter, number> = { all: batch.items.filter((i) => i.candidate_set).length,
+  const approved = job.items.filter((i) => i.approval && !i.regen_requested);
+  const regen = job.items.filter((i) => i.regen_requested && !i.tasks.generate?.state.match(/queued|running/));
+  const undecided = job.items.filter((i) => i.candidate_set && !i.approval && !i.regen_requested);
+  const buildable = job.items.filter((i) => i.legal.build);
+  const counts: Record<Filter, number> = { all: job.items.filter((i) => i.candidate_set).length,
     undecided: undecided.length, approved: approved.length, regen: regen.length };
 
   return (
@@ -226,8 +226,8 @@ export function ApproveTab({ batch, reload }: TabProps) {
       )}
       <div style={{ gridColumn: "1 / -1", margin: "0 -24px -24px" }}>
         <ActionBar note={`${approved.length} approved · ${regen.length} to regenerate · ${undecided.length} undecided`}
-          sub={batch.recipe.build_available ? "Undecided rows stay here; build them in a later pass."
-            : `${batch.recipe.build_label} build unavailable: ${batch.recipe.build_blocked_reason}`}>
+          sub={job.recipe.build_available ? "Undecided rows stay here; build them in a later pass."
+            : `${job.recipe.build_label} build unavailable: ${job.recipe.build_blocked_reason}`}>
           {regen.length > 0 && <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => {
             const res = await send<{ results: Outcome[] }>("POST", `${base}:regenerate`, { idempotency_key: key(),
               items: regen.map((i) => ({ item_id: i.id, expected_item_revision: i.revision })) });
@@ -235,14 +235,14 @@ export function ApproveTab({ batch, reload }: TabProps) {
             const bad = res.results.filter((r) => !r.ok);
             if (bad.length) throw new Error(bad.map((b) => b.message).join("; "));
           })}>Regenerate {regen.length}</button>}
-          <button className="btn btn-primary" disabled={act.busy || !batch.recipe.build_available || buildable.length === 0}
-            title={batch.recipe.build_available ? "" : batch.recipe.build_blocked_reason}
+          <button className="btn btn-primary" disabled={act.busy || !job.recipe.build_available || buildable.length === 0}
+            title={job.recipe.build_available ? "" : job.recipe.build_blocked_reason}
             onClick={() => void act.run(async () => {
               await send("POST", `${base}:build-approved`, { idempotency_key: key(), items: buildable.map((i) => ({
                 item_id: i.id, approval_id: i.approval, expected_item_revision: i.revision })) });
               reload();
-              nav(`/p/${id}/batches/${batch.id}/build`);
-            })}>{batch.recipe.build_label} for {buildable.length} approved</button>
+              nav(`/p/${id}/jobs/${job.id}/build`);
+            })}>{job.recipe.build_label} for {buildable.length} approved</button>
         </ActionBar>
       </div>
     </div>

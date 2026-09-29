@@ -1,21 +1,29 @@
-"""Build and publication commands: explicit approved inputs in, durable operations out."""
+"""Build and publication commands: exact approved inputs in, BuildRuns attached at creation, staged tasks out."""
 from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.domain import AssetManifest, JobItem
+from assetstudio_core.domain import AssetManifest, BuildRun, JobItem
+from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import name_parts
 from assetstudio_core.naming import render_name, variant_letters
 from assetstudio_core.recipes import RECIPES, legacy_variant, validate_parameters
 from assetstudio_storage.project import manifest_key
+from assetstudio_storage.publication import name_key
 from pydantic import BaseModel, Field
 
+from ..coordinator.builds.common import create_run, reusable_qa_mask
+from ..coordinator.stages import STAGES, new_task
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
-from .prompts import ItemRef, _outcome
-from .records import cmd_payload, load_build, load_item, load_job, mutate_item, set_task
+from ..taskstore import Busy
+from . import commands
+from .prompts import ItemRef, job_of
+from .records import load_build, load_decision, load_item, load_job
+from .runs import active_run_for, record_wave
 from .runtime import build_readiness
+from .taskview import busy, item_tasks
 
 
 class BuildItem(ItemRef):
@@ -23,7 +31,7 @@ class BuildItem(ItemRef):
 
 
 class BuildApproved(BaseModel):
-    items: list[BuildItem] = Field(min_length=1, max_length=200)
+    items: list[BuildItem] = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
@@ -36,7 +44,7 @@ class ReexportItem(ItemRef):
 
 
 class Reexport(BaseModel):
-    items: list[ReexportItem] = Field(min_length=1, max_length=200)
+    items: list[ReexportItem] = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
@@ -47,110 +55,221 @@ class PublishItem(ItemRef):
 
 
 class Publish(BaseModel):
-    items: list[PublishItem] = Field(min_length=1, max_length=200)
+    items: list[PublishItem] = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=8, max_length=100)
 
 
-def build_approved(studio: Studio, ctx: ProjectContext, batch_id: str, req: BuildApproved) -> dict[str, Any]:
-    ctx.require_writable()
-    batch, _ = load_job(ctx.store, batch_id)
-    recipe = RECIPES[batch.recipe_id]
-    gate = build_readiness(studio, recipe.id)
-    if gate["state"] != "ready":
-        raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
-    prior = studio.journal.command_result(ctx.id, "build_approved", req.idempotency_key,
-                                                 cmd_payload(req, batch_id))
-    if prior is not None:
-        return prior
-    results, eligible = [], []
-    exporters = (studio.worker3d.health().get("exporters") or {}) if recipe.build == "model3d" and studio.worker3d \
-        else {}
+class RetryPreview(BaseModel):
+    items: list[ItemRef] = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=8, max_length=100)
+
+
+def _fail(results: list[dict[str, Any]], unit: ItemRef, jid: str | None, e: ApiError) -> None:
+    results.append({"job_id": jid, "item_id": unit.item_id, "ok": False, "code": e.code, "message": e.message})
+
+
+def _exporters(studio: Studio) -> dict[str, Any]:
+    return (studio.worker3d.health().get("exporters") or {}) if studio.worker3d is not None else {}
+
+
+def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: BuildApproved,
+                run_id: str | None) -> dict[str, Any]:
+    results, units, exporters = [], [], None
+    if job_id is not None:  # a Job-level command on a recipe that cannot build is refused as a whole
+        recipe = RECIPES[load_job(ctx.store, job_id)[0].recipe_id]
+        gate = build_readiness(studio, recipe.id)
+        if gate["state"] != "ready":
+            raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
     for b in req.items:
-        def apply(item: JobItem, b: BuildItem = b) -> None:
+        jid = None
+        try:
+            jid = job_of(b, job_id)
+            job, _ = load_job(ctx.store, jid)
+            recipe = RECIPES[job.recipe_id]
+            gate = build_readiness(studio, recipe.id)
+            if gate["state"] != "ready":
+                raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
+            item, _ = load_item(ctx.store, jid, b.item_id)
             snap = ctx.store.read_snapshot(item.snapshot_sha)
             if (variant := legacy_variant(snap)) is not None:
                 raise ApiError(422, "legacy_recipe", f"recorded with {variant}; fork this Job to the current "
                                                      "recipe before building (the old snapshot stays unchanged)")
-            if recipe.build == "model3d" and not exporters.get(snap["parameters"].get("exporter", "")):
-                raise ApiError(422, "exporter_unavailable",
-                               f"exporter {snap['parameters'].get('exporter')!r} is not installed in the 3D worker")
+            if recipe.build == "model3d":
+                exporters = _exporters(studio) if exporters is None else exporters
+                if not exporters.get(snap["parameters"].get("exporter", "")):
+                    raise ApiError(422, "exporter_unavailable", f"exporter {snap['parameters'].get('exporter')!r} "
+                                                                "is not installed in the 3D worker")
+            if item.revision != b.expected_item_revision:
+                raise ApiError(409, "stale_item", f"{item.name} changed (revision {item.revision}); reload")
             if item.approval != b.approval_id or item.regen_requested:
                 raise ApiError(409, "stale_approval", "the approval changed; reload")
             if item.accepted_build is not None:
                 raise ApiError(409, "accepted", "a build is already accepted")
-            if item.tasks.get("build") and item.tasks["build"].state in ("queued", "running"):
+            if busy(item_tasks(studio, ctx.id, item), "build"):
                 raise ApiError(409, "busy", "a build is already running")
-        out = _outcome(studio, ctx, batch_id, b.item_id, apply, b.expected_item_revision)
-        results.append(out)
-        if out["ok"]:
-            eligible.append({"item_id": b.item_id, "approval_id": b.approval_id})
-    lane = "gpu1" if "birefnet" in recipe.build_models else "cpu"  # may need segmentation when QA had no mask
-    response = {"results": results,
-                "operation": _enqueue_build(studio, ctx, batch_id, recipe, eligible, req.idempotency_key, lane)}
-    studio.journal.record_command(ctx.id, "build_approved", req.idempotency_key, cmd_payload(req, batch_id),
-                                  response)
-    return response
+        except ApiError as e:
+            _fail(results, b, jid, e)
+            continue
+        units.append({"job_id": jid, "item_id": b.item_id, "approval_id": b.approval_id, "build": recipe.build,
+                      "run_id": run_id or active_run_for(studio, ctx, jid)})
+        results.append({"job_id": jid, "item_id": b.item_id, "ok": True})
+    return {"units": units, "results": results}
 
 
-def reexport(studio: Studio, ctx: ProjectContext, batch_id: str, req: Reexport) -> dict[str, Any]:
+def build_chain(studio: Studio, ctx: ProjectContext, run: BuildRun, unit: dict[str, Any],
+                wave_id: str | None) -> list[Any]:
+    """Stage tasks for one build run. Segmentation runs on GPU1 only when no reusable QA mask exists."""
+    common = {"project_id": ctx.id, "job_id": unit["job_id"], "item_id": unit["item_id"], "input_key": run.id,
+              "inputs": {"build_run_id": run.id}, "run_id": unit.get("run_id"), "wave_id": wave_id}
+    item, _ = load_item(ctx.store, unit["job_id"], unit["item_id"])
+    snap = ctx.store.read_snapshot(item.snapshot_sha)
+    out: list[Any] = []
+
+    def add(stage: str, **kw: Any) -> None:
+        deps = [out[-1].id] if out else []
+        out.append(new_task(studio, STAGES[stage], deps=deps, **common, **kw))
+    needs_mask = run.build == "model3d" or run.build == "sprite" or (
+        run.build == "icon" and snap["parameters"].get("background") == "transparent")
+    if run.kind == "reexport":
+        add("bake", resident=_bake_res(studio, run, snap))
+        add("finalize")
+        return out
+    if needs_mask and "segment" not in run.checkpoints:
+        bound = load_decision(ctx.store, unit["job_id"], run.inputs["approval_id"]).bound
+        reusable = reusable_qa_mask(ctx, unit["job_id"], bound, ctx.store.artifact(bound["artifact_id"]))
+        if reusable is None:
+            add("segment")
+        else:  # the QA mask of exactly these bytes is reused: no GPU work, no model load
+            add("segment", lane="cpu", resident="cpu")
+    if run.build == "model3d":
+        if "sample" not in run.checkpoints:
+            add("sample")
+        add("bake", resident=_bake_res(studio, run, snap))
+        add("finalize")
+    else:
+        add("derive")
+    return out
+
+
+def _bake_res(studio: Studio, run: BuildRun, snap: dict[str, Any]) -> str:
+    from ..coordinator.stages import residency
+
+    exporter = (run.inputs.get("overrides") or {}).get("exporter") or snap["parameters"].get("exporter", "clean")
+    return residency(studio, "bake", exporter=exporter)
+
+
+@commands.replayable("build_approved")
+def _build_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
+    results = {(r["job_id"], r["item_id"]): r for r in plan["results"]}
+    created: list[str] = []
+    wave_id = plan.get("wave_id")
+    for u in plan["units"]:
+        item, _ = load_item(ctx.store, u["job_id"], u["item_id"])
+        if item.approval != u["approval_id"]:
+            results[(u["job_id"], u["item_id"])] = {**u, "ok": False, "code": "stale_approval",
+                                                    "message": "the approval changed before the build started"}
+            continue
+        run = create_run(studio, ctx, u["job_id"], item, u["approval_id"], u["build"], cid,
+                         reexport_from=u.get("reexport_from"), overrides=u.get("overrides"))
+        try:
+            created += studio.journal.tasks.create(build_chain(studio, ctx, run, u, wave_id), cid)
+        except Busy as e:
+            results[(u["job_id"], u["item_id"])] = {**u, "ok": False, "code": "busy", "message": str(e)}
+            continue
+        results[(u["job_id"], u["item_id"])] = {**results[(u["job_id"], u["item_id"])], "build_run_id": run.id}
+    record_wave(studio, ctx, plan, cid, "build")
+    studio.events.publish("tasks", project_id=ctx.id)
+    return {"command_id": cid, "results": list(results.values()), "tasks": created,
+            "operation": {"id": cid, "kind": "build", "tasks": created} if created else None}
+
+
+def build_approved(studio: Studio, ctx: ProjectContext, job_id: str | None, req: BuildApproved,
+                   run_id: str | None = None) -> dict[str, Any]:
+    body = {"job_id": job_id, "run_id": run_id, **req.model_dump(mode="json")}
+
+    def plan(cid: str) -> dict[str, Any]:
+        return {**_plan_build(studio, ctx, job_id, req, run_id), "run_id": run_id,
+                "wave_id": derived_id("wav", cid) if run_id else None}
+    return commands.execute(studio, ctx, "build_approved", req.idempotency_key, body, plan)
+
+
+def reexport(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Reexport) -> dict[str, Any]:
     """New build runs from stored raw intermediates with changed export parameters; TRELLIS.2 is not resampled."""
-    ctx.require_writable()
-    batch, _ = load_job(ctx.store, batch_id)
-    recipe = RECIPES[batch.recipe_id]
-    if recipe.build != "model3d":
-        raise ApiError(422, "reexport_unsupported", f"{recipe.label} builds have no raw intermediate to re-export")
-    gate = build_readiness(studio, recipe.id)
-    if gate["state"] != "ready":
-        raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}", {"state": gate["state"]})
     for it in req.items:
         if bad := [k for k in it.overrides if k not in REEXPORT_KEYS]:
             raise ApiError(422, "invalid_parameters", f"not re-exportable: {bad}; allowed {list(REEXPORT_KEYS)}")
-        if errors := validate_parameters(recipe, it.overrides):
-            raise ApiError(422, "invalid_parameters", "; ".join(f"{k}: {m}" for k, m in errors))
-    prior = studio.journal.command_result(ctx.id, "reexport", req.idempotency_key,
-                                                 cmd_payload(req, batch_id))
-    if prior is not None:
-        return prior
-    results, eligible = [], []
-    for r in req.items:
-        run, _ = load_build(ctx.store, batch_id, r.build_run_id)
+    body = {"job_id": job_id, **req.model_dump(mode="json")}
 
-        def check(item: JobItem, r: ReexportItem = r, run: Any = run) -> None:
-            if run.item_id != item.id or "raw" not in run.artifacts:
-                raise ApiError(409, "no_raw", "that build has no stored raw intermediate for this item")
-            if item.approval != run.inputs.get("approval_id") or item.regen_requested:
-                raise ApiError(409, "stale_approval", "the approval changed since that build; build again")
-            if item.tasks.get("build") and item.tasks["build"].state in ("queued", "running"):
-                raise ApiError(409, "busy", "a build is already running")
-        out = _outcome(studio, ctx, batch_id, r.item_id, check, r.expected_item_revision)
-        results.append(out)
-        if out["ok"]:
-            eligible.append({"item_id": r.item_id, "approval_id": run.inputs["approval_id"],
-                             "reexport_from": run.id, "overrides": r.overrides})
-    response = {"results": results, "operation": _enqueue_build(studio, ctx, batch_id, recipe, eligible,
-                                                                  req.idempotency_key, "gpu1")}
-    studio.journal.record_command(ctx.id, "reexport", req.idempotency_key, cmd_payload(req, batch_id),
-                                  response)
-    return response
-
-
-def _enqueue_build(studio: Studio, ctx: ProjectContext, batch_id: str, recipe: Any, eligible: list[dict[str, Any]],
-                   key: str, lane: str) -> dict[str, Any] | None:
-    if not eligible:
-        return None
-    op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="build", lane=lane,
-                                         affinity=f"build.{recipe.build}",
-                                         payload={"batch_id": batch_id, "items": eligible},
-                                         idempotency_key=key, hold=True)
-    if created:
-        for e in eligible:
-            mutate_item(studio, ctx, batch_id, e["item_id"], lambda x: set_task(x, "build", op.id, "queued"))
-        studio.journal.release(op.id)
-    return op.public()
+    def plan(cid: str) -> dict[str, Any]:
+        results, units = [], []
+        for r in req.items:
+            jid = None
+            try:
+                jid = job_of(r, job_id)
+                job, _ = load_job(ctx.store, jid)
+                recipe = RECIPES[job.recipe_id]
+                if recipe.build != "model3d":
+                    raise ApiError(422, "reexport_unsupported",
+                                   f"{recipe.label} builds have no raw intermediate to re-export")
+                if errors := validate_parameters(recipe, r.overrides):
+                    raise ApiError(422, "invalid_parameters", "; ".join(f"{k}: {m}" for k, m in errors))
+                gate = build_readiness(studio, recipe.id)
+                if gate["state"] != "ready":
+                    raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}")
+                item, _ = load_item(ctx.store, jid, r.item_id)
+                run, _ = load_build(ctx.store, jid, r.build_run_id)
+                if item.revision != r.expected_item_revision:
+                    raise ApiError(409, "stale_item", f"{item.name} changed; reload")
+                if run.item_id != item.id or "raw" not in run.artifacts:
+                    raise ApiError(409, "no_raw", "that build has no stored raw intermediate for this item")
+                if item.approval != run.inputs.get("approval_id") or item.regen_requested:
+                    raise ApiError(409, "stale_approval", "the approval changed since that build; build again")
+                if busy(item_tasks(studio, ctx.id, item), "build"):
+                    raise ApiError(409, "busy", "a build is already running")
+            except ApiError as e:
+                _fail(results, r, jid, e)
+                continue
+            units.append({"job_id": jid, "item_id": r.item_id, "approval_id": run.inputs["approval_id"],
+                          "build": "model3d", "reexport_from": run.id, "overrides": r.overrides,
+                          "run_id": active_run_for(studio, ctx, jid)})
+            results.append({"job_id": jid, "item_id": r.item_id, "ok": True})
+        return {"units": units, "results": results}
+    return commands.execute(studio, ctx, "build_approved", req.idempotency_key, body, plan)
 
 
+def retry_preview(studio: Studio, ctx: ProjectContext, job_id: str | None, req: RetryPreview) -> dict[str, Any]:
+    """Preview-only retry of valid builds whose preview failed: never regenerates or rebakes."""
+    body = {"job_id": job_id, **req.model_dump(mode="json")}
+
+    def plan(cid: str) -> dict[str, Any]:
+        units, results = [], []
+        for r in req.items:
+            jid = job_of(r, job_id)
+            item, _ = load_item(ctx.store, jid, r.item_id)
+            run = load_build(ctx.store, jid, item.current_build)[0] if item.current_build else None
+            if run is None or run.result != "valid" or run.preview != "failed":
+                results.append({"job_id": jid, "item_id": r.item_id, "ok": False, "code": "no_failed_preview",
+                                "message": "only valid builds with a failed preview can retry it"})
+                continue
+            units.append({"job_id": jid, "item_id": r.item_id, "build_run_id": run.id})
+            results.append({"job_id": jid, "item_id": r.item_id, "ok": True})
+        return {"units": units, "results": results}
+    return commands.execute(studio, ctx, "retry_preview", req.idempotency_key, body, plan)
+
+
+@commands.replayable("retry_preview")
+def _preview_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
+    tasks = [new_task(studio, STAGES["preview"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
+                      input_key=f"{u['build_run_id']}|{cid}", inputs={"build_run_id": u["build_run_id"]})
+             for u in plan["units"]]
+    created = studio.journal.tasks.create(tasks, cid) if tasks else []
+    return {"command_id": cid, "results": plan["results"], "tasks": created}
+
+
+# --- publication ---------------------------------------------------------------------------------------------------
 def publish_target(ctx: ProjectContext, item: JobItem, taken: set[str]) -> dict[str, Any]:
-    """Where an accepted result will land: a new version of the target asset, or a new asset with a free name."""
+    """Where an accepted result will land: a new version of the target asset, or a new asset with a free name
+    (free by the authoritative name records, plus names already planned in this command)."""
     if item.target_asset_id:
         manifest, _ = ctx.store.get(manifest_key(item.target_asset_id), AssetManifest)
         return {"asset_id": manifest.asset_id, "name_id": manifest.name_id, "new_asset": False,
@@ -164,65 +283,79 @@ def publish_target(ctx: ProjectContext, item: JobItem, taken: set[str]) -> dict[
         name_id = render_name(template, item.name, root, sub, snap["recipe"]["kind"], letter)
         if "{variant}" not in template and "{v}" not in template and letter != "a":
             name_id = f"{name_id}_{letter}"
-        if name_id not in taken:
+        if name_id not in taken and ctx.store.repo.stat_object(name_key(name_id)) is None:
             return {"asset_id": None, "name_id": name_id, "new_asset": True, "current_version_id": None,
                     "next_display_version": 1}
     raise ApiError(409, "naming_exhausted", f"no free name for {item.name}")
 
 
-def publish_preview(ctx: ProjectContext, batch_id: str) -> list[dict[str, Any]]:
-    batch, _ = load_job(ctx.store, batch_id)
-    taken = ctx.index.name_ids()
+def publish_preview(ctx: ProjectContext, job_ids: list[str]) -> list[dict[str, Any]]:
+    taken: set[str] = set()
     out = []
-    for iid in batch.item_ids:
-        item, _ = load_item(ctx.store, batch_id, iid)
-        if item.accepted_build is None:
-            continue
-        target = publish_target(ctx, item, taken)
-        taken.add(target["name_id"])
-        out.append({"item_id": item.id, "name": item.name, "build_run_id": item.accepted_build,
-                    "expected_item_revision": item.revision, "published": item.published is not None, **target})
+    for jid in job_ids:
+        job, _ = load_job(ctx.store, jid)
+        for iid in job.item_ids:
+            item, _ = load_item(ctx.store, jid, iid)
+            if item.accepted_build is None:
+                continue
+            target = publish_target(ctx, item, taken)
+            taken.add(target["name_id"])
+            out.append({"job_id": jid, "item_id": item.id, "name": item.name, "build_run_id": item.accepted_build,
+                        "expected_item_revision": item.revision, "published": item.published is not None, **target})
     return out
 
 
-def publish(studio: Studio, ctx: ProjectContext, batch_id: str, req: Publish) -> dict[str, Any]:
-    ctx.require_writable()
-    prior = studio.journal.command_result(ctx.id, "publish", req.idempotency_key,
-                                                 cmd_payload(req, batch_id))
-    if prior is not None:
-        return prior
-    taken = ctx.index.name_ids()
-    results, eligible = [], []
-    for p in req.items:
+def publish(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Publish,
+            run_id: str | None = None) -> dict[str, Any]:
+    body = {"job_id": job_id, "run_id": run_id, **req.model_dump(mode="json")}
+
+    def plan(cid: str) -> dict[str, Any]:
+        taken: set[str] = set()
+        results, units = [], []
+        for p in req.items:
+            jid = None
+            try:
+                jid = job_of(p, job_id)
+                item, _ = load_item(ctx.store, jid, p.item_id)
+                if item.revision != p.expected_item_revision:
+                    raise ApiError(409, "stale_item", "item changed; reload")
+                if item.accepted_build != p.build_run_id:
+                    raise ApiError(409, "not_accepted", "only an accepted build result can be published")
+                run, _ = load_build(ctx.store, jid, p.build_run_id)
+                if run.result != "valid":
+                    raise ApiError(409, "invalid_build", "structural validation did not pass")
+                target = publish_target(ctx, item, taken)
+                if not target["new_asset"] and target["current_version_id"] != p.expected_current_version:
+                    raise ApiError(409, "stale_pointer", "the target asset's current version changed; reload")
+                taken.add(target["name_id"])
+            except ApiError as e:
+                _fail(results, p, jid, e)
+                continue
+            units.append({**p.model_dump(), "job_id": jid, **target,
+                          "run_id": run_id or active_run_for(studio, ctx, jid)})
+            results.append({"job_id": jid, "item_id": p.item_id, "ok": True})
+        return {"units": units, "results": results, "run_id": run_id,
+                "wave_id": derived_id("wav", cid) if run_id else None}
+    return commands.execute(studio, ctx, "publish", req.idempotency_key, body, plan)
+
+
+@commands.replayable("publish")
+def _publish_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str) -> dict[str, Any]:
+    tasks = [new_task(studio, STAGES["publish"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
+                      input_key=f"{u['build_run_id']}|{cid}", run_id=u["run_id"], wave_id=plan.get("wave_id"),
+                      inputs={k: u[k] for k in ("build_run_id", "asset_id", "name_id", "make_current",
+                                                "expected_current_version")})
+             for u in plan["units"]]
+    results = {(r["job_id"], r["item_id"]): r for r in plan["results"]}
+    created = []
+    for t in tasks:
         try:
-            item, _ = load_item(ctx.store, batch_id, p.item_id)
-            if item.revision != p.expected_item_revision:
-                raise ApiError(409, "stale_item", "item changed; reload")
-            if item.accepted_build != p.build_run_id:
-                raise ApiError(409, "not_accepted", "only an accepted build result can be published")
-            run, _ = load_build(ctx.store, batch_id, p.build_run_id)
-            if run.result != "valid":
-                raise ApiError(409, "invalid_build", "structural validation did not pass")
-            target = publish_target(ctx, item, taken)
-            if not target["new_asset"] and target["current_version_id"] != p.expected_current_version:
-                raise ApiError(409, "stale_pointer", "the target asset's current version changed; reload")
-            taken.add(target["name_id"])
-        except ApiError as e:
-            results.append({"item_id": p.item_id, "ok": False, "code": e.code, "message": e.message})
-            continue
-        eligible.append({**p.model_dump(), **target})
-        results.append({"item_id": p.item_id, "ok": True})
-    op_public = None
-    if eligible:
-        op, created = studio.journal.enqueue(project_id=ctx.id, batch_id=batch_id, kind="publish", lane="cpu",
-                                             affinity="publish", payload={"batch_id": batch_id, "items": eligible},
-                                             idempotency_key=req.idempotency_key, hold=True)
-        if created:
-            for e in eligible:
-                mutate_item(studio, ctx, batch_id, e["item_id"], lambda x: set_task(x, "publish", op.id, "queued"))
-            studio.journal.release(op.id)
-        op_public = op.public()
-    response = {"results": results, "operation": op_public}
-    studio.journal.record_command(ctx.id, "publish", req.idempotency_key, cmd_payload(req, batch_id),
-                                  response)
-    return response
+            created += studio.journal.tasks.create([t], cid)
+        except Busy as e:
+            results[(t.job_id, t.item_id)] = {"job_id": t.job_id, "item_id": t.item_id, "ok": False, "code": "busy",
+                                              "message": str(e)}
+    record_wave(studio, ctx, plan, cid, "publication")
+    return {"command_id": cid, "results": list(results.values()), "tasks": created,
+            "operation": {"id": cid, "kind": "publish", "tasks": created} if created else None}
+
+

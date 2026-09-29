@@ -98,7 +98,7 @@ def mutate_item(studio: Studio, ctx: ProjectContext, batch_id: str, item_id: str
         item.revision += 1
         item.updated_at = now_iso()
         ctx.store.replace(item_key(batch_id, item_id), item, token)
-    studio.events.publish("item", project_id=ctx.id, batch_id=batch_id, item_id=item_id)
+    studio.events.publish("item", project_id=ctx.id, job_id=batch_id, batch_id=batch_id, item_id=item_id)
     return item
 
 

@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { Box, ErrorLine, taskColor } from "../../components/ui";
-import { type BatchDetail, get, key, P, send } from "../../lib/api";
+import { get, J, type JobDetail, key, send } from "../../lib/api";
 import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
-import { ActionBar, type TabProps } from "./BatchWorkspace";
+import { ActionBar, type TabProps } from "./JobWorkspace";
 
-export function PromptsTab({ batch, reload }: TabProps) {
+export function PromptsTab({ job, reload }: TabProps) {
   const { id } = useProject();
   const nav = useNavigate();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -15,10 +15,10 @@ export function PromptsTab({ batch, reload }: TabProps) {
   const [unsel, setUnsel] = useState<Set<string>>(new Set());
   const [append, setAppend] = useState("");
   const act = useAction();
-  const base = `${P(id)}/batches/${batch.id}`;
-  const open = batch.items.filter((i) => i.legal.edit_prompt || i.legal.enhance);
-  const edits = Object.entries(drafts).filter(([iid, text]) => text !== batch.items.find((i) => i.id === iid)?.prompt?.description);
-  const selectable = batch.items.filter((i) => i.legal.confirm);
+  const base = `${J(id)}/${job.id}`;
+  const open = job.items.filter((i) => i.legal.edit_prompt || i.legal.enhance);
+  const edits = Object.entries(drafts).filter(([iid, text]) => text !== job.items.find((i) => i.id === iid)?.prompt?.description);
+  const selectable = job.items.filter((i) => i.legal.confirm);
   const chosen = selectable.filter((i) => !unsel.has(i.id));
   const sel = new Set(chosen.map((i) => i.id));
   const setSel = (next: Set<string>) => setUnsel(new Set(selectable.filter((i) => !next.has(i.id)).map((i) => i.id)));
@@ -27,7 +27,7 @@ export function PromptsTab({ batch, reload }: TabProps) {
     if (!edits.length) return;
     const res = await send<{ results: { item_id: string; ok: boolean; message?: string }[] }>("POST", `${base}:edit-prompts`, {
       items: edits.map(([iid, description]) => ({ item_id: iid, description,
-        expected_item_revision: batch.items.find((i) => i.id === iid)!.revision })) });
+        expected_item_revision: job.items.find((i) => i.id === iid)!.revision })) });
     const bad = res.results.filter((r) => !r.ok);
     if (bad.length) throw new Error(bad.map((r) => r.message).join("; "));
     setDrafts({});
@@ -57,7 +57,7 @@ export function PromptsTab({ batch, reload }: TabProps) {
         </div>
       )}
       <div className="table">
-        {batch.items.map((it) => {
+        {job.items.map((it) => {
           const editable = it.legal.edit_prompt;
           const text = drafts[it.id] ?? it.prompt?.description ?? "";
           const enh = it.tasks.enhance;
@@ -86,18 +86,18 @@ export function PromptsTab({ batch, reload }: TabProps) {
         })}
       </div>
       <div className="muted" style={{ fontSize: 12 }}>Every prompt also gets the recipe's locked technical constraints:{" "}
-        <span className="mono" style={{ color: "var(--text-2)" }}>{batch.locked_template || "(none for this recipe)"}</span></div>
+        <span className="mono" style={{ color: "var(--text-2)" }}>{job.locked_template || "(none for this recipe)"}</span></div>
       <ErrorLine error={act.error} />
       <ActionBar note={open.length ? `${chosen.length} of ${selectable.length} ready prompts selected${edits.length ? ` · ${edits.length} unsaved edits` : ""}`
-        : "Prompts confirmed."} sub={batch.recipe.generation_available ? `${batch.counts.items} items · candidates per item from the recipe`
-          : `generation unavailable: ${batch.recipe.generation_blocked_reason}`}>
+        : "Prompts confirmed."} sub={job.recipe.generation_available ? `${job.counts.items} items · candidates per item from the recipe`
+          : `generation unavailable: ${job.recipe.generation_blocked_reason}`}>
         {edits.length > 0 && <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => { await saveEdits(); reload(); })}>
           Save {edits.length} edits</button>}
         {open.length ? (
-          <button className="btn btn-primary" disabled={act.busy || chosen.length === 0 || !batch.recipe.generation_available}
+          <button className="btn btn-primary" disabled={act.busy || chosen.length === 0 || !job.recipe.generation_available}
             onClick={() => void act.run(async () => {
               await saveEdits();
-              const fresh = await get<BatchDetail>(base);
+              const fresh = await get<JobDetail>(base);
               const ids = new Set(chosen.map((i) => i.id));
               const res = await send<{ results: { ok: boolean; message?: string }[] }>("POST", `${base}:confirm-and-generate`, {
                 idempotency_key: key(), items: fresh.items.filter((i) => ids.has(i.id) && i.current_prompt).map((i) => ({
@@ -105,9 +105,9 @@ export function PromptsTab({ batch, reload }: TabProps) {
               const bad = res.results.filter((r) => !r.ok);
               reload();
               if (bad.length) throw new Error(bad.map((r) => r.message).join("; "));
-              nav(`/p/${id}/batches/${batch.id}/candidates`);
+              nav(`/p/${id}/jobs/${job.id}/candidates`);
             })}>Confirm {chosen.length} prompts + generate</button>
-        ) : <button className="btn btn-primary" onClick={() => nav(`/p/${id}/batches/${batch.id}/approve`)}>Go to approve →</button>}
+        ) : <button className="btn btn-primary" onClick={() => nav(`/p/${id}/jobs/${job.id}/approve`)}>Go to approve →</button>}
       </ActionBar>
     </div>
   );

@@ -15,8 +15,10 @@ export interface ProjectRow { id: string; name: string; root: string; open: bool
 export interface Summary {
   id: string; name: string; read_only: boolean; simulated: boolean; owner: Record<string, string>;
   storage: { backend: string; state: string; root: string };
-  counts: { assets: number; planned: number; shots: number; batches: number; categories: number; recipes: number };
-  waiting: { batches: number; items: number; detail: { batch_id: string; alias: string; next_action: string }[] };
+  counts: { assets: number; planned: number; shots: number; jobs: number; batches: number; active_batches: number;
+    categories: number; recipes: number };
+  waiting: { jobs: number; items: number; by_gate: Record<string, number>;
+    detail: { job_id: string; alias: string; next_action: string }[] };
 }
 export interface CategoryNode {
   id: string; label: string; slug: string; path: string; parent_id: string | null; depth: number;
@@ -66,9 +68,15 @@ export interface CandidateView { id: string; index: number; artifact_id: string;
 export interface PromptRev { id: string; number: number; origin: string; description: string; template: string;
   positive: string; negative: string; original_brief: string; enhancer: Record<string, Json> | null }
 export interface BuildRunView { id: string; status: string; result: "valid" | "invalid" | "validation_unavailable" | null;
-  artifacts: Record<string, string>; inputs: Record<string, Json>;
-  validation: { ok?: boolean; checks?: { id: string; ok: boolean; detail?: string; advisory?: boolean }[] };
+  artifacts: Record<string, string>; inputs: Record<string, Json>; kind: "build" | "reexport" | "repair";
+  derived_from: string | null; preview: "pending" | "available" | "failed" | "unsupported" | null;
+  preview_error: string | null; checkpoints: Record<string, { stage: string; committed_at: string }>;
+  validation: { ok?: boolean; checks?: { id: string; ok: boolean; detail?: string; advisory?: boolean }[];
+    failure_code?: string; failed_stage?: string };
   error: string | null }
+export interface BuildHistoryRow { id: string; status: string; result: string | null; kind: string; error: string | null;
+  derived_from: string | null; created_at: string; preview: string | null; checkpoints: string[]; has_raw: boolean;
+  accepted: boolean; current: boolean }
 export interface ItemView {
   id: string; name: string; brief: string; revision: number; category_id: string | null; shot_id: string | null;
   target_asset_id: string | null; current_prompt: string | null; prompt_confirmed: string | null;
@@ -81,24 +89,50 @@ export interface ItemView {
     generation: Record<string, Json>; candidates: CandidateView[] } | null;
   approval_detail: { id: string; bound: Record<string, Json>; qa_status: string | null; override_qa: boolean;
     failed_checks: string[]; missing_checks: string[] } | null;
-  build: BuildRunView | null;
-  legal: Record<"edit_prompt" | "enhance" | "confirm" | "approve" | "mark_regenerate" | "build" | "accept" | "publish",
-    boolean>;
+  build: BuildRunView | null; build_history: BuildHistoryRow[]; job_id: string;
+  legal: Record<"edit_prompt" | "enhance" | "confirm" | "approve" | "mark_regenerate" | "build" | "accept" | "publish"
+    | "retry_preview", boolean>;
 }
 export interface Counts { items: number; prompts: number; confirmed: number; candidates: number; approved: number;
   regenerate: number; built: number; accepted: number; published: number; busy: number; failed: number;
   cancelled: number }
-export interface BatchSummary {
+/** A Job: a configured production workflow of one or more items (formerly called a batch). */
+export interface JobSummary {
   id: string; alias: string; title: string; kind: Kind; kind_label: string; recipe_id: string;
   category_id: string | null; category_label: string | null; created_at: string; source: string; counts: Counts;
   by_stage: Record<string, number>; current_tab: string; waiting_on_user: boolean; next_action: string;
+  active_run: string | null; legacy: boolean; legacy_recipe: string | null;
 }
 export interface Stage { tag: string; name: string; backend: string }
-export interface BatchDetail extends BatchSummary {
+export interface JobDetail extends JobSummary {
   seed_family: number; config_revision: number; locked_template: string; items: ItemView[];
   recipe: { id: string; label: string; build_label: string; build_available: boolean; build_blocked_reason: string;
     generation_available: boolean; generation_blocked_reason: string; stages: Stage[] };
 }
+export interface RunCounts { jobs: number; items: number; enhanced: number; enhance_failed: number;
+  prompts_confirmed: number; prompts_waiting: number; candidates_ready: number; approved: number; undecided: number;
+  builds_valid: number; builds_invalid: number; builds_failed: number; accepted: number; published: number;
+  active_tasks: number; failed_tasks: number; paused_tasks: number }
+export interface RunSummary { id: string; batch_id: string | null; plan_id: string; created_at: string;
+  closed_at: string | null; stop_at: string; status: string; counts: RunCounts; waves: string[]; job_ids: string[] }
+/** A Batch: a named group of Jobs scheduled together. It owns no item content. */
+export interface BatchGroup { id: string; alias: string; title: string; job_ids: string[]; kinds: Kind[]; jobs: number;
+  items: number; revision: number; created_at: string; updated_at: string; runs: string[];
+  latest_run: RunSummary | null }
+export interface BatchGroupDetail extends BatchGroup { jobs_detail: JobSummary[]; run_history: RunSummary[] }
+export interface PlanItem { item_id: string; name: string; revision: number; action: "enhance" | "at_gate" | "excluded" | "done";
+  reason: string }
+export interface RunPlan { plan_id: string; plan_sha256: string; batch_id: string | null; batch_revision: number | null;
+  stop_at: string; jobs: { job_id: string; title: string; kind: Kind; recipe_id: string; items: PlanItem[] }[];
+  residency_groups: Record<string, number>; preflight: Record<string, string>;
+  counts: { jobs: number; items: number; enhance: number; at_gate: number; excluded: number; done: number } }
+export interface StageTask { id: string; job_id: string; item_id: string; run_id: string | null; stage: string;
+  family: string; lane: string; residency: string; state: string; control: string; attempts: number;
+  error: { code: string; message: string; retryable?: boolean } | null; created_at: string; updated_at: string }
+export interface ModelPass { id: string; lane: string; residency: string; worker: string | null; task_ids: string[];
+  jobs: string[]; started_at: string; ended_at: string | null; close_reason: string | null;
+  measured: { model_loads: Record<string, number> | null; switched?: boolean; previous_residency?: string | null } }
+export interface RunDetail extends RunSummary { jobs: JobDetail[]; passes: ModelPass[]; tasks: StageTask[] }
 export interface Operation { id: string; kind: string; state: string; lane: string; batch_id: string | null;
   progress: Record<string, Json>; error: { code: string; message: string; retryable?: boolean } | null;
   created_at: string; updated_at: string }
@@ -118,7 +152,8 @@ export interface Runtime {
   services: { name: string; role: string; url: string; reachable: boolean; ready: boolean; problems: string[];
     version?: string | null; loaded?: Record<string, boolean> }[];
   lanes: Record<string, { lane: string; owner: string | null; state: string; last_error: string | null }>;
-  coordinator: { lanes: Record<string, { running: string | null; queued: number }> } | null;
+  coordinator: { lanes: Record<string, { running: string | null; queued: number; blocked: number }>;
+    passes: ModelPass[] } | null;
   models: ModelRow[]; licences: { id: string; name: string; licence: string; status: string; note?: string }[];
   recipes: RecipeInfo[];
 }
@@ -189,4 +224,6 @@ export async function uploadMany<T>(path: string, files: File[]): Promise<T> {
 
 export const key = (): string => crypto.randomUUID();
 export const P = (project: string) => `/api/v1/projects/${project}`;
+export const V2 = (project: string) => `/api/v2/projects/${project}`;
+export const J = (project: string) => `${V2(project)}/jobs`;
 export const artifactUrl = (project: string, artifactId: string) => `${P(project)}/artifacts/${artifactId}/content`;
