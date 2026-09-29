@@ -10,12 +10,14 @@ from assetstudio_core.lifecycle import item_stage
 from ..registry import ProjectContext
 from ..studio import Studio
 from . import build_modes
+from .build_binding import build_matches_approval, candidate_identity, run_decision
 from .records import load_build, load_cset, load_decision, load_prompt, load_qa
 from .taskview import as_json, busy, item_tasks
 
 
 def legal_actions(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build: BuildRun | None,
-                  build_available: bool, direct: bool = False) -> dict[str, bool]:
+                  build_available: bool, direct: bool = False, matches: bool = True) -> dict[str, bool]:
+    """`matches`: the current build was made from the item's current approval (or the same candidate)."""
     gen_busy = busy(tasks, "generate")
     build_active = busy(tasks, "build")
     if direct:  # no prompt, candidates or approval: one confirmed deterministic transform
@@ -24,7 +26,8 @@ def legal_actions(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build:
                             "build"), False)
         return {**no, "run_transform": rerunnable and not build_active and item.accepted_build is None
                 and not stage_busy,
-                "accept": build is not None and build.result == "valid" and item.accepted_build is None,
+                "accept": build is not None and build.result == "valid" and item.accepted_build is None
+                and matches,
                 "publish": item.accepted_build is not None and not stage_busy,
                 "retry_preview": build is not None and build.result == "valid" and build.preview == "failed"
                 and not build_active}
@@ -41,8 +44,8 @@ def legal_actions(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build:
         "mark_regenerate": item.current_set is not None and not build_active and item.accepted_build is None
         and not gen_busy,
         "build": build_available and item.approval is not None and not item.regen_requested and not build_active
-        and item.accepted_build is None and (build is None or build.result != "valid"),
-        "accept": build is not None and build.result == "valid" and item.accepted_build is None,
+        and item.accepted_build is None and (build is None or build.result != "valid" or not matches),
+        "accept": build is not None and build.result == "valid" and item.accepted_build is None and matches,
         "publish": item.accepted_build is not None and not stage_busy,
         "retry_preview": build is not None and build.result == "valid" and build.preview == "failed"
         and not build_active,
@@ -105,9 +108,33 @@ def approved_view(ctx: ProjectContext, item: JobItem, rounds: list[dict[str, Any
     return {"candidate_set_id": set_id, "candidate_id": bound.get("candidate_id"), "round": rnd}
 
 
+def _attempt_source(ctx: ProjectContext, job_id: str, run: BuildRun) -> dict[str, Any] | None:
+    """The candidate this attempt was actually built from (its own decision, not the item's current approval)."""
+    d = run_decision(ctx.store, job_id, run)
+    ident = candidate_identity(d) if d else None
+    if ident is None:
+        return None
+    number = load_cset(ctx.store, job_id, ident[0]).number
+    return {"candidate_set_id": ident[0], "candidate_id": ident[1], "round": number}
+
+
 def prompt_stale(item: JobItem, prompt: Any) -> bool:
     rev = prompt.bindings.get("references_revision") if prompt else None
     return rev is not None and rev != item.references_revision
+
+
+def _history(ctx: ProjectContext, job_id: str, item: JobItem) -> list[dict[str, Any]]:
+    history = []
+    for rid in item.build_runs:
+        r = load_build(ctx.store, job_id, rid)[0]
+        history.append({"approval_id": r.inputs.get("approval_id"), "source": _attempt_source(ctx, job_id, r),
+                        "matches_approval": build_matches_approval(ctx.store, job_id, item, r),
+                        "id": r.id, "status": r.status, "result": r.result, "kind": r.kind, "error": r.error,
+                        "derived_from": r.derived_from, "created_at": r.created_at, "preview": r.preview,
+                        "checkpoints": sorted(r.checkpoints), "has_raw": "raw" in r.artifacts,
+                        "accepted": r.id == item.accepted_build, "current": r.id == item.current_build,
+                        **build_modes.history_extra(r)})
+    return history
 
 
 def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, build_available: bool) -> dict[str, Any]:
@@ -120,14 +147,7 @@ def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, buil
     candidates = [_candidate_view(ctx, job.id, c, item.qa.get(c.id)) for c in cset.candidates] if cset else []
     rounds = rounds_view(studio, ctx, item, tasks)
     approval = load_decision(store, job.id, item.approval) if item.approval else None
-    history = []
-    for rid in item.build_runs:
-        r = load_build(store, job.id, rid)[0]
-        history.append({"id": r.id, "status": r.status, "result": r.result, "kind": r.kind, "error": r.error,
-                        "derived_from": r.derived_from, "created_at": r.created_at, "preview": r.preview,
-                        "checkpoints": sorted(r.checkpoints), "has_raw": "raw" in r.artifacts,
-                        "accepted": r.id == item.accepted_build, "current": r.id == item.current_build,
-                        **build_modes.history_extra(r)})
+    history = _history(ctx, job.id, item)
     return {
         **item.model_dump(mode="json", exclude={"tasks"}),
         "batch_id": job.id,  # v1 compatibility: the old API called the Job a batch
@@ -143,5 +163,6 @@ def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, buil
         "approval_detail": approval.model_dump(mode="json") if approval else None,
         "build": build.model_dump(mode="json") if build else None,
         "build_history": history,
-        "legal": legal_actions(item, tasks, st.busy, build, build_available, job.direct),
+        "legal": legal_actions(item, tasks, st.busy, build, build_available, job.direct,
+                               build is None or build_matches_approval(store, job.id, item, build)),
     }

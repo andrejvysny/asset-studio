@@ -31,6 +31,8 @@ def _aggregate(chain: list[StageTask]) -> TaskRef:
     done = sum(1 for s in states if s == "succeeded")
     progress = {**lead.progress, "stage": lead.stage, "stages_done": done, "stages_total": len(chain)}
     progress.pop("engine", None)
+    if state == "succeeded" and any(t.downstream_pending for t in chain):
+        progress["downstream_pending"] = True  # QA (or other follow-up) is deferred behind an older owner
     return TaskRef(op_id=lead.id, state=state, error=err.get("message") if state != "succeeded" else None,  # type: ignore[arg-type]
                    progress=progress)
 

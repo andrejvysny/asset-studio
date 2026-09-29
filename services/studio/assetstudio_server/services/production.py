@@ -18,6 +18,7 @@ from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import Busy
 from . import build_modes, commands
+from .build_binding import build_matches_approval
 from .prompts import ItemRef, job_of
 from .publish_view import publish_preview as publish_preview  # noqa: PLC0414 (re-export for routers)
 from .publish_view import publish_target
@@ -86,6 +87,11 @@ def _exporters(studio: Studio) -> dict[str, Any]:
     return (studio.worker3d.health().get("exporters") or {}) if studio.worker3d is not None else {}
 
 
+def _require_exporter(exporters: dict[str, Any], name: str) -> None:
+    if not exporters.get(name):
+        raise ApiError(422, "exporter_unavailable", f"exporter {name!r} is not installed in the 3D worker")
+
+
 def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: BuildApproved,
                 run_id: str | None) -> dict[str, Any]:
     results, units, exporters = [], [], None
@@ -115,9 +121,7 @@ def _plan_build(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Bu
                                                      "recipe before building (the old snapshot stays unchanged)")
             if recipe.build == "model3d":
                 exporters = _exporters(studio) if exporters is None else exporters
-                if not exporters.get(snap["parameters"].get("exporter", "")):
-                    raise ApiError(422, "exporter_unavailable", f"exporter {snap['parameters'].get('exporter')!r} "
-                                                                "is not installed in the 3D worker")
+                _require_exporter(exporters, b.overrides.get("exporter") or snap["parameters"].get("exporter", ""))
             if item.revision != b.expected_item_revision:
                 raise ApiError(409, "stale_item", f"{item.name} changed (revision {item.revision}); reload")
             if item.approval != b.approval_id or item.regen_requested:
@@ -331,6 +335,10 @@ def reexport(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Reexp
         if bad := [k for k in it.overrides if k not in REEXPORT_KEYS]:
             raise ApiError(422, "invalid_parameters", f"not re-exportable: {bad}; allowed {list(REEXPORT_KEYS)}")
     body = {"job_id": job_id, **req.model_dump(mode="json")}
+    if wanted := [x for it in req.items if isinstance(x := it.overrides.get("exporter"), str) and x]:
+        available = _exporters(studio)
+        for name in wanted:
+            _require_exporter(available, name)
 
     def plan(cid: str) -> dict[str, Any]:
         results, units = [], []
@@ -349,6 +357,9 @@ def reexport(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Reexp
                 if gate["state"] != "ready":
                     raise ApiError(422, "build_unavailable", f"{recipe.label}: {gate['reason']}")
                 item, _ = load_item(ctx.store, jid, r.item_id)
+                snap = ctx.store.read_snapshot(item.snapshot_sha)
+                _require_exporter(_exporters(studio),
+                                  r.overrides.get("exporter") or snap["parameters"].get("exporter", ""))
                 run, _ = load_build(ctx.store, jid, r.build_run_id)
                 if item.revision != r.expected_item_revision:
                     raise ApiError(409, "stale_item", f"{item.name} changed; reload")
@@ -418,6 +429,9 @@ def publish(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Publis
                 run, _ = load_build(ctx.store, jid, p.build_run_id)
                 if run.result != "valid":
                     raise ApiError(409, "invalid_build", "structural validation did not pass")
+                if not build_matches_approval(ctx.store, jid, item, run):
+                    raise ApiError(409, "approval_mismatch", "this attempt was built from a different candidate "
+                                   "than the current approval; approve that candidate again or build again")
                 if item.published is not None and item.published.build_run_id == p.build_run_id:
                     raise ApiError(409, "already_published", "this accepted result is already published as "
                                    f"{item.published.asset_id} v{item.published.display_version}")

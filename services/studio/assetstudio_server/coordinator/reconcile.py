@@ -12,7 +12,7 @@ from typing import Any
 from ..registry import ProjectContext
 from ..services.records import load_item, load_job
 from ..studio import Studio
-from ..taskstore import Busy, StageTask
+from ..taskstore import Busy, RunNotOpen, StageTask
 from .stages import STAGES, new_task
 from .stages.qa import qa_needs
 from .stages.qa_compare import compare_needed
@@ -60,10 +60,27 @@ def ensure_downstream(studio: Studio, ctx: ProjectContext, t: StageTask | None) 
     if new:
         try:
             tasks.create(new, t.command_id)
-        except Busy as e:  # an older QA chain for this item is still active: it is superseded when it runs
-            log.warning("downstream of %s deferred: %s", t.id, e)
+        except Busy as e:  # an older chain still owns the stage: retry_deferred admits it once that finishes
+            log.info("downstream of %s deferred: %s", t.id, e)
             return
+        except RunNotOpen as e:  # the run was cancelled/closed: the follow-up is intentionally not created
+            log.info("downstream of %s skipped: %s", t.id, e)
     tasks.mark_downstream(t.id)
+
+
+def retry_deferred(studio: Studio, project_id: str | None = None, item_id: str | None = None) -> None:
+    """Admit follow-up chains that were deferred behind an older owner. Never raises: called after every task
+    outcome and from the retry loop."""
+    try:
+        pending = studio.journal.tasks.pending_downstream(project_id, item_id)
+    except Exception:
+        log.exception("listing deferred downstream failed")
+        return
+    for t in pending:
+        try:
+            ensure_downstream(studio, studio.registry.get(t.project_id), t)
+        except Exception:
+            log.exception("deferred downstream of %s failed", t.id)
 
 
 def reconcile_on_start(studio: Studio) -> None:

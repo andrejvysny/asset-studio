@@ -11,9 +11,9 @@ from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import Kind
 from assetstudio_core.variants import ReferenceImage, SourceBinding, VariantDraft
 from assetstudio_processing.images import ImageRejected, inspect_image
-from assetstudio_processing.render import REFERENCE_VIEWS, RENDERER_ID, render_view
+from assetstudio_processing.render import REFERENCE_VIEWS, RENDERER_ID, RenderUnsupported, render_view
 from assetstudio_storage.repo import NotFound
-from PIL import Image
+from PIL import Image, ImageCms, ImageOps
 
 from ..errors import ApiError
 from ..registry import ProjectContext
@@ -22,7 +22,7 @@ from .variants import load_draft, primary_bytes, resolve_source, save_draft
 
 RENDER_SIZE = 1024
 NEUTRAL_BG = (200, 200, 200)
-IMAGE_PROFILE = "assetstudio.image_prepare.v1"
+IMAGE_PROFILE = "assetstudio.image_prepare.v2"
 
 
 def refs_key(srs_id: str) -> str:
@@ -57,30 +57,54 @@ def _render_3d(ctx: ProjectContext, source: SourceBinding) -> list[dict[str, Any
     for view, (yaw, pitch) in REFERENCE_VIEWS.items():
         try:
             png, meta = render_view(data, yaw, pitch, RENDER_SIZE)
+        except RenderUnsupported as e:
+            raise ApiError(422, RenderUnsupported.code, str(e)[:300]) from e
         except Exception as e:  # trimesh/numpy raise many types on hostile meshes; never crash the request
             raise _unavailable(f"cannot render the {view} view of the source: {str(e)[:200]}") from e
         out.append(_register(ctx, source, view, RENDERER_ID, png, "image/png", "source_render", meta))
     return out
 
 
+def _to_srgb(im: Image.Image, icc: bytes) -> Image.Image:
+    """Convert to sRGB using the embedded profile; a failure is an error, never silently wrong colours."""
+    has_alpha = "A" in im.mode
+    if im.mode not in ("RGB", "RGBA", "CMYK"):
+        im = im.convert("RGBA" if has_alpha or "transparency" in im.info else "RGB")
+    try:
+        src = ImageCms.ImageCmsProfile(io.BytesIO(icc))
+        return ImageCms.profileToProfile(im, src, ImageCms.createProfile("sRGB"),
+                                         outputMode="RGBA" if im.mode == "RGBA" else "RGB")
+    except (ImageCms.PyCMSError, OSError, ValueError, TypeError) as e:
+        raise _unavailable(f"the source's embedded colour profile cannot be converted to sRGB: {str(e)[:150]}") from e
+
+
 def _prepare_2d(ctx: ProjectContext, source: SourceBinding) -> list[dict[str, Any]]:
+    """Every 2D source -> RGB PNG without metadata: EXIF-oriented, sRGB, alpha composited onto NEUTRAL_BG."""
     data = primary_bytes(ctx, source)
     try:
         info = inspect_image(data, ("PNG", "JPEG", "WEBP"))
     except ImageRejected as e:
         raise _unavailable(str(e)) from e
-    meta: dict[str, Any] = {"width": info.width, "height": info.height, "format": info.format,
-                            "alpha_composited": info.has_alpha, "warnings": []}
-    mime = info.mime
+    with Image.open(io.BytesIO(data)) as raw:
+        icc = raw.info.get("icc_profile")
+        orient = raw.getexif().get(0x0112)
+        im = ImageOps.exif_transpose(raw)
+        im.load()
+    if icc:
+        im = _to_srgb(im, icc)
     if info.has_alpha:
-        with Image.open(io.BytesIO(data)) as im:
-            rgba = im.convert("RGBA")
+        rgba = im.convert("RGBA")
         base = Image.new("RGBA", rgba.size, (*NEUTRAL_BG, 255))
-        buf = io.BytesIO()
-        Image.alpha_composite(base, rgba).convert("RGB").save(buf, "PNG")
-        data, mime = buf.getvalue(), "image/png"
-        meta["background"] = list(NEUTRAL_BG)
-    return [_register(ctx, source, "image", IMAGE_PROFILE, data, mime, "source_prepared", meta)]
+        im = Image.alpha_composite(base, rgba)
+    clean = Image.new("RGB", im.size)  # fresh image: no ICC/EXIF/text metadata carried into the PNG
+    clean.paste(im.convert("RGB"))
+    buf = io.BytesIO()
+    clean.save(buf, "PNG")
+    meta: dict[str, Any] = {"profile": IMAGE_PROFILE, "source_format": info.format, "source_mode": info.mode,
+                            "width": im.width, "height": im.height, "exif_orientation": orient,
+                            "icc_converted": bool(icc), "alpha_composited": info.has_alpha,
+                            "background": list(NEUTRAL_BG), "warnings": []}
+    return [_register(ctx, source, "image", IMAGE_PROFILE, buf.getvalue(), "image/png", "source_prepared", meta)]
 
 
 def prepare_references(studio: Studio, ctx: ProjectContext, draft_id: str) -> dict[str, Any]:
@@ -89,7 +113,7 @@ def prepare_references(studio: Studio, ctx: ProjectContext, draft_id: str) -> di
     if draft.materialized is not None:
         raise ApiError(409, "draft_materialized", "this draft was already saved as Jobs")
     source = resolve_source(ctx, draft.source.asset_id, draft.source.version_id)
-    if source != draft.source:
+    if source.content_key() != draft.source.content_key():
         raise ApiError(409, "source_version_mismatch", "the source no longer matches the draft; start a new draft")
     is3d = source.kind is Kind.model3d
     images = _render_3d(ctx, source) if is3d else _prepare_2d(ctx, source)

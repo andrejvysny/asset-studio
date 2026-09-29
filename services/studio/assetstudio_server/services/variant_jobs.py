@@ -77,7 +77,7 @@ def _checked_draft(ctx: ProjectContext, draft_id: str, req: CreateJobs) -> tuple
     if draft.revision != req.expected_revision:
         raise ApiError(409, "stale_variant_plan", f"draft changed (revision {draft.revision}); reload")
     source = resolve_source(ctx, draft.source.asset_id, draft.source.version_id)
-    if source != draft.source:
+    if source.content_key() != draft.source.content_key():
         raise ApiError(409, "source_version_mismatch", "the source no longer matches the draft; start a new draft")
     if not draft.rows:
         raise ApiError(422, "empty_plan", "add at least one variant row")
@@ -88,7 +88,7 @@ def _check_method(studio: Studio, ctx: ProjectContext, draft: VariantDraft, sour
     ok, why = static_capability(source.kind, draft.method)
     if not ok:
         raise ApiError(422, "unsupported_configuration", why)
-    st = method_status(studio, ctx, source, draft.method)
+    st = method_status(studio, ctx, source, draft.method)  # re-checks engine/edit-workflow readiness at save time
     if not st["available"]:
         raise ApiError(422, st["reason"], st["message"])
     errors = validate_rows(draft.method, source.kind, draft.rows)

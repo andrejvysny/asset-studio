@@ -186,6 +186,12 @@ class SourceBinding(Strict):
     def artifact(self, role: str) -> SourceArtifactRef | None:
         return next((a for a in self.artifacts if a.role == role), None)
 
+    def content_key(self) -> tuple[Any, ...]:
+        """Immutable identity of the source content. version_sha256 already covers the version record (origin,
+        licence, style snapshot); display_name is mutable (asset rename) and deliberately excluded."""
+        return (self.project_id, self.asset_id, self.version_id, self.version_sha256, self.kind.value,
+                self.primary_role, tuple((a.role, a.artifact_id, a.sha256) for a in self.artifacts))
+
 
 class ReferenceImage(Strict):
     """One single-object conditioning/QA image derived from the source version (never a contact sheet)."""

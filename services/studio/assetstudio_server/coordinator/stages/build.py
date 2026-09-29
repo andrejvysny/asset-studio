@@ -15,7 +15,7 @@ from assetstudio_storage.publication import NewAsset, PublishRequest, StalePoint
 from assetstudio_storage.repo import Conflict, IntegrityError, NotFound, StorageError
 
 from ...models import load_lock
-from ...provenance import licence_summary
+from ...provenance import add_build_components, derived_licence, licence_summary
 from ...services.records import (
     build_key,
     load_cset,
@@ -95,6 +95,24 @@ def preview(env: TaskEnv) -> dict[str, Any]:
     return {"preview": inp.run.preview}
 
 
+def _models_of(env: TaskEnv, gen: dict[str, Any], used: list[str]) -> tuple[list[dict[str, Any]], str]:
+    """Execution receipts when the generation recorded them; else today's lock, marked as a reconstruction."""
+    if "model_receipts" in gen:
+        return [{"key": r["key"], **{k: r[k] for k in ("repo", "revision", "files") if k in r},
+                 **({"missing_from_lock": True} if r.get("missing_from_lock") else {})}
+                for r in gen["model_receipts"]], "execution_receipt"
+    lock = load_lock(env.studio.settings.config_dir)["models"]
+    return [{"key": k, "repo": lock[k]["repo"], "revision": lock[k]["revision"], "files": lock[k]["files"],
+             "reconstructed_from_current_lock": True} for k in used if k in lock], "reconstructed"
+
+
+def _licence_of(env: TaskEnv, gen: dict[str, Any], used: list[str], run: BuildRun) -> dict[str, Any]:
+    config_dir, components = env.studio.settings.config_dir, run.inputs.get("components")
+    if gen.get("licence"):
+        return add_build_components(gen["licence"], config_dir, components)
+    return licence_summary(config_dir, used, gen, components)
+
+
 def _details(env: TaskEnv, job_id: str, item: JobItem, run: BuildRun) -> dict[str, Any]:
     store = env.ctx.store
     decision = load_decision(store, job_id, run.inputs["approval_id"])
@@ -102,10 +120,9 @@ def _details(env: TaskEnv, job_id: str, item: JobItem, run: BuildRun) -> dict[st
     cset = load_cset(store, job_id, b["candidate_set_id"])
     qa = load_qa(store, job_id, b["qa_evaluation_id"]) if b.get("qa_evaluation_id") else None
     prompt = load_prompt(store, job_id, b["prompt_revision_id"])
-    lock = load_lock(env.studio.settings.config_dir)
-    used = cset.generation.get("models", [])
-    models = [{"key": k, "repo": lock["models"][k]["repo"], "revision": lock["models"][k]["revision"],
-               "files": lock["models"][k]["files"]} for k in used if k in lock["models"]]
+    gen = cset.generation
+    used = gen.get("models", [])
+    models, provenance = _models_of(env, gen, used)
     return {
         "sources": {"job_id": job_id, "item_id": item.id, "shot_id": item.shot_id, "prompt_revision_id": prompt.id,
                     "candidate_set_id": cset.id, "candidate_id": b["candidate_id"], "approval_id": decision.id,
@@ -115,15 +132,16 @@ def _details(env: TaskEnv, job_id: str, item: JobItem, run: BuildRun) -> dict[st
                                     for k, c in run.checkpoints.items()}},
         "config_snapshot_sha": item.snapshot_sha,
         "models": models,
-        "engine": {k: v for k, v in cset.generation.items() if k not in ("models",)},
+        # The version record has no top-level slot for this, so it rides in `engine`.
+        "engine": {**{k: v for k, v in gen.items() if k not in ("models", "model_receipts", "licence")},
+                   "models_provenance": provenance},
         "parameters": {"seed": b.get("seed"), **cset.generation.get("params", {})},
         "qa": None if qa is None else {"evaluation_id": qa.id, "status": qa.policy["status"],
                                        "coverage": qa.policy["coverage"], "override": decision.override_qa,
                                        "override_reason": decision.override_reason,
                                        "failed": decision.failed_checks, "missing": decision.missing_checks},
         "validation": run.validation,
-        "licence": licence_summary(env.studio.settings.config_dir, used, cset.generation,
-                                   run.inputs.get("components")),
+        "licence": _licence_of(env, gen, used, run),
     }
 
 
@@ -162,9 +180,8 @@ def _direct_details(env: TaskEnv, job_id: str, item: JobItem, run: BuildRun, pla
                     "source": {"asset_id": src.asset_id, "version_id": src.version_id}},
         "config_snapshot_sha": item.snapshot_sha, "models": [], "engine": {},
         "parameters": {"transform": decision.bound["transform"]}, "qa": None, "validation": run.validation,
-        "licence": {"status": src.licence.get("status", "unknown"), "components": [],
-                    "derivation": "deterministic CPU transform", "source_licence": src.licence,
-                    "note": "No model was used. The source version's licence record is carried forward unchanged."},
+        "licence": derived_licence({"status": "cleared", "components": []}, src.licence,
+                                   "deterministic CPU transform"),
     }
 
 
@@ -172,7 +189,8 @@ def _variant_details(env: TaskEnv, job: Job, item: JobItem, run: BuildRun, plan:
     if job.direct:
         return _direct_details(env, job.id, item, run, plan)
     d = _details(env, job.id, item, run)
-    d["licence"] = {**d["licence"], "source_licence": plan.source.licence}
+    d["licence"] = derived_licence(d["licence"], plan.source.licence,
+                                   "source-conditioned image edit + model build")
     return d
 
 

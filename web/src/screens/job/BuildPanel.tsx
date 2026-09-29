@@ -11,7 +11,7 @@ import { useAction } from "../../lib/hooks";
 import { useProject } from "../../lib/project";
 import { BuildSettings, type SettingsBase } from "./BuildSettings";
 import * as act from "./jobActions";
-import { attemptState, DIM, describeTransform, isGlbReport, isRasterReport, isRunning, pickLabel } from "./jobModel";
+import { attemptState, DIM, describeTransform, isGlbReport, isRasterReport, isRunning, sourceLabel } from "./jobModel";
 import { ReexportDialog } from "./ReexportDialog";
 
 /** Full record + meta report of the selected attempt (any attempt of the item). */
@@ -72,7 +72,9 @@ export function BuildPanel({ job, item, sel, n, reload, goPrompt }: Props) {
   const settings: SettingsBase = { triangles: num(bake?.decimation_target), texture_size: num(bake?.texture_size),
     remesh: typeof bake?.remesh === "boolean" ? bake.remesh : null };
   const valid = sel.result === "valid";
-  const from = sel.current && item.approval ? ` · from ${pickLabel(item, job.direct, job.kind)}` : "";
+  const source = sourceLabel(item, sel, job.direct, job.kind);
+  const from = source ? ` · from ${source}` : "";
+  const usable = sel.current && sel.matches_approval;
 
   const cells: [string, string, string?][] = job.direct ? transformCells(meta?.transform) : is3d ? [
     ["triangles", meta?.mesh?.triangles?.toLocaleString() ?? "—"],
@@ -85,7 +87,7 @@ export function BuildPanel({ job, item, sel, n, reload, goPrompt }: Props) {
     ["check", view?.validation.ok === undefined ? "—" : view.validation.ok ? "pass" : "fail", view?.validation.ok ? OK : view?.validation.ok === false ? BAD : undefined],
     ["checks ok", view ? `${(view.validation.checks ?? []).filter((c) => c.ok).length}/${(view.validation.checks ?? []).length}` : "—"],
     ["preview", sel.preview ?? "—"], ["seed", sel.seed == null ? "—" : String(sel.seed)],
-    ["from", from ? pickLabel(item, false, job.kind) : "—"], ["files", view ? String(Object.keys(view.artifacts).length) : "—"],
+    ["from", source || "—"], ["files", view ? String(Object.keys(view.artifacts).length) : "—"],
   ];
 
   const tryAgain: { label: string; sub: string; off?: boolean; go: () => void }[] = job.direct
@@ -128,7 +130,10 @@ export function BuildPanel({ job, item, sel, n, reload, goPrompt }: Props) {
             </div>))}
         </div>)}
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 9 }}>
-        {valid && (
+        {valid && !job.direct && !usable && !sel.accepted && (
+          <span className="sub" style={{ color: INFO }}>Built from {source || "another candidate"}. To use this attempt, approve that
+            candidate again (its attempts are restored), or build again.</span>)}
+        {valid && (usable || sel.accepted) && (
           <button className={`btn jw-cta${sel.accepted ? "" : " btn-primary"}`} style={sel.accepted ? { color: OK, borderColor: OK } : undefined}
             disabled={a.busy || !!item.published} onClick={() => run(() => act.setAccepted(id, job.id, item.id, sel.id, !sel.accepted))}>
             {item.published ? "Published ✓" : sel.accepted ? `Accepted attempt ${n} ✓ · click to undo` : `Accept attempt ${n}`}</button>)}

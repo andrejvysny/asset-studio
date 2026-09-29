@@ -8,7 +8,7 @@ import {
 import { relevantMethods } from "./useVariantDraft";
 import {
   ANCHORS, GLB_OPS, isDirect, type LocalRow, methodSub, METHOD_LABEL, RASTER_OPS, type TransformForm, type TransformOp,
-  VIEW_LABEL, WARNING_TEXT,
+  VIEW_LABEL, warningText,
 } from "./model";
 
 export interface VersionChip { version_id: string; display_version: number }
@@ -178,7 +178,7 @@ export function ReferencesPanel(p: { project: string; state: string; refs: Refer
             </button>
           ))}
         </div>
-        {p.refs.warnings.map((w) => <span key={w} className="vz-note" style={{ color: WARN }}>{WARNING_TEXT[w] ?? w}</span>)}
+        {p.refs.warnings.map((w) => <span key={w} className="vz-note" style={{ color: WARN }}>{warningText(w)}</span>)}
       </>)}
     </div>
   );

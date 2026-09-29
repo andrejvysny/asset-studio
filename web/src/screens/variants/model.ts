@@ -34,10 +34,14 @@ export const CANDIDATE_OPTIONS = [2, 4, 6, 8];
 export const MAX_ROWS = 32;
 
 export const WARNING_TEXT: Record<string, string> = {
-  double_sided_ignored: "renderer ignores double-sided materials",
-  alpha_mode_ignored: "renderer ignores alpha-tested/transparent materials; foliage edges may look solid",
-  texture_missing: "no base colour texture rendered; the reference shows flat shading only",
+  blend_approximated: "transparent (BLEND) materials are shown as cut-outs at 50% alpha",
+  texture_unrendered: "a base colour texture could not be sampled (missing UVs); those parts show material colour only",
+  sampler_wrap_ignored: "texture clamp/mirror wrap modes are rendered as repeat",
+  texture_missing: "no base colour texture or material colour; the reference shows flat grey shading only",
 };
+/** Readable text for a reference warning; `unsupported_extension:<name>` carries the glTF extension name. */
+export const warningText = (w: string): string => WARNING_TEXT[w]
+  ?? (w.startsWith("unsupported_extension:") ? `glTF extension ${w.slice(22)} is not rendered` : w);
 export const VIEW_LABEL: Record<string, string> = {
   three_quarter: "Three-quarter", rear: "Rear", side: "Side", image: "Image",
 };
@@ -176,6 +180,9 @@ const ERROR_TEXT: Record<string, string> = {
   no_suggestion: "There is no suggestion to apply.",
   too_many_rows: `A plan holds at most ${MAX_ROWS} rows.`,
   reference_conditioning_unavailable: "The source reference images cannot be prepared.",
+  unsupported_source_features: "The source uses glTF features the reference renderer cannot show faithfully, so it cannot condition image edits.",
+  enforcement_unsupported: "Only advisory constraints are supported; no machine check exists for this one.",
+  engine_unavailable: "The image-edit workflow is not runnable in ComfyUI right now.",
   family_fixed: "The source already belongs to a family, so the family name cannot be changed here.",
   source_integrity_failed: "The source files failed verification, so no variants can be made from this version.",
   source_not_published: "That version is not a published version of this asset.",

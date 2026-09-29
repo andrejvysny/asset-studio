@@ -1,3 +1,36 @@
+# TODO — Hardening pass (review of 8de5fe8, 2026-09-29)
+
+Review: "AssetStudio — Master review, correctness findings and hardening plan" (R01–R11). All 11 findings
+confirmed against source at 65c16ab. Scope: WP-A (review/run invariants) + WP-B (variant inputs) + R07/R10/R11.
+WP-C (GPU/operational re-run), WP-D (files+manifest exporter), WP-E (project style, materials) are NOT in this pass.
+
+- [x] R01 build/approval binding: approve clears or restores the matching build; accept checks the build's own
+      candidate binding; attempt labels come from each run's decision; historical accept disabled (UI = API)
+- [x] R08 approve + accept_builds through commands.execute (planned per-unit decisions, idempotent replay)
+- [x] R02 persisted run control (run/paused/cancelled/closed) enforced at create/ready/claim/retry; wave
+      membership + openness validated before effects
+- [x] R03 retry/claim use the same single-owner rule as create (typed 409)
+- [x] R04 deferred downstream: savepoint (no partial chains), re-admitted on owner release + periodic reconcile
+- [x] R05 prepared-input profile v2 (decode, EXIF transpose, sRGB, alpha composite, always PNG)
+- [x] R06 renderer v2: base colour factor, texture alpha, MASK/BLEND cutout, two-sided lighting, extension checks
+- [x] R09 edit workflow readiness in variant capability; exporter override checked in build preflight
+- [x] R07 execution-time model/workflow/licence receipts; derived licence status never better than source
+- [x] R10 worker3d executor survives spool errors, liveness in health; GPU acquisition failures visible + bounded
+- [x] R11 index rebuild keeps concurrent upserts; grouped cursor revision read with its page
+- [x] §5 source binding compares content identity (rename-safe); machine_enforced constraints refused;
+      task list reads unbounded for run/item control
+- [x] docs: acceptance scope matrix (tested / not hardware-validated / experimental / deferred) with exact commits
+
+Result: lint clean, 358 backend + 28 e2e pass, web build ok (SIMULATED engines; no GPU re-run of this pass).
+Follow-ups (not in this pass):
+- [ ] WP-C: real-GPU + operational re-run at the hardened head (JPEG 2D source, alpha-tested foliage, worker loss,
+      disk-full spool, 30–60 min mixed load); egress-blocked edit-model run (keeps generative variants experimental)
+- [ ] WP-D: files + manifest exporter (server folder + browser ZIP from one frozen bundle), bulk tag/category, version compare
+- [ ] WP-E: project style wizard + revisions; Surface/Seamless materials + seam repair
+- [ ] "QA queued" label only shows once the older QA finished; while it runs the item shows "QA running"
+- [ ] run summary counts still mix current item state with run tasks (separate run receipts)
+- [ ] renderer: factor applied in sRGB space; grey-ICC images refused; BLEND approximated as MASK 0.5
+
 # TODO — Asset Variants & Families + Claude Design v2 UI (milestone 2026-09-29)
 
 Spec: owner guide "AssetStudio — Asset Variants and Families" (baseline 60ff832; started at 0310b08).

@@ -27,6 +27,7 @@ from ..services.runs import list_batches
 from ..services.shotlist import shot_statuses
 from ..services.storage import storage_view, test_storage
 from ..studio import Studio
+from ..taskstore import Busy, RunNotOpen
 from .deps import project, studio
 
 SSE_POLL_S = 0.5
@@ -300,7 +301,14 @@ def retry_task(task_id: str, s: Studio = Depends(studio)) -> dict[str, Any]:
     t = s.journal.tasks.get(task_id)
     if t is None:
         raise ApiError(404, "unknown_task", task_id)
-    if not s.journal.tasks.retry(task_id):
+    try:
+        retried = s.journal.tasks.retry(task_id)
+    except Busy as e:
+        raise ApiError(409, "busy", f"{e.family} is already active for this item (task {e.owner}); "
+                       "wait for it or cancel it first") from e
+    except RunNotOpen as e:
+        raise ApiError(409, "run_not_open", str(e)) from e
+    if not retried:
         raise ApiError(409, "not_retryable", f"task is {t.state} (control {t.control})")
     s.events.publish("task", project_id=t.project_id, job_id=t.job_id, item_id=t.item_id, task_id=t.id)
     return s.journal.tasks.get(task_id).public()  # type: ignore[union-attr]

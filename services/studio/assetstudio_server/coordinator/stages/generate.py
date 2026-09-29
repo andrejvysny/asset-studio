@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
@@ -13,7 +14,9 @@ from assetstudio_core.seeds import derive_seed
 from assetstudio_processing.images import ImageRejected, inspect_image
 
 from ...adapters.base import EngineRejected, ImageEditRequest, ImageEngine, LoraUse, T2IRequest, engine_prompt_id
+from ...adapters.comfyui import graph_sha256
 from ...models import load_lock
+from ...provenance import licence_summary
 from ...services.records import cset_key, load_item, load_job, load_prompt, mutate_item
 from ...services.variant_gen import SourceIntegrityError, VariantSource, primary_bytes, variant_source
 from ..errors import Blocked, ItemFailed
@@ -119,17 +122,46 @@ def _t2i_request(env: TaskEnv, prompt: Any, params: dict[str, Any], over: dict[s
                       filename_prefix=f"assetstudio/{t.job_id}/{t.item_id}", style_lora=style, speed_lora=speed)
 
 
-def _generation(engine: ImageEngine, t: Any, params: dict[str, Any], plan: _Plan) -> dict[str, Any]:
+def _workflow_receipt(engine: ImageEngine, edit: bool) -> dict[str, Any]:
+    """The workflow this generation used (edit workflow in edit mode), from the engine's registry when it has one."""
+    registry = getattr(engine, "registry", None)
+    if registry is not None:
+        found = registry.by_kind("image_edit" if edit else "t2i")
+        if found:
+            wf = found[0]
+            return {"id": wf.id, "version": wf.version, "graph_sha256": graph_sha256(wf.graph)}
+    d = engine.describe()
+    return {"id": d.get("workflow"), "version": d.get("workflow_version"), "graph_sha256": None}
+
+
+def _model_receipts(config_dir: Path, keys: list[str]) -> list[dict[str, Any]]:
+    models = load_lock(config_dir)["models"]
+    out: list[dict[str, Any]] = []
+    for k in keys:
+        m = models.get(k)
+        if m is None:
+            out.append({"key": k, "missing_from_lock": True})
+            continue
+        out.append({"key": k, "repo": m["repo"], "revision": m["revision"],
+                    "files": {n: f.get("sha256") for n, f in (m.get("files") or {}).items()}})
+    return out
+
+
+def _generation(engine: ImageEngine, t: Any, params: dict[str, Any], plan: _Plan, config_dir: Path) -> dict[str, Any]:
     base = {**engine.describe(), "simulated": engine.simulated, "residency": t.residency}
     if plan.vs is not None:
-        return {**base, "mode": "image_edit", "models": EDIT_MODELS, "conditioning": plan.vs.conditioning(),
-                "params": plan.edit_params, "style_lora": None, "speed_lora": None,
-                "speed_preset_note": "not applicable to edit model"}
-    style, speed = plan.style, plan.speed
-    return {**base, "params": {k: params[k] for k in ("width", "height", "steps", "cfg", "speed_preset")
-                               if k in params} | plan.over,
-            "style_lora": style.__dict__ if style else None, "speed_lora": speed.__dict__ if speed else None,
-            "models": ["qwen_image_2512"]}
+        gen = {**base, "mode": "image_edit", "models": EDIT_MODELS, "conditioning": plan.vs.conditioning(),
+               "params": plan.edit_params, "style_lora": None, "speed_lora": None,
+               "speed_preset_note": "not applicable to edit model"}
+    else:
+        style, speed = plan.style, plan.speed
+        gen = {**base, "params": {k: params[k] for k in ("width", "height", "steps", "cfg", "speed_preset")
+                                  if k in params} | plan.over,
+               "style_lora": style.__dict__ if style else None, "speed_lora": speed.__dict__ if speed else None,
+               "models": ["qwen_image_2512"]}
+    return {**gen, "model_receipts": _model_receipts(config_dir, gen["models"]),
+            "workflow": _workflow_receipt(engine, plan.vs is not None),
+            "licence": licence_summary(config_dir, gen["models"], gen)}
 
 
 def _finish(x: JobItem, cs_id: str) -> None:
@@ -233,7 +265,7 @@ def generate(env: TaskEnv) -> dict[str, Any]:
         raise ItemFailed(errors or "no candidates produced", "output_invalid")
     cset = CandidateSet(id=cs_id, item_id=item.id, number=set_number, prompt_revision_id=prompt.id,
                         created_at=now_iso(), op_id=t.id, requested=count, candidates=candidates,
-                        generation=_generation(engine, t, params, plan))
+                        generation=_generation(engine, t, params, plan, env.studio.settings.config_dir))
     if store.repo.stat_object(cset_key(t.job_id, cs_id)) is None:
         store.create(cset_key(t.job_id, cs_id), cset)
     mutate_item(env.studio, env.ctx, t.job_id, item.id, lambda x: _finish(x, cs_id))

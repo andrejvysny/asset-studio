@@ -311,8 +311,8 @@ def test_render_view_png_background_and_warnings() -> None:
     for y, x in ((0, 0), (0, 127), (127, 0), (127, 127)):
         assert tuple(im[y, x]) == (10, 200, 30)
     assert (im != (10, 200, 30)).any(axis=-1).sum() > 200
-    assert {"alpha_mode_ignored", "double_sided_ignored"} <= set(meta["warnings"])
-    assert meta["renderer"] == "assetstudio.cpu_lambert.v1" and meta["size"] == 128
+    assert "blend_approximated" in meta["warnings"] and "double_sided_ignored" not in meta["warnings"]
+    assert meta["renderer"] == "assetstudio.cpu_lambert.v2" and meta["size"] == 128 and meta["culling"] == "none"
 
 
 def test_reference_views_and_no_warning_for_opaque() -> None:
@@ -324,7 +324,7 @@ def test_reference_views_and_no_warning_for_opaque() -> None:
     views = render.reference_views(build_glb(mutate=clean), size=64)
     assert set(views) == set(render.REFERENCE_VIEWS)
     assert all(Image.open(io.BytesIO(p)).size == (64, 64) for p, _ in views.values())
-    assert not {"alpha_mode_ignored", "double_sided_ignored"} & set(views["side"][1]["warnings"])
+    assert "blend_approximated" not in views["side"][1]["warnings"]
 
 
 def test_preview_png_unchanged_shape() -> None:

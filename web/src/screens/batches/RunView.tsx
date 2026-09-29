@@ -211,14 +211,16 @@ export function RunView() {
   if (run.batch_id) return <Navigate to={`/p/${id}/batches/${run.batch_id}/review`} replace />;
   const rows: Row[] = run.jobs.flatMap((j) => j.items.map((i) => ({ ...i, job_title: j.title, job_id: j.id })));
   const c = run.counts;
+  const paused = run.control === "paused" || c.paused_tasks > 0;
+  const ended = run.control === "cancelled" || run.status === "closed";
   const control = (action: string) => void act.run(async () => { await send("POST", `${base}:${action}`); r.reload(); });
   return (
     <div className="content narrow" style={{ maxWidth: 1240, gap: 18 }}>
       {run.batch_id ? <Link to={`/p/${id}/batches/${run.batch_id}`} className="sub" style={{ textDecoration: "none" }}>← Batch</Link>
         : <Link to={`/p/${id}/jobs/${run.job_ids[0]}`} className="sub" style={{ textDecoration: "none" }}>← Job (standalone run)</Link>}
       <PageHead sub={`started ${relTime(run.created_at)} · frozen selection: ${c.jobs} Jobs, ${c.items} items`} title={<>Run {runId.slice(-8)} {runPill(run.status)}</>}>
-        <button className="btn" disabled={act.busy || run.status === "closed"} onClick={() => control(c.paused_tasks ? "resume" : "pause")}>
-          {c.paused_tasks ? "Resume" : "Pause"}</button>
+        <button className="btn" disabled={act.busy || ended} onClick={() => control(paused ? "resume" : "pause")}>
+          {paused ? "Resume" : "Pause"}</button>
         <button className="btn" disabled={act.busy || !c.active_tasks} onClick={() => control("cancel")}>Cancel run's work</button>
         <button className="btn" disabled={act.busy || c.active_tasks > 0 || run.status === "closed"} onClick={() => control("close")}
           title="Keeps undecided items in their Jobs for a later run">Close run</button>

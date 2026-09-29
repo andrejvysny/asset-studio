@@ -11,14 +11,13 @@ import io
 import json
 import os
 import queue
-import re
 import shutil
-import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
 
 import raw as rawio
+import spool
 import torch
 from export import to_glb
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -31,14 +30,13 @@ from pydantic import BaseModel, Field
 from rasterize import available
 
 IDLE_UNLOAD_S = float(os.environ.get("IDLE_UNLOAD_S", "300"))
-SPOOL = Path(os.environ.get("WORKER3D_SPOOL", "/spool"))
+SPOOL = spool.SPOOL
 TRELLIS_REF = "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
 MAX_IMAGE_BYTES = 64 * 2**20
 LIMITATIONS = [f"export always fills holes with perimeter < {0.03} (upstream constant)"]
 EXPORTER_LICENCE = {"clean": "MIT (TRELLIS.2 o-voxel port + AssetStudio UV rasteriser)",
                     "research": "NVIDIA Source Code License (nvdiffrast v0.4.0): research/evaluation only"}
-EXEC_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
-TERMINAL = ("succeeded", "failed", "cancelled", "lost")
+TERMINAL = spool.TERMINAL
 
 
 def missing_models() -> list[str]:
@@ -67,40 +65,14 @@ app = FastAPI(title="assetstudio worker3d")
 
 # --- spool -------------------------------------------------------------------------------------------------------
 def _dir(eid: str) -> Path:
-    if not EXEC_ID.fullmatch(eid):
+    if not spool.EXEC_ID.fullmatch(eid):
         raise HTTPException(400, "invalid execution id")
     return SPOOL / eid
 
 
-def _write(path: Path, data: bytes) -> None:
-    tmp = path.with_name(f".tmp-{path.name}")
-    with open(tmp, "wb") as f:
-        f.write(data)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
-
-
 def _state(eid: str) -> dict[str, Any] | None:
-    try:
-        return json.loads((_dir(eid) / "state.json").read_text())
-    except FileNotFoundError:
-        return None
-
-
-def _set_state(eid: str, **fields: Any) -> None:
-    st = {**(_state(eid) or {}), **fields, "updated_at": time.time()}
-    _write(_dir(eid) / "state.json", json.dumps(st).encode())
-
-
-def _recover_spool() -> None:
-    """Executions that were queued/running when a previous process died can no longer complete."""
-    SPOOL.mkdir(parents=True, exist_ok=True)
-    for d in SPOOL.iterdir():
-        st = _state(d.name) if EXEC_ID.fullmatch(d.name) else None
-        if st is not None and st.get("state") not in TERMINAL:
-            _set_state(d.name, state="lost", error="worker restarted before this execution finished",
-                       lost_session=st.get("session_id"))
+    _dir(eid)
+    return spool.state(eid)
 
 
 # --- execution ---------------------------------------------------------------------------------------------------
@@ -144,46 +116,26 @@ def _run_export(eid: str, params: dict[str, Any], body: bytes) -> tuple[bytes, d
     return glb, meta
 
 
-def _executor() -> None:
-    """One GPU execution at a time. Activity was counted at admission and is released here when it ends."""
-    while True:
-        eid = jobs.get()
+def _guarded(fn: spool.Runner) -> spool.Runner:
+    """Map torch/raw-specific failures to typed spool failures."""
+    def run(eid: str, params: dict[str, Any], body: bytes) -> tuple[bytes, dict[str, Any]]:
         try:
-            d = _dir(eid)
-            req = json.loads((d / "request.json").read_text())
-            if _cancelled(eid):
-                _set_state(eid, state="cancelled")
-                continue
-            _set_state(eid, state="running", started_at=time.time())
-            fn = _run_generate if req["op"] == "generate" else _run_export
-            try:
-                data, meta = fn(eid, req["params"], (d / "input.bin").read_bytes())
-            except InterruptedError:
-                _set_state(eid, state="cancelled")
-                continue
-            except rawio.RawInvalid as e:
-                _set_state(eid, state="failed", error=f"invalid raw intermediate: {e}", code="input_invalid")
-                continue
-            except torch.cuda.OutOfMemoryError as e:
-                _set_state(eid, state="failed", error=f"out of GPU memory: {str(e)[:200]}", code="oom")
-                continue
-            except Exception as e:  # recorded, never swallowed; the executor keeps serving
-                _set_state(eid, state="failed", error=f"{type(e).__name__}: {str(e)[:300]}", code="internal")
-                continue
-            _write(d / "result.bin", data)
-            _write(d / "meta.json", json.dumps(meta, separators=(",", ":")).encode())
-            _set_state(eid, state="succeeded", finished_at=time.time(),
-                       result_sha256=hashlib.sha256(data).hexdigest(), result_size=len(data))
-        finally:
-            cancel_flags.discard(eid)
-            (_dir(eid) / "input.bin").unlink(missing_ok=True)
-            lease.leave()
+            return fn(eid, params, body)
+        except rawio.RawInvalid as e:
+            raise spool.ExecutionFailed("input_invalid", f"invalid raw intermediate: {e}") from e
+        except torch.cuda.OutOfMemoryError as e:
+            raise spool.ExecutionFailed("oom", f"out of GPU memory: {str(e)[:200]}") from e
+    return run
+
+
+executor = spool.Executor(jobs, {"generate": _guarded(_run_generate), "export": _guarded(_run_export)},
+                          cancel_flags, lease)
 
 
 @app.on_event("startup")
 def _startup() -> None:
-    _recover_spool()
-    threading.Thread(target=_executor, name="executor", daemon=True).start()
+    spool.recover()
+    executor.start()
 
 
 def _epoch(value: str | None) -> int | None:
@@ -216,9 +168,9 @@ async def submit(eid: str, request: Request, op: Literal["generate", "export"],
         raise HTTPException(409, f"stale_lease: {e}") from e
     try:
         d.mkdir(parents=True)
-        _write(d / "input.bin", body)
-        _write(d / "request.json", json.dumps({"op": op, "params": params}).encode())
-        _set_state(eid, state="queued", request_sha256=req_sha, session_id=lease.session_id,
+        spool.write(d / "input.bin", body)
+        spool.write(d / "request.json", json.dumps({"op": op, "params": params}).encode())
+        spool.set_state(eid, state="queued", request_sha256=req_sha, session_id=lease.session_id,
                    epoch=lease.epoch, submitted_at=time.time())
     except BaseException:
         lease.leave()
@@ -307,7 +259,8 @@ def execution_ack(eid: str) -> dict[str, Any]:
 def health() -> dict:
     missing = missing_models()
     spooled = sum(1 for _ in SPOOL.iterdir()) if SPOOL.is_dir() else 0
-    return {"ok": not missing and torch.cuda.is_available(), "missing_models": missing,
+    ex = executor.health()
+    return {"ok": not missing and torch.cuda.is_available() and ex["alive"], "executor": ex, "missing_models": missing,
             "models_present": {k: k not in missing for k in ("trellis2", "trellis_image_large", "dinov3_vitl16")},
             "loaded": {"trellis2": trellis.loaded}, "loads": {"trellis2": trellis.loads}, "exporters": available(),
             "trellis_ref": TRELLIS_REF, "cuda": torch.cuda.is_available(), "gpu": gpu_info(),

@@ -65,6 +65,9 @@ def item_stage(item: JobItem, build: BuildRun | None, tasks: dict[str, TaskRef] 
         qa = _task(tasks, "qa")
         if item.regen_requested:
             return ItemStage("approve", "marked for regeneration", True, False)
+        gen_ref = tasks.get("generate")
+        if qa not in ACTIVE and gen_ref is not None and gen_ref.progress.get("downstream_pending"):
+            return ItemStage("approve", "QA queued", True, True)
         return ItemStage("approve", "QA running" if qa in ACTIVE else "undecided", True, qa in ACTIVE)
     enh = _task(tasks, "enhance")
     if enh in ACTIVE:
@@ -139,6 +142,7 @@ def _progress_label(s: dict, rounds: int, build_label: str) -> tuple[str, str]:
         "approved": (f"Build {build_label}", "wait"), "ready to transform": ("Run transform", "wait"),
         "generating": (f"Generating R{rounds + 1}…", "run"), "not generated": ("Generate candidates", "wait"),
         "generation failed": ("Retry generation", "bad"), "QA running": ("QA running…", "run"),
+        "QA queued": ("QA queued", "wait"),
         "undecided": ("Approve a candidate", "wait"), "marked for regeneration": ("Regenerate", "wait"),
         "enhancing": ("Enhancing prompt…", "run"), "brief only": ("Draft · not run", "draft"),
         "enhance failed": ("Retry enhance", "bad"), "edited": ("Confirm prompt", "wait"),

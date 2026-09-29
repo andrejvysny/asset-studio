@@ -12,6 +12,8 @@ from assetstudio_storage.repo import CorruptBlob, IntegrityError, NotFound
 from ..errors import ApiError
 from ..registry import ProjectContext
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
 
 class SourceIntegrityError(Exception):
     """The plan's reference bytes are missing or differ from the frozen digest: never condition on them."""
@@ -55,4 +57,7 @@ def primary_bytes(ctx: ProjectContext, vs: VariantSource) -> bytes:
         raise SourceIntegrityError(f"source reference {vs.primary.view} failed verification: {e}"[:300]) from e
     if hashlib.sha256(data).hexdigest() != vs.primary.sha256:
         raise SourceIntegrityError(f"source reference {vs.primary.view} differs from the frozen plan")
+    if not data.startswith(PNG_MAGIC):
+        raise SourceIntegrityError("the plan's prepared input predates PNG normalisation; "
+                                   "create a new variant draft from this source")
     return data

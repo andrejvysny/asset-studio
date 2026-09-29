@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from assetstudio_core.canonical import now_iso
 from assetstudio_core.ids import is_id
 
 from ..registry import ProjectContext
 from ..studio import Studio
-from ..taskstore import StageTask
+from ..taskstore import Busy, RunNotOpen, StageTask
 from .errors import Blocked, Cancelled, ItemFailed, classify
 
 log = logging.getLogger("assetstudio.coordinator")
@@ -29,6 +30,7 @@ BACKOFF_SLACK_S = 0.01  # wall-clock ms truncation + wall/monotonic conversion j
 # Automatic retries of transiently blocked work are bounded (no hidden infinite retry).
 MAX_AUTO_ATTEMPTS = 6
 MAX_AUTO_RETRY_S = 2 * 3600.0
+MAX_ADMISSION_FAILURES = 6  # consecutive GPU1 acquire failures before queued members are blocked
 
 __all__ = ["Blocked", "Cancelled", "Coordinator", "ItemFailed", "Limits", "TaskEnv"]
 
@@ -95,6 +97,7 @@ class Coordinator:
         self._blocked_until: dict[str, float] = {}
         self._current: dict[str, dict[str, Any]] = {}
         self._pick_lock = threading.Lock()
+        self._admission_failures: dict[str, dict[str, Any]] = {}  # residency -> {"count", "since"}
 
     # --- lifecycle ------------------------------------------------------------------------------------------
     def _cancel_orphaned_prompts(self, orphans: list[dict[str, Any]]) -> None:
@@ -225,10 +228,15 @@ class Coordinator:
         if lane == "gpu1" and worker is not None:
             try:
                 epoch = self.studio.lanes["gpu1"].acquire(worker)
-            except Exception as e:  # ownership unknown: the resource blocks, its tasks stay queued
+                self._admission_failures.pop(residency, None)
+                for t in members:
+                    if t.progress.pop("admission", None) is not None:
+                        tasks.progress(t.id, t.progress, touch=False)
+            except Exception as e:  # ownership unknown: the resource blocks, its tasks stay queued (bounded)
                 _, err, _ = classify(e)
                 self._blocked_until[residency] = time.monotonic() + RETRY_BLOCKED_S
                 reason = f"resource_unavailable: {err['message'][:120]}"
+                self._admission_failed(residency, worker, members, err["message"])
                 members = []
         queue, seen = list(members), {t.id for t in members}
         while queue:
@@ -270,7 +278,33 @@ class Coordinator:
         self.studio.events.publish("pass", lane=lane, pass_id=pid)
         return {"pass_id": pid, "tasks": done, "reason": reason}
 
+    def _admission_failed(self, residency: str, worker: str, members: list[StageTask], message: str) -> None:
+        tasks = self.studio.journal.tasks
+        rec = self._admission_failures.setdefault(residency, {"count": 0, "since": now_iso()})
+        rec["count"] += 1
+        for t in members:
+            t.progress["admission"] = {"code": "resource_unavailable", "message": message[:200],
+                                       "failures": rec["count"], "since": rec["since"]}
+            tasks.progress(t.id, t.progress, touch=False)
+        if rec["count"] >= MAX_ADMISSION_FAILURES:
+            n = rec["count"]
+            tasks.block_queued([t.id for t in members], {
+                "code": "resource_unavailable", "retryable": False,
+                "message": f"could not acquire GPU1 for {worker} after {n} attempts: {message[:200]}; "
+                           "retry explicitly"})
+            self._admission_failures.pop(residency, None)
+            for t in members:
+                self._publish(t)
+
     def _run_task(self, t: StageTask) -> tuple[str, bool]:
+        try:
+            return self._execute(t)
+        finally:
+            from .reconcile import retry_deferred
+
+            retry_deferred(self.studio, t.project_id, t.item_id)
+
+    def _execute(self, t: StageTask) -> tuple[str, bool]:
         tasks = self.studio.journal.tasks
         try:
             ctx = self.studio.registry.get(t.project_id)
@@ -313,6 +347,9 @@ class Coordinator:
     def _retry_loop(self) -> None:
         while not self._stop.wait(RETRY_BLOCKED_S):
             self.retry_blocked()
+            from .reconcile import retry_deferred
+
+            retry_deferred(self.studio)
 
     def retry_blocked(self) -> None:
         tasks = self.studio.journal.tasks
@@ -323,7 +360,10 @@ class Coordinator:
             if t.attempts >= MAX_AUTO_ATTEMPTS or _age_s(t.created_at) > MAX_AUTO_RETRY_S:
                 tasks.exhaust(t.id, err, t.attempts)
                 continue
-            tasks.retry(t.id)
+            try:
+                tasks.retry(t.id)
+            except (Busy, RunNotOpen) as e:  # another owner / closed run: stays blocked for an operator decision
+                log.warning("automatic retry of %s refused: %s", t.id, e)
 
     def status(self) -> dict[str, Any]:
         tasks = self.studio.journal.tasks
@@ -331,7 +371,8 @@ class Coordinator:
                                  "running": (self._current.get(lane) or {}).get("task"),
                                  "queued": len(tasks.list(lane=lane, states=("queued",))),
                                  "blocked": len(tasks.list(lane=lane, states=("blocked",)))} for lane in LANES},
-                "limits": self.limits.__dict__, "passes": tasks.passes(limit=20)}
+                "limits": self.limits.__dict__, "passes": tasks.passes(limit=20),
+                "admission_failures": {r: dict(v) for r, v in self._admission_failures.items()}}
 
 
 def wait_until(predicate: Callable[[], bool], timeout: float, interval: float = 0.05) -> bool:

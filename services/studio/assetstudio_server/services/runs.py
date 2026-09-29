@@ -151,7 +151,8 @@ def load_run(ctx: ProjectContext, run_id: str) -> tuple[BatchRun, str]:
 def active_run_for(studio: Studio, ctx: ProjectContext, job_id: str) -> str | None:
     """The open run whose frozen selection includes this Job: Job-level actions become scoped continuations."""
     for r in runs(ctx):
-        if r.closed_at is None and job_id in r.selection:
+        if (r.closed_at is None and job_id in r.selection
+                and studio.journal.tasks.run_control(r.id) not in ("cancelled", "closed")):
             return r.id
     return None
 
@@ -303,28 +304,56 @@ def run_task_ids(studio: Studio, ctx: ProjectContext, run_id: str, states: tuple
 
 def control_run(studio: Studio, ctx: ProjectContext, run_id: str, action: str) -> dict[str, Any]:
     """pause: finish the current task, admit nothing further. resume: explicit. cancel: only this run's tasks
-    (not a global interrupt, never data deletion). close: only when nothing is active; undecided items stay."""
+    (not a global interrupt, never data deletion). close: only when nothing is active; undecided items stay.
+    The run-level intent is persisted FIRST so tasks created concurrently or after a restart obey it."""
     ctx.require_writable()
     run, token = load_run(ctx, run_id)
     tasks = studio.journal.tasks
-    ids = run_task_ids(studio, ctx, run_id)
-    if action == "pause":
-        n = tasks.set_control(ids, "paused", ("run",))
-    elif action == "resume":
-        n = tasks.set_control(ids, "run", ("paused",))
-    elif action == "cancel":
-        n = len(tasks.request_cancel(ids))
-    elif action == "close":
-        if ids:
-            raise ApiError(409, "run_active", "pause or cancel the run's active work before closing it")
-        if run.closed_at is None:
-            run.closed_at, run.close_reason = now_iso(), "closed by operator"
-            ctx.store.replace(run_key(run_id), run, token)
-        n = 0
-    else:
+    current = tasks.run_control(run_id)
+    if action not in ("pause", "resume", "cancel", "close"):
         raise ApiError(400, "invalid_action", action)
+    if run.closed_at is not None or current == "closed":
+        raise ApiError(409, "invalid_transition", f"run is closed; cannot {action}")
+    if action in ("pause", "resume") and current == "cancelled":
+        raise ApiError(409, "invalid_transition", f"run is cancelled; cannot {action}")
+    legacy_paused = any(t.control == "paused" for t in tasks.list(project_id=ctx.id, run_id=run_id,
+                                                                  states=TASK_ACTIVE))
+    if action == "resume" and current != "paused" and not legacy_paused:
+        raise ApiError(409, "invalid_transition", "only a paused run can be resumed")
+    n = 0
+    if action == "pause":
+        tasks.set_run_control(ctx.id, run_id, "paused")
+        n = tasks.set_control(run_task_ids(studio, ctx, run_id), "paused", ("run",))
+    elif action == "resume":
+        tasks.set_run_control(ctx.id, run_id, "run")
+        n = tasks.set_control(run_task_ids(studio, ctx, run_id), "run", ("paused",))
+    elif action == "cancel":
+        tasks.set_run_control(ctx.id, run_id, "cancelled")
+        n = len(tasks.request_cancel(run_task_ids(studio, ctx, run_id)))
+    elif run_task_ids(studio, ctx, run_id):
+        raise ApiError(409, "run_active", "pause or cancel the run's active work before closing it")
+    else:
+        run.closed_at, run.close_reason = now_iso(), "closed by operator"
+        ctx.store.replace(run_key(run_id), run, token)
+        tasks.set_run_control(ctx.id, run_id, "closed")
     studio.events.publish("run", project_id=ctx.id, run_id=run_id)
     return {"run_id": run_id, "action": action, "affected": n, **run_summary(studio, ctx, load_run(ctx, run_id)[0])}
+
+
+def require_wave(studio: Studio, ctx: ProjectContext, run_id: str, units: list[Any]) -> BatchRun:
+    """Validate a wave BEFORE any effect: the run is open and every unit names an item frozen in its selection.
+    A paused run still accepts waves (human decisions); the tasks they create are admitted paused."""
+    run, _ = load_run(ctx, run_id)
+    control = studio.journal.tasks.run_control(run_id)
+    if run.closed_at is not None or control in ("cancelled", "closed"):
+        raise ApiError(409, "run_not_open", f"run {run_id} is {'closed' if run.closed_at else control}")
+    if any(u.job_id is None for u in units):
+        raise ApiError(422, "job_required", "every wave item must name its job_id",
+                       sorted({u.item_id for u in units if u.job_id is None}))
+    foreign = sorted({u.item_id for u in units if u.item_id not in run.selection.get(u.job_id, {})})
+    if foreign:
+        raise ApiError(422, "not_in_run", "items are not part of this run's frozen selection", foreign)
+    return run
 
 
 def record_wave(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str, gate: str) -> None:
@@ -384,9 +413,12 @@ def run_summary(studio: Studio, ctx: ProjectContext, run: BatchRun) -> dict[str,
         if t.stage in ("finalize", "derive") and t.state == "succeeded" and t.result:
             counts["builds_valid" if t.result.get("result") == "valid" else "builds_invalid"] += 1
     waiting = counts["prompts_waiting"] + counts["undecided"]
-    if run.closed_at:
+    control = studio.journal.tasks.run_control(run.id)
+    if run.closed_at or control == "closed":
         status = "closed"
-    elif counts["paused_tasks"]:
+    elif control == "cancelled":
+        status = "cancelled"
+    elif control == "paused" or counts["paused_tasks"]:
         status = "paused"
     elif counts["active_tasks"]:
         status = "running"
@@ -396,6 +428,7 @@ def run_summary(studio: Studio, ctx: ProjectContext, run: BatchRun) -> dict[str,
         status = "completed_with_errors" if counts["failed_tasks"] else "completed"
     return {"id": run.id, "batch_id": run.batch_id, "plan_id": run.plan_id, "created_at": run.created_at,
             "closed_at": run.closed_at, "stop_at": run.stop_at, "status": status, "counts": counts,
+            "control": control, "control_revision": studio.journal.tasks.run_control_revision(run.id),
             "waves": run.waves, "job_ids": list(run.selection)}
 
 

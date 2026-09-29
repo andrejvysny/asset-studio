@@ -15,6 +15,7 @@ from assetstudio_core.variants import (
     MAX_ROWS,
     METHOD_LABELS,
     Constraint,
+    Enforcement,
     FamilyChoice,
     GlbTransform,
     Intent,
@@ -43,6 +44,7 @@ EXPERIMENTAL_WARNING = "experimental: source-conditioned editing is not yet rele
 EDIT_MODEL = "qwen_image_edit_2511"
 RECONSTRUCT_RECIPE = "model3d.default"
 _IMAGE_ROLE_KINDS = (Kind.concept_art, Kind.sprite, Kind.icon)
+MACHINE_ENFORCED_IDS: frozenset[str] = frozenset()  # constraint ids that have a real automated check (none yet)
 
 
 def draft_key(draft_id: str) -> str:
@@ -138,11 +140,27 @@ def _blocker(studio: Studio, ctx: ProjectContext, source: SourceBinding, method:
             return ("missing_models", f"the image-edit model {EDIT_MODEL} is not installed")
     if studio.engine is None:
         return ("engine_unavailable", "no image engine configured (library-only mode)")
+    edit = _edit_workflow_blocker(studio)
+    if edit is not None:
+        return edit
     if method is Method.image_edit_reconstruct:
         b = runtime_svc.build_readiness(studio, RECONSTRUCT_RECIPE)
         if b["state"] != "ready":
             return (b["state"], b["reason"] or "3D reconstruction is not available")
     return None
+
+
+def _edit_workflow_blocker(studio: Studio) -> tuple[str, str] | None:
+    report = runtime_svc.engine_check(studio)
+    if not report.get("reachable", False):
+        why = "; ".join(map(str, report.get("problems") or [])) or "no answer"
+        msg = f"the image engine is unreachable, so the image-edit workflow cannot run: {why}"
+        return ("engine_unavailable", msg[:300])
+    edits = [w for w in (report.get("workflows") or {}).values() if w.get("kind") == "image_edit"]
+    if any(w.get("ready") for w in edits):
+        return None
+    problems = "; ".join(str(p) for w in edits for p in w.get("problems") or []) or "no image-edit workflow registered"
+    return ("engine_unavailable", f"the image-edit workflow is not runnable in ComfyUI: {problems}"[:300])
 
 
 def method_status(studio: Studio, ctx: ProjectContext, source: SourceBinding, method: Method) -> dict[str, Any]:
@@ -277,6 +295,13 @@ def create_draft(studio: Studio, ctx: ProjectContext, req: CreateDraft) -> Varia
     return load_draft(ctx, res["draft_id"])[0]
 
 
+def _check_enforcement(preserve: list[Constraint]) -> None:
+    for c in preserve:
+        if c.enforcement is Enforcement.machine_enforced and c.id not in MACHINE_ENFORCED_IDS:
+            raise ApiError(422, "enforcement_unsupported",
+                           "no machine-enforced check exists for this constraint; use advisory_visual")
+
+
 def _apply_patch(draft: VariantDraft, req: PatchDraft) -> None:
     if req.method is not None and req.method != draft.method:
         ok, why = static_capability(draft.source.kind, req.method)
@@ -287,6 +312,7 @@ def _apply_patch(draft: VariantDraft, req: PatchDraft) -> None:
     if req.intent is not None and draft.method is not Method.direct_transform:
         draft.intent = req.intent
     if req.preserve is not None:
+        _check_enforcement(req.preserve)
         draft.preserve = req.preserve
     if req.candidates_per_row is not None:
         draft.candidates_per_row = req.candidates_per_row

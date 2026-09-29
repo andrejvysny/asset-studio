@@ -17,8 +17,12 @@ from typing import Any
 from assetstudio_core.canonical import now_iso
 from assetstudio_core.ids import derived_id, new_id
 
+from . import runcontrol
+from .runcontrol import NOT_HELD_SQL, RunControlMixin, RunNotOpen
+
 TASK_ACTIVE = ("queued", "running", "reconciling", "blocked")
 TASK_TERMINAL = ("succeeded", "failed", "cancelled")
+__all__ = ["Busy", "NewTask", "RunNotOpen", "StageTask", "TaskStore", "TASK_ACTIVE", "TASK_TERMINAL"]
 
 DDL = """
 CREATE TABLE IF NOT EXISTS stage_tasks (
@@ -42,7 +46,7 @@ CREATE TABLE IF NOT EXISTS command_intents (
   project_id TEXT NOT NULL, action TEXT NOT NULL, key TEXT NOT NULL, command_id TEXT NOT NULL,
   intent TEXT NOT NULL, state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
   PRIMARY KEY (project_id, action, key));
-"""
+""" + runcontrol.DDL
 
 
 class Busy(Exception):
@@ -109,6 +113,7 @@ class StageTask:
     pass_id: str | None
     created_at: str
     updated_at: str
+    downstream_pending: bool = False  # succeeded, but its required follow-up tasks do not exist yet
 
     def public(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -122,10 +127,11 @@ def _task(r: sqlite3.Row) -> StageTask:
         microbatch=r["microbatch"], priority=r["priority"], deps=json.loads(r["deps"]), state=r["state"],
         control=r["control"], progress=json.loads(r["progress"]),
         result=json.loads(r["result"]) if r["result"] else None, error=json.loads(r["error"]) if r["error"] else None,
-        attempts=r["attempts"], pass_id=r["pass_id"], created_at=r["created_at"], updated_at=r["updated_at"])
+        attempts=r["attempts"], pass_id=r["pass_id"], created_at=r["created_at"], updated_at=r["updated_at"],
+        downstream_pending=r["state"] == "succeeded" and not r["downstream_ok"])
 
 
-class TaskStore:
+class TaskStore(RunControlMixin):
     def __init__(self, db: sqlite3.Connection, lock: threading.RLock, changed: threading.Condition) -> None:
         self._db, self._lock, self.changed = db, lock, changed
         self._db.executescript(DDL)
@@ -151,6 +157,7 @@ class TaskStore:
             with self.txn() as conn:
                 return self.create(tasks, command_id, conn)
         now, ids = now_iso(), []
+        run_ctl = self._admit_runs(db, tasks)
         chain = {t.id for t in tasks}  # tasks created together (e.g. segment -> sample -> bake) form one owner
         for t in tasks:
             row = db.execute("SELECT id FROM stage_tasks WHERE logical_key=?", (t.logical_key,)).fetchone()
@@ -166,11 +173,11 @@ class TaskStore:
             seq = db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM stage_tasks").fetchone()[0]
             db.execute(
                 "INSERT INTO stage_tasks (id, seq, project_id, job_id, item_id, run_id, wave_id, command_id, stage, "
-                "family, logical_key, inputs, lane, residency, microbatch, priority, deps, state, created_at, "
-                "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "family, logical_key, inputs, lane, residency, microbatch, priority, deps, state, control, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (t.id, seq, t.project_id, t.job_id, t.item_id, t.run_id, t.wave_id, command_id, t.stage, t.family,
                  t.logical_key, json.dumps(t.inputs), t.lane, t.residency, t.microbatch, t.priority,
-                 json.dumps(t.deps), "queued", now, now))
+                 json.dumps(t.deps), "queued", "paused" if run_ctl.get(t.run_id) == "paused" else "run", now, now))
             ids.append(t.id)
         return ids
 
@@ -190,7 +197,7 @@ class TaskStore:
 
     def list(self, *, project_id: str | None = None, job_id: str | None = None, item_id: str | None = None,
              run_id: str | None = None, lane: str | None = None, states: tuple[str, ...] | None = None,
-             command_id: str | None = None, limit: int = 5000) -> list[StageTask]:
+             command_id: str | None = None, limit: int | None = None) -> list[StageTask]:
         where, args = [], []
         for col, val in (("project_id", project_id), ("job_id", job_id), ("item_id", item_id), ("run_id", run_id),
                          ("lane", lane), ("command_id", command_id)):
@@ -202,7 +209,8 @@ class TaskStore:
             args += list(states)
         sql = "SELECT * FROM stage_tasks" + (" WHERE " + " AND ".join(where) if where else "")
         with self._lock:
-            rows = self._db.execute(sql + " ORDER BY seq LIMIT ?", [*args, limit]).fetchall()
+            rows = self._db.execute(sql + " ORDER BY seq" + ("" if limit is None else " LIMIT ?"),
+                                    [*args, *([] if limit is None else [limit])]).fetchall()
         return [_task(r) for r in rows]
 
     def latest_by_family(self, project_id: str, item_id: str) -> dict[str, StageTask]:
@@ -218,7 +226,8 @@ class TaskStore:
         """Queued, not paused/cancelled, every dependency succeeded. Dependents of failed/cancelled work fail."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM stage_tasks WHERE lane=? AND state='queued' AND control='run' ORDER BY priority, seq",
+                "SELECT * FROM stage_tasks WHERE lane=? AND state='queued' AND control='run' AND "
+                f"{NOT_HELD_SQL} ORDER BY priority, seq",
                 (lane,)).fetchall()
             tasks = [_task(r) for r in rows]
             out = []
@@ -255,14 +264,18 @@ class TaskStore:
         with self._lock:
             n = self._db.execute(
                 "UPDATE stage_tasks SET state='running', pass_id=?, attempts=attempts+1, updated_at=?, "
-                "revision=revision+1 WHERE id=? AND state='queued' AND control='run'",
+                "revision=revision+1 WHERE id=? AND state='queued' AND control='run' AND " + NOT_HELD_SQL + " AND "
+                "NOT EXISTS (SELECT 1 FROM stage_tasks o WHERE o.project_id=stage_tasks.project_id "
+                "AND o.item_id=stage_tasks.item_id AND o.family=stage_tasks.family AND o.state='running' "
+                "AND o.command_id != stage_tasks.command_id)",
                 (pass_id, now_iso(), task_id)).rowcount
         return n == 1
 
-    def progress(self, task_id: str, progress: dict[str, Any]) -> None:
+    def progress(self, task_id: str, progress: dict[str, Any], touch: bool = True) -> None:
+        """`touch=False` keeps updated_at: the scheduler's backoff is anchored on it."""
         with self._lock:
-            self._db.execute("UPDATE stage_tasks SET progress=?, updated_at=? WHERE id=?",
-                             (json.dumps(progress), now_iso(), task_id))
+            self._db.execute("UPDATE stage_tasks SET progress=?, updated_at=CASE WHEN ? THEN ? ELSE updated_at END "
+                             "WHERE id=?", (json.dumps(progress), touch, now_iso(), task_id))
             self.changed.notify_all()
 
     def finish(self, task_id: str, state: str, *, result: dict[str, Any] | None = None,
@@ -293,13 +306,27 @@ class TaskStore:
                 return "cancelled"
             ok = 0 if downstream is None else 1
             if downstream:
-                try:
-                    self.create(downstream, row["command_id"], db)
-                except Busy:
-                    ok = 0  # an older chain still owns the stage: startup/next reconcile retries
+                ok, result = self._create_downstream(db, downstream, row["command_id"], result)
             db.execute("UPDATE stage_tasks SET state='succeeded', result=?, downstream_ok=?, updated_at=?, "
                        "revision=revision+1 WHERE id=?", (json.dumps(result), ok, now_iso(), task_id))
             return "succeeded"
+
+    def _create_downstream(self, db: sqlite3.Connection, downstream: list[NewTask], command_id: str,
+                           result: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Follow-up chain all-or-nothing. Busy defers it (re-admitted once the older owner finishes); a run that
+        was cancelled/closed meanwhile skips it for good."""
+        db.execute("SAVEPOINT downstream")
+        try:
+            self.create(downstream, command_id, db)
+        except Busy as e:
+            db.execute("ROLLBACK TO downstream")
+            return 0, {**result, "downstream_deferred": {"owner": e.owner}}
+        except RunNotOpen as e:
+            db.execute("ROLLBACK TO downstream")
+            return 1, {**result, "downstream_skipped": f"run {e.control}"}
+        finally:
+            db.execute("RELEASE downstream")
+        return 1, result
 
     def request_cancel(self, ids: list[str]) -> list[str]:
         """Intent first (survives restarts), then immediate cancellation of anything not running."""
@@ -327,13 +354,31 @@ class TaskStore:
         return n
 
     def retry(self, task_id: str) -> bool:
-        """Explicit retry of the same logical inputs; never resurrects cancelled work."""
-        with self._lock:
-            n = self._db.execute(
-                "UPDATE stage_tasks SET state='queued', error=NULL, updated_at=?, revision=revision+1 "
-                "WHERE id=? AND state IN ('failed','blocked') AND control='run'", (now_iso(), task_id)).rowcount
-            self.changed.notify_all()
-        return n == 1
+        """Explicit retry of the same logical inputs; never resurrects cancelled work. Raises Busy when another
+        command's task still owns the item stage, RunNotOpen when its run was cancelled/closed."""
+        with self.txn() as db:
+            r = db.execute("SELECT * FROM stage_tasks WHERE id=?", (task_id,)).fetchone()
+            if r is None or r["state"] not in ("failed", "blocked") or r["control"] != "run":
+                return False
+            control = "run"
+            if r["run_id"]:
+                run_ctl = runcontrol.read_control(db, r["run_id"])[0]
+                if run_ctl in ("cancelled", "closed"):
+                    raise RunNotOpen(r["run_id"], run_ctl)
+                control = "paused" if run_ctl == "paused" else "run"
+            owner = db.execute(
+                f"SELECT id FROM stage_tasks WHERE project_id=? AND item_id=? AND family=? AND command_id != ? "
+                f"AND state IN ({','.join('?' * len(TASK_ACTIVE))}) LIMIT 1",
+                (r["project_id"], r["item_id"], r["family"], r["command_id"], *TASK_ACTIVE)).fetchone()
+            if owner is not None:
+                raise Busy(r["item_id"], r["family"], owner["id"])
+            db.execute("UPDATE stage_tasks SET state='queued', control=?, error=NULL, updated_at=?, "
+                       "revision=revision+1 WHERE id=?", (control, now_iso(), task_id))
+        return True
+
+    def block_queued(self, ids: list[str], error: dict[str, Any]) -> int:
+        """Conditional queued -> blocked (admission gave up); running/cancelled work is untouched."""
+        return sum(self._set(tid, ("queued",), "blocked", error=error) for tid in ids)
 
     def exhaust(self, task_id: str, err: dict[str, Any], attempts: int) -> None:
         """Stop automatic retries: the task stays blocked for an explicit operator decision."""
@@ -366,10 +411,15 @@ class TaskStore:
             self.changed.notify_all()
         return {"cancelled": c, "requeued": r, "orphans": orphans}
 
-    def pending_downstream(self) -> list[StageTask]:
+    def pending_downstream(self, project_id: str | None = None, item_id: str | None = None) -> list[StageTask]:
+        where, args = "", []
+        for col, val in (("project_id", project_id), ("item_id", item_id)):
+            if val is not None:
+                where += f" AND {col}=?"
+                args.append(val)
         with self._lock:
-            rows = self._db.execute("SELECT * FROM stage_tasks WHERE state='succeeded' AND downstream_ok=0 "
-                                    "ORDER BY seq").fetchall()
+            rows = self._db.execute("SELECT * FROM stage_tasks WHERE state='succeeded' AND downstream_ok=0"
+                                    + where + " ORDER BY seq", args).fetchall()
         return [_task(r) for r in rows]
 
     def mark_downstream(self, task_id: str) -> None:

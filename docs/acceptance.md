@@ -140,6 +140,33 @@ still overridable). Remaining: diversity flagged 5 of 6 pine picks as near-dupli
 subtle rows (compact/narrow/tall) vary modestly. Generative variants stay **experimental** until an egress-blocked run
 of the edit model (spec §8.5) is recorded.
 
+## Hardening pass (review of 8de5fe8) — 2026-09-29
+
+CPU evidence only (SIMULATED engines). Lint clean; `uv run pytest` 358 pass; `make e2e` 28 pass; web build ok.
+
+| Finding | Fix | Tests |
+|---|---|---|
+| R01 build accepted under another approval | approve clears/restores the matching attempt; accept + publish check the run's own candidate binding (`approval_mismatch`); history labels from each run's decision | `contract/test_review_binding.py` (Job + Batch routes) |
+| R08 gate commands not replay-safe | approve/accept via `commands.execute` (planned per-unit decisions, idempotent effects) | `regression/test_gate_replay.py` |
+| R02 pause not persisted / wave scope | `run_controls` table enforced at create/ready/claim/retry; `require_wave` (open run, frozen selection) | `regression/test_run_control.py` |
+| R03 retry second owner | transactional retry + claim guard (409 `busy`) | `regression/test_task_ownership.py` |
+| R04 deferred QA stranded | savepoint (no partial chain); re-admitted after each task outcome + retry-loop tick | `regression/test_task_ownership.py` |
+| R05 JPEG prepared input | profile `image_prepare.v2`: EXIF transpose, sRGB, alpha composite, PNG; old non-PNG plans fail actionably | `contract/test_variant_inputs.py` |
+| R06 renderer ignores alpha/factors | renderer `cpu_lambert.v2`: texture x factor x vertex colour, MASK/BLEND cut-out, two-sided light, required-extension refusal | `unit/test_render_materials.py` (analytic oracles) |
+| R09 readiness | edit workflow readiness gates generative methods; effective exporter checked | `contract/test_variant_inputs.py`, `test_review_binding.py` |
+| R07 provenance from current lock | generation-time model/workflow/licence receipts; `derived_licence` never better than the source | `unit/test_provenance_receipts.py` |
+| R10 worker/admission failures | worker3d `spool.Executor` survives spool/disk errors, liveness in `/health`; GPU1 acquire failures recorded, blocked after 6 | `unit/test_worker3d_spool.py`, `test_task_ownership.py` |
+| R11 index rebuild race | upserts during collection re-applied at swap; grouped cursor revision read with its page | `unit/test_index_concurrency.py` |
+
+### Release scope matrix (at this pass)
+
+| State | Capabilities |
+|---|---|
+| Implemented and tested (CPU/simulated) | Jobs + Batches with run control, review gates, direct variants, family grouping/search, candidate rounds, build attempts, provenance receipts, index rebuild |
+| Implemented, validated on target hardware at 8de5fe8 only | generative variants (GPU run above predates this pass; renderer v2 + input profile v2 not yet GPU-run) |
+| Experimental | source-conditioned generative variants (no egress-blocked edit-model run) |
+| Deferred | files + manifest exporter (folder/ZIP), project style wizard, Surface/Seamless materials, S3/GC, style-LoRA registration, Docker (non-Podman) run |
+
 ## Known limitations (this release)
 
 - 3D: upstream CuMesh simplification is not deterministic (same raw → e.g. 99 808 vs 99 221 faces); upstream export

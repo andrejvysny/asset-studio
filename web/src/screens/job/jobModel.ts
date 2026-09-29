@@ -50,6 +50,16 @@ export function pickLabel(item: ItemView, direct: boolean, kind: Kind): string {
   return `R${a.round} #${candidateKey(cand)}`;
 }
 
+/** Where an attempt came from: its own recorded source, never the item's current approval. */
+export function sourceLabel(item: ItemView, row: BuildHistoryRow, direct: boolean, kind: Kind): string {
+  if (direct) return pickLabel(item, direct, kind);
+  const src = row.source;
+  if (!src) return "";
+  const cand = item.rounds.find((r) => r.candidate_set_id === src.candidate_set_id)?.candidates.find((c) => c.id === src.candidate_id);
+  if (src.round == null) return "approved candidate";
+  return cand ? `R${src.round} #${candidateKey(cand)}` : `R${src.round}`;
+}
+
 export function isApprovedHere(item: ItemView, round: Round | undefined, cand: CandidateView | undefined): boolean {
   const a = item.approved;
   return !!a && !!round && !!cand && a.candidate_set_id === round.candidate_set_id && a.candidate_id === cand.id;

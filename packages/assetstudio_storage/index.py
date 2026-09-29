@@ -83,6 +83,8 @@ class AssetIndex:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self._lock = threading.Lock()
+        self._rebuild_lock = threading.Lock()
+        self._pending: dict[str, tuple[Any, ...]] | None = None  # upserts that land while a rebuild is collecting
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
@@ -102,10 +104,13 @@ class AssetIndex:
         self._db.execute("INSERT INTO meta VALUES ('revision', '1') ON CONFLICT(key) DO UPDATE "
                          "SET value = CAST(value AS INTEGER) + 1")
 
+    def _revision_locked(self) -> int:
+        r = self._db.execute("SELECT value FROM meta WHERE key = 'revision'").fetchone()
+        return int(r[0]) if r else 0
+
     def revision(self) -> int:
         with self._lock:
-            r = self._db.execute("SELECT value FROM meta WHERE key = 'revision'").fetchone()
-        return int(r[0]) if r else 0
+            return self._revision_locked()
 
     def needs_rebuild(self) -> bool:
         with self._lock:
@@ -117,36 +122,61 @@ class AssetIndex:
                 r = self._db.execute("SELECT family_name FROM assets WHERE asset_id = ? AND family_id = ?",
                                      (manifest.asset_id, manifest.family_id)).fetchone()
                 family_name = r[0] if r else None
-            self._db.execute(f"INSERT OR REPLACE INTO assets ({','.join(_COLUMNS)}) VALUES ({_PLACEHOLDERS})",
-                             _row(manifest, family_name))
+            row = _row(manifest, family_name)
+            self._db.execute(f"INSERT OR REPLACE INTO assets ({','.join(_COLUMNS)}) VALUES ({_PLACEHOLDERS})", row)
+            if self._pending is not None:
+                self._pending[manifest.asset_id] = row
             self._bump()
 
-    def rebuild(self, store: ProjectStore) -> dict[str, int]:
-        """Shadow table + swap: queries keep answering from the old table until the new one is complete."""
+    def _collect(self, store: ProjectStore) -> tuple[list[tuple[Any, ...]], list[str]]:
         names: dict[str, str] = {}
         for fid in store.list_ids("families"):
             fam, _ = store.get_opt(family_key(fid), AssetFamily)
             if fam is not None:
                 names[fid] = fam.name
-        rows, errors = [], 0
+        rows: list[tuple[Any, ...]] = []
+        failed: list[str] = []
         for asset_id in store.list_ids("manifests"):
             try:
                 m = store.get(manifest_key(asset_id), AssetManifest)[0]
                 rows.append(_row(m, names.get(m.family_id or "")))
             except Exception:  # a corrupt manifest is reported, not silently indexed
-                errors += 1
-        with self._lock:
-            self._db.execute("DROP TABLE IF EXISTS assets_new")
-            self._db.execute(_DDL.format(t="assets_new"))
-            self._db.executemany(f"INSERT INTO assets_new ({','.join(_COLUMNS)}) VALUES ({_PLACEHOLDERS})", rows)
-            self._db.execute("BEGIN")
+                failed.append(asset_id)
+        return rows, failed
+
+    def _swap(self, rows: list[tuple[Any, ...]]) -> None:
+        """Caller holds self._lock. Upserts recorded during collection supersede the (older) snapshot rows."""
+        insert = f"INSERT OR REPLACE INTO assets_new ({','.join(_COLUMNS)}) VALUES ({_PLACEHOLDERS})"
+        self._db.execute("DROP TABLE IF EXISTS assets_new")
+        self._db.execute(_DDL.format(t="assets_new"))
+        self._db.executemany(insert, rows)
+        self._db.executemany(insert, list((self._pending or {}).values()))
+        self._db.execute("BEGIN")
+        try:
             self._db.execute("DROP TABLE assets")
             self._db.execute("ALTER TABLE assets_new RENAME TO assets")
             self._db.execute("INSERT OR REPLACE INTO meta VALUES ('rebuilt_at', ?)", (now_iso(),))
             self._db.execute("DELETE FROM meta WHERE key = 'needs_rebuild'")
             self._bump()
             self._db.execute("COMMIT")
-        return {"indexed": len(rows), "errors": errors}
+        except BaseException:
+            self._db.execute("ROLLBACK")
+            raise
+
+    def rebuild(self, store: ProjectStore) -> dict[str, Any]:
+        """Shadow table + swap: queries keep answering from the old table until the new one is complete.
+        Upserts during the (unlocked) collection are recorded and re-applied at swap, so none is lost."""
+        with self._rebuild_lock:
+            with self._lock:
+                self._pending = {}
+            try:
+                rows, failed = self._collect(store)
+                with self._lock:
+                    self._swap(rows)
+            finally:
+                with self._lock:
+                    self._pending = None
+        return {"indexed": len(rows), "errors": len(failed), "error_ids": failed[:100]}
 
     def count(self) -> int:
         with self._lock:
@@ -170,17 +200,17 @@ class AssetIndex:
                       limit: int = 60, cursor: str | None = None) -> dict[str, Any]:
         """Filter first, then group: units are families (matching members only) or single ungrouped assets,
         ordered by their best matching member and paginated as units, so a family never splits across pages."""
-        rev = self.revision()
         qhash = hashlib.sha256(json.dumps([sorted(categories) if categories is not None else None, kind, origin, q,
                                            family_id]).encode()).hexdigest()[:16]
-        offset = _decode_cursor(cursor, qhash, rev)
-        empty = {"group_by": "family", "matching_asset_count": 0, "matching_group_count": 0, "query_revision": rev,
-                 "groups": [], "next_cursor": None}
-        if categories is not None and not categories:
-            return empty
         clause, args = _filter(categories, kind, origin, q, family_id)
         unit = "COALESCE(family_id, 'a:' || asset_id)"
-        with self._lock:
+        with self._lock:  # one critical section: the cursor revision must belong to the page it accompanies
+            rev = self._revision_locked()
+            offset = _decode_cursor(cursor, qhash, rev)
+            empty = {"group_by": "family", "matching_asset_count": 0, "matching_group_count": 0,
+                     "query_revision": rev, "groups": [], "next_cursor": None}
+            if categories is not None and not categories:
+                return empty
             n_assets, n_groups = self._db.execute(
                 f"SELECT COUNT(*), COUNT(DISTINCT {unit}) FROM assets WHERE {clause}", args).fetchone()
             heads = self._db.execute(

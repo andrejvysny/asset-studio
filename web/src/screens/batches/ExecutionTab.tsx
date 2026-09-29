@@ -75,7 +75,8 @@ export function ExecutionTab({ ctx }: { ctx: BatchCtx }) {
   const control = (action: string) => void act.run(async () => {
     await send("POST", `${V2(project)}/runs/${active!.id}:${action}`); t.reload(); ctx.reload();
   });
-  const paused = (active?.counts.paused_tasks ?? 0) > 0;
+  const paused = active?.control === "paused" || (active?.counts.paused_tasks ?? 0) > 0;
+  const ended = active?.control === "cancelled" || active?.control === "closed";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {active && (
@@ -83,7 +84,7 @@ export function ExecutionTab({ ctx }: { ctx: BatchCtx }) {
           <span className="sub">Run {active.id.slice(-8)}</span>{runPill(active.status)}
           <span className="sub">{active.counts.active_tasks} active · {active.counts.failed_tasks} failed tasks</span>
           <span style={{ flex: 1 }} />
-          <button className="btn" disabled={act.busy} onClick={() => control(paused ? "resume" : "pause")}>{paused ? "Resume" : "Pause"}</button>
+          <button className="btn" disabled={act.busy || ended} onClick={() => control(paused ? "resume" : "pause")}>{paused ? "Resume" : "Pause"}</button>
           <button className="btn" disabled={act.busy || !active.counts.active_tasks} onClick={() => control("cancel")}>Cancel run's work</button>
           <button className="btn" disabled={act.busy || active.counts.active_tasks > 0} onClick={() => control("close")}
             title="Keeps undecided items in their Jobs for a later run">Close run</button>

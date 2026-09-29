@@ -81,14 +81,14 @@ def run_detail(run_id: str, ctx: ProjectContext = Depends(project), s: Studio = 
 @router.post("/runs/{run_id}:confirm-prompts")
 def wave_confirm(run_id: str, req: prompts.ConfirmAndGenerate, ctx: ProjectContext = Depends(project),
                  s: Studio = Depends(studio)) -> JSONResponse:
-    runs.load_run(ctx, run_id)
+    runs.require_wave(s, ctx, run_id, req.items)
     return JSONResponse(prompts.confirm_and_generate(s, ctx, None, req, run_id), status_code=202)
 
 
 @router.post("/runs/{run_id}:approve-candidates")
 def wave_approve(run_id: str, req: review.Approve, ctx: ProjectContext = Depends(project),
                  s: Studio = Depends(studio)) -> dict[str, Any]:
-    runs.load_run(ctx, run_id)
+    runs.require_wave(s, ctx, run_id, req.items)
     return review.approve(s, ctx, None, req, run_id)
 
 
@@ -101,14 +101,14 @@ def wave_preview_best(run_id: str, req: review.PreviewBest, ctx: ProjectContext 
 @router.post("/runs/{run_id}:build-approved")
 def wave_build(run_id: str, req: production.BuildApproved, ctx: ProjectContext = Depends(project),
                s: Studio = Depends(studio)) -> JSONResponse:
-    runs.load_run(ctx, run_id)
+    runs.require_wave(s, ctx, run_id, req.items)
     return JSONResponse(production.build_approved(s, ctx, None, req, run_id), status_code=202)
 
 
 @router.post("/runs/{run_id}:accept-builds")
 def wave_accept(run_id: str, req: review.AcceptBuilds, ctx: ProjectContext = Depends(project),
                 s: Studio = Depends(studio)) -> dict[str, Any]:
-    runs.load_run(ctx, run_id)
+    runs.require_wave(s, ctx, run_id, req.items)
     return review.accept_builds(s, ctx, None, req, run_id)
 
 
@@ -122,7 +122,7 @@ def wave_publish_preview(run_id: str, ctx: ProjectContext = Depends(project)) ->
 @router.post("/runs/{run_id}:publish")
 def wave_publish(run_id: str, req: production.Publish, ctx: ProjectContext = Depends(project),
                  s: Studio = Depends(studio)) -> JSONResponse:
-    runs.load_run(ctx, run_id)
+    runs.require_wave(s, ctx, run_id, req.items)
     return JSONResponse(production.publish(s, ctx, None, req, run_id), status_code=202)
 
 

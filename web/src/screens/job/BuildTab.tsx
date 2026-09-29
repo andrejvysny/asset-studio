@@ -7,7 +7,7 @@ import { useProject } from "../../lib/project";
 import { BuildPanel } from "./BuildPanel";
 import * as act from "./jobActions";
 import {
-  attemptMarks, attemptPct, attemptState, DIM, FAINT, isRunning, MODE_LABEL, pickLabel, VERB,
+  attemptMarks, attemptPct, attemptState, DIM, FAINT, isRunning, MODE_LABEL, pickLabel, sourceLabel, VERB,
 } from "./jobModel";
 import type { TabProps } from "./JobWorkspace";
 
@@ -31,7 +31,8 @@ function AttemptRow({ job, item, row, n, on, onPick }:
   const is3d = job.kind === "model3d" && !job.direct;
   const [state, color] = attemptState(row, is3d);
   const note = attemptNote(item, row);
-  const line = [row.current && item.approval ? `from ${pickLabel(item, job.direct, job.kind)}` : "", settingsLine(job, item, row)]
+  const source = sourceLabel(item, row, job.direct, job.kind);
+  const line = [source ? `from ${source}` : "", settingsLine(job, item, row)]
     .filter(Boolean).join(" · ");
   return (
     <button className={`jw-attempt${on ? " on" : ""}`} onClick={onPick} aria-pressed={on} aria-label={`attempt ${n}, ${state}`}>
@@ -65,9 +66,10 @@ export function BuildTab({ job, item, reload, goTab }: TabProps) {
   const sel = newestFirst.find((x) => x.row.id === picked) ?? newestFirst.find((x) => x.row.current) ?? newestFirst[0];
   const latest = history[history.length - 1];
   const pick = pickLabel(item, job.direct, job.kind);
-  const approvalChanged = !!item.approval && !!item.build?.inputs.approval_id && item.build.inputs.approval_id !== item.approval;
+  const currentRow = history.find((h) => h.current);
   const canStart = job.direct ? item.legal.run_transform && history.length === 0
-    : !!item.approval && (history.length === 0 || approvalChanged) && !isRunning(latest) && !item.accepted_build;
+    : !!item.approval && !isRunning(latest) && !item.accepted_build
+      && (history.length === 0 || !item.build || !currentRow?.matches_approval);
   const blocked = !job.direct && !job.recipe.build_available;
   const verb = VERB[job.kind];
   const start = () => void a.run(async () => {

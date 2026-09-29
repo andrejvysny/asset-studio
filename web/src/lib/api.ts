@@ -76,7 +76,9 @@ export interface AssetDetail {
 export interface Published { asset_id: string; version_id: string; display_version: number;
   /** The accepted build this publication committed; null/absent on publications recorded before variants. */
   build_run_id?: string | null }
-export interface Task { op_id: string; state: string; error: string | null; progress: { done?: number; total?: number } }
+export interface Task { op_id: string; state: string; error: string | null;
+  progress: { done?: number; total?: number; downstream_pending?: boolean;
+    admission?: { code: string; message: string; failures: number; since: string } } }
 export interface CheckResult { rule_id: string; source: string; severity: "major" | "minor";
   result: "pass" | "fail" | "unavailable" | "not_applicable"; reason: string; observed: Json; threshold: Json;
   evaluator?: string }
@@ -110,6 +112,11 @@ export interface BuildMetaReport { mesh?: { triangles?: number };
 export interface BuildHistoryRow { id: string; status: string; result: string | null; kind: string; error: string | null;
   derived_from: string | null; created_at: string; preview: string | null; checkpoints: string[]; has_raw: boolean;
   accepted: boolean; current: boolean;
+  /** The approval decision this attempt was built from, the candidate that decision bound (null: direct
+   * transform) and whether that is still the item's approved candidate. */
+  approval_id: string | null;
+  source: { candidate_set_id: string; candidate_id: string; round: number | null } | null;
+  matches_approval: boolean;
   /** How the run was requested. "reexport" for re-export runs. */
   mode: BuildMode | "reexport"; seed: number | null; overrides: RebuildOverrides }
 export interface ItemView {
@@ -186,7 +193,10 @@ export interface RunCounts { jobs: number; items: number; enhanced: number; enha
   builds_valid: number; builds_invalid: number; builds_failed: number; accepted: number; published: number;
   active_tasks: number; failed_tasks: number; paused_tasks: number }
 export interface RunSummary { id: string; batch_id: string | null; plan_id: string; created_at: string;
-  closed_at: string | null; stop_at: string; status: string; counts: RunCounts; waves: string[]; job_ids: string[] }
+  closed_at: string | null; stop_at: string; status: string; counts: RunCounts; waves: string[]; job_ids: string[];
+  /** Persisted run intent: new work is admitted paused, or refused when cancelled/closed. */
+  control: RunControl; control_revision: number }
+export type RunControl = "run" | "paused" | "cancelled" | "closed";
 /** A Batch: a named group of Jobs scheduled together. It owns no item content. */
 export interface BatchGroup { id: string; alias: string; title: string; job_ids: string[]; kinds: Kind[]; jobs: number;
   items: number; revision: number; created_at: string; updated_at: string; runs: string[];

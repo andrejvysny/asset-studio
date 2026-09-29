@@ -90,11 +90,20 @@ creates a new prompt revision and candidate set for selected rows only; history 
   guarded item mutations) → recorded response. Intents left open by a crash are replayed at startup. Idempotency keys
   are scoped by project + action and bound to the whole request (including target ids).
 - **Downstream**: a stage's success and its required follow-up tasks (e.g. generation → QA) commit in ONE journal
-  transaction; startup also repairs any succeeded task whose downstream is not marked created.
+  transaction (inside a savepoint, so a chain is all-or-nothing); startup also repairs any succeeded task whose
+  downstream is not marked created. A chain deferred behind an older owner of the same item stage is re-admitted
+  after every task outcome and on each retry-loop tick (no restart needed).
 - **Cancel/pause**: intent (`control`) is separate from execution state, survives restarts and is never cleared by a
-  retry; state transitions are conditional. Cancelling a run affects only its tasks. Pause admits nothing new.
+  retry; state transitions are conditional. Cancelling a run affects only its tasks. Run-level intent
+  (`run_controls`: run/paused/cancelled/closed) is the admission authority: tasks of a paused run are created paused
+  and never dispatched, a cancelled/closed run admits nothing (`run_not_open`). Wave routes validate run openness and
+  frozen selection before any effect.
+- **Ownership**: one active owner per item stage family, enforced by create, retry (409 `busy`) and claim.
+- **Review binding**: a build attempt belongs to the candidate decision it was built from; acceptance and publication
+  require it to match the current approval's candidate. Re-approving a candidate restores its latest attempt.
 - **Retries**: explicit retry = same logical inputs; automatic retries of transiently blocked work are bounded
-  (6 attempts / 2 h) and back off per resource; an explicit retry bypasses the backoff.
+  (6 attempts / 2 h) and back off per resource; an explicit retry bypasses the backoff. GPU1 acquisition failures
+  are recorded on waiting tasks (`progress.admission`) and block them after 6 consecutive failures.
 - **Failure scope** (`coordinator/errors.py`): invalid input/output → that item fails, others continue; engine
   unavailable / ownership unknown → the resource blocks (pass stops, other lanes continue); corrupt artifact → blocks
   dependants with an explicit repair action; unexpected exception → that task fails with its type, lane keeps serving.

@@ -5,7 +5,7 @@ import { BAD, INFO, OK, WARN } from "../../components/progress";
 
 export function runPill(status: string): ReactNode {
   const cls = status === "running" || status === "waiting_for_review" || status === "paused" ? "warn"
-    : status === "completed" ? "ok" : status === "completed_with_errors" ? "bad" : "none";
+    : status === "completed" ? "ok" : status === "completed_with_errors" || status === "cancelled" ? "bad" : "none";
   return <span className={`pill ${cls}`}>{status.replaceAll("_", " ")}</span>;
 }
 
