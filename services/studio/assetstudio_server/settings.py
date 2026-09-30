@@ -46,6 +46,8 @@ class Settings:
     runner_heartbeat_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_HEARTBEAT_S", 15))
     runner_lease_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_LEASE_S", 60))
     runner_offer_ttl_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_OFFER_TTL_S", 30))
+    runner_maintenance_s: float = field(
+        default_factory=lambda: float(os.environ.get("STUDIO_RUNNER_MAINTENANCE_S", 5.0)))
     runner_token_ttl_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_TOKEN_TTL_S", 900))
     runner_audience: str = field(default_factory=lambda: os.environ.get(
         "STUDIO_RUNNER_AUDIENCE", os.environ.get("STUDIO_PUBLIC_URL", "http://127.0.0.1:8190")))

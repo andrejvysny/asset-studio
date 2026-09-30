@@ -22,3 +22,6 @@ tests/gpu/artifacts/variants/
 comfyui/user/
 projects/*
 !projects/.gitkeep
+
+# subagent memory notes (local only)
+**/.claude/agent-memory/

@@ -185,6 +185,52 @@ def cmd_storage_verify(s: Settings, a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def _auth_store(s: Settings):  # noqa: ANN202 - AuthStore
+    from .authstore import AuthStore
+
+    return AuthStore(s.instance_dir / "auth.sqlite")
+
+
+def _csv_or_all(value: str) -> list[str] | str:
+    return "*" if value.strip() == "*" else [v.strip() for v in value.split(",") if v.strip()]
+
+
+def cmd_runners(s: Settings, a: argparse.Namespace) -> int:
+    """Runner groups, registration tokens and revocation; opens the auth DB directly (no server needed)."""
+    store = _auth_store(s)
+    try:
+        if a.sub == "group-create":
+            try:
+                _print(store.create_group(a.name, _csv_or_all(a.projects), _csv_or_all(a.operations),  # type: ignore[arg-type]
+                                          [x for x in a.labels.split(",") if x], a.ephemeral, "cli"))
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif a.sub == "token":
+            group = store.get_group(a.group) or next((g for g in store.groups() if g["name"] == a.group), None)
+            if group is None:
+                print(f"unknown runner group {a.group!r}", file=sys.stderr)
+                return 1
+            try:
+                print(store.create_registration_token(group["id"], a.ttl, "cli"))
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif a.sub == "list":
+            for r in store.runners():
+                print(f"{r['id']}  {r['name']:20} {r['state']:8} group={r['group_id']}  "
+                      f"last_seen={r['last_seen_at'] or '-'}")
+        else:
+            if store.get_runner(a.runner) is None:
+                print(f"unknown runner {a.runner!r}", file=sys.stderr)
+                return 1
+            store.revoke_runner(a.runner, "cli")
+            print(f"{a.runner} revoked")
+    finally:
+        store.close()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="assetstudio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -235,6 +281,22 @@ def main(argv: list[str] | None = None) -> int:
         o = op.add_parser(name)
         o.add_argument("task")
         o.set_defaults(fn=cmd_operations)
+    rn = sub.add_parser("runners").add_subparsers(dest="sub", required=True)
+    gc = rn.add_parser("group-create", help="create a runner group")
+    gc.add_argument("--name", required=True)
+    gc.add_argument("--projects", default="*", help="'*' or comma-separated project ids")
+    gc.add_argument("--operations", default="*", help="'*' or comma-separated operations")
+    gc.add_argument("--labels", default="", help="comma-separated")
+    gc.add_argument("--ephemeral", action="store_true")
+    gc.set_defaults(fn=cmd_runners)
+    rt = rn.add_parser("token", help="print a one-time registration token for a group")
+    rt.add_argument("--group", required=True, help="group name or id")
+    rt.add_argument("--ttl", type=int, default=900, help="seconds (1..3600)")
+    rt.set_defaults(fn=cmd_runners)
+    rn.add_parser("list").set_defaults(fn=cmd_runners)
+    rr = rn.add_parser("revoke")
+    rr.add_argument("runner")
+    rr.set_defaults(fn=cmd_runners)
     args = p.parse_args(argv)
     if args.cmd == "serve":
         from .main import run
