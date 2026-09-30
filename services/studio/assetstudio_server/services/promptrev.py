@@ -9,6 +9,7 @@ from assetstudio_storage.project import ProjectStore
 
 from .edit_templates import EDIT_NEGATIVE, FIXED_SENTENCE, edit_template
 from .records import prompt_key
+from .reference_bindings import ENHANCER_MAX_IMAGES, resolve_references
 
 
 def compose(description: str, suffix: str) -> str:
@@ -61,7 +62,9 @@ def edited_bindings(store: ProjectStore, item: JobItem, variant: dict[str, Any] 
     old = parent.bindings if parent else {}
     if not refresh:
         return dict(old)
+    sel = resolve_references(store, item, store.read_snapshot(item.snapshot_sha), "prompt_guidance",
+                             ENHANCER_MAX_IMAGES - (1 if variant else 0))
     fresh = {"preset": item.enhance_preset, "mode": "edit" if variant else "t2i",
-             "references_revision": item.references_revision, "reference_ids": [r["id"] for r in item.references],
-             **(variant or {})}
+             "references_revision": item.references_revision, "reference_ids": sel.ids(),
+             "references_excluded": sel.excluded_list(), **(variant or {})}
     return {**old, **fresh}

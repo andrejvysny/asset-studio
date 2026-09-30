@@ -120,6 +120,31 @@ def register(mcp: FastMCP, deps: Deps) -> None:
             raise ToolError(f"unknown category {category_id!r}; categories: {', '.join(sorted(effective)) or 'none'}")
         return {"category_id": category_id, "effective": effective[category_id]}
 
+    @mcp.tool(annotations=READ)
+    async def config_effects(ctx: Context, category_id: str | None = None, kind: str | None = None,
+                             mode: Literal["t2i", "edit"] = "t2i", job_id: str | None = None,
+                             item_id: str | None = None, project_id: str | None = None) -> dict[str, Any]:
+        """What each setting is PLANNED to do and which consumer reads it: classification applied |
+        conditioning_only (sent to a model, compliance not guaranteed) | advisory_only | not_applicable |
+        unsupported (nothing reads it; never assume it works). Without job_id: a new Job in category_id/kind
+        (saved config). With job_id+item_id: that item's frozen configuration plus which reference images reach
+        the enhancer and compare-QA, and which were excluded and why."""
+        c = deps.client(ctx)
+        pid = await deps.project_id(c, project_id)
+        if job_id or item_id:
+            if not (job_id and item_id):
+                raise ToolError("invalid_request: pass both job_id and item_id, or neither")
+            return await c.get(f"/api/v2/projects/{pid}/jobs/{job_id}/items/{item_id}/effects")
+        return await c.get(f"/api/v1/projects/{pid}/config:effects", category_id=category_id, kind=kind, mode=mode)
+
+    @mcp.tool(annotations=READ)
+    async def style_history(ctx: Context, style_id: str, project_id: str | None = None) -> dict[str, Any]:
+        """Immutable revisions of one style profile, newest first (`current` = the content in the config now).
+        To restore one, config_set section=styles key=style_id with its `content`."""
+        c = deps.client(ctx)
+        pid = await deps.project_id(c, project_id)
+        return await c.get(f"/api/v1/projects/{pid}/styles/{style_id}/revisions")
+
     @mcp.tool(annotations=WRITE)
     @with_sections
     async def config_set(ctx: Context, section: EditSection, value: dict[str, Any], key: str | None = None,

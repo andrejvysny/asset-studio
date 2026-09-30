@@ -3,8 +3,6 @@ candidates to them; they are never fed to the image model. Every change bumps `r
 confirmation binds, so a prompt written against older references cannot be confirmed silently."""
 from __future__ import annotations
 
-import hashlib
-import io
 import math
 from typing import Any, Literal
 
@@ -204,27 +202,3 @@ def set_preset(studio: Studio, ctx: ProjectContext, job_id: str, item_id: str, r
         item.enhance_preset = req.preset
         item.references_revision += 1  # the preset shapes the instruction text: same staleness rule
     return _change(studio, ctx, job_id, item_id, req.expected_item_revision, fn)
-
-
-def _cropped(data: bytes, crop: dict[str, float]) -> bytes:
-    from PIL import Image
-
-    with Image.open(io.BytesIO(data)) as im:
-        w, h = im.size
-        box = (round(crop["x"] * w), round(crop["y"] * h), round((crop["x"] + crop["w"]) * w),
-               round((crop["y"] + crop["h"]) * h))
-        out = io.BytesIO()
-        im.crop(box).convert("RGBA" if im.mode in ("RGBA", "LA", "P") else "RGB").save(out, "PNG")
-    return out.getvalue()
-
-
-def reference_inputs(ctx: ProjectContext, item: JobItem) -> list[tuple[bytes, str, str]]:
-    """(bytes, "reference", note) per item reference, verified against the recorded digest, crop applied.
-    Raises IntegrityError when a reference no longer matches what the user attached."""
-    out = []
-    for r in item.references[:MAX_REFERENCES]:
-        data = ctx.store.artifact_bytes(r["artifact_id"])
-        if hashlib.sha256(data).hexdigest() != r["sha256"]:
-            raise IntegrityError(f"reference {r['id']} differs from what was attached")
-        out.append((_cropped(data, r["crop"]) if r.get("crop") else data, "reference", r.get("note", "")))
-    return out

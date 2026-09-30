@@ -54,6 +54,22 @@ def test_style_roundtrip_merge_and_errors(api: Api) -> None:
     run(api, body)
 
 
+def test_style_history_and_effects_tools(api: Api) -> None:
+    new_project(api)
+
+    async def body(s: ClientSession, app: Any) -> None:
+        await call(s, "config_set", section="styles", key="warm", value={"guide": "v1"})
+        await call(s, "config_set", section="styles", key="warm", value={"guide": "v2"}, merge=True)
+        await call(s, "config_set", section="defaults", value={"kind": {"mode": "value", "value": "concept_art"},
+                                                               "style": {"mode": "value", "value": "warm"}})
+        hist = (await call(s, "style_history", style_id="warm"))["revisions"]
+        assert [r["content"]["guide"] for r in hist] == ["v2", "v1"] and hist[0]["actor"] == "agent:claude"
+        fx = (await call(s, "config_effects"))["effects"]
+        assert next(e for e in fx if e["field"] == "style.guide")["classification"] == "conditioning_only"
+        assert "both job_id and item_id" in await call_error(s, "config_effects", job_id="job_x")
+    run(api, body)
+
+
 def test_category_upsert_effective_and_pipelines(api: Api) -> None:
     new_project(api)
 

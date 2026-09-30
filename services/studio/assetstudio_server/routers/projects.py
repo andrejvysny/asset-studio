@@ -6,18 +6,22 @@ import json
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from assetstudio_core.config import StudioConfig, parse_config
-from assetstudio_core.inheritance import name_parts, resolve, validate_semantics
+from assetstudio_core.effects import config_warnings, field_effects
+from assetstudio_core.inheritance import ResolutionError, build_snapshot, name_parts, resolve, validate_semantics
+from assetstudio_core.kinds import Kind
 from assetstudio_core.naming import render_name, slug
 from assetstudio_core.recipes import RECIPES
 from assetstudio_core.safeyaml import ParseError, load_yaml
 from assetstudio_storage.repo import Conflict
+from assetstudio_storage.styles import record_style_revisions, style_history
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from .. import actor
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..services import media as media_svc
@@ -115,6 +119,12 @@ def _parse_body(body: ConfigBody) -> tuple[StudioConfig | None, list[dict[str, A
     return cfg, [e.model_dump() for e in validate_semantics(cfg)]
 
 
+def _warnings(cfg: StudioConfig) -> list[dict[str, str]]:
+    scopes = {"defaults": cfg.defaults.model_dump(mode="json")}
+    scopes |= {f"categories.{c.id}.defaults": c.defaults.model_dump(mode="json") for c in cfg.categories}
+    return config_warnings(scopes)
+
+
 def _config_view(ctx: ProjectContext) -> dict[str, Any]:
     cfg, _ = ctx.config()
     effective = {}
@@ -127,7 +137,7 @@ def _config_view(ctx: ProjectContext) -> dict[str, Any]:
             render_name(naming, n, root, sub, str(res["kind"].value or ""), "a")
             for n in ("Example item", "Second example")]
     return {"config": cfg.model_dump(mode="json"), "yaml": ctx.store.config_text(cfg), "revision": cfg.revision,
-            "effective": effective, "categories": category_tree(ctx)}
+            "effective": effective, "categories": category_tree(ctx), "warnings": _warnings(cfg)}
 
 
 @router.get("/projects/{project_id}/config")
@@ -139,7 +149,22 @@ def get_config(ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
 def validate_config(body: ConfigBody, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
     cfg, errors = _parse_body(body)
     return {"ok": cfg is not None and not errors, "errors": errors,
-            "config": cfg.model_dump(mode="json") if cfg else None}
+            "warnings": _warnings(cfg) if cfg else [], "config": cfg.model_dump(mode="json") if cfg else None}
+
+
+@router.get("/projects/{project_id}/config:effects")
+def config_effects(ctx: ProjectContext = Depends(project), category_id: str | None = None,
+                   kind: Kind | None = None, mode: Literal["t2i", "edit"] = "t2i") -> dict[str, Any]:
+    """Planned effect of every setting a new Job in this scope would freeze. Side-effect free."""
+    cfg, _ = ctx.config()
+    if category_id is not None and cfg.category(category_id) is None:
+        raise ApiError(404, "unknown_category", f"no category {category_id!r}")
+    try:
+        snap = build_snapshot(cfg, category_id, {"kind": kind.value} if kind else None)
+    except ResolutionError as e:
+        raise ApiError(422, "unresolved", str(e)) from e
+    return {"planned": True, "category_id": category_id, "recipe": snap["recipe"], "mode": mode,
+            "effects": [e.model_dump(mode="json") for e in field_effects(snap, mode)]}
 
 
 @router.patch("/projects/{project_id}/config")
@@ -165,8 +190,19 @@ def patch_config(body: PatchConfig, ctx: ProjectContext = Depends(project), s: S
             ctx.store.write_config(cfg, token)
         except Conflict as e:
             raise ApiError(409, "stale_config", "configuration changed on disk; reload") from e
+        record_style_revisions(ctx.store, cfg, actor.current())
     s.events.publish("config", project_id=ctx.id)
     return _config_view(ctx)
+
+
+@router.get("/projects/{project_id}/styles/{style_id}/revisions")
+def style_revisions(style_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
+    """Immutable history of one style profile, newest first. Restore = save the old content as a new config."""
+    cfg, _ = ctx.config()
+    revisions = style_history(ctx.store, cfg, style_id, None if ctx.read_only else actor.current())
+    if not revisions and style_id not in cfg.styles:
+        raise ApiError(404, "unknown_style", f"no style {style_id!r} and no history")
+    return {"style_id": style_id, "revisions": revisions}
 
 
 # --- storage / runtime ----------------------------------------------------------------------------------------

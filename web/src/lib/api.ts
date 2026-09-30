@@ -239,11 +239,26 @@ export interface Runtime {
   models: ModelRow[]; licences: { id: string; name: string; licence: string; status: string; note?: string }[];
   recipes: RecipeInfo[];
 }
+export interface ConfigWarning { path: string; message: string }
 export interface ConfigView {
-  config: StudioConfig; yaml: string; revision: number; categories: CategoryNode[];
+  config: StudioConfig; yaml: string; revision: number; categories: CategoryNode[]; warnings: ConfigWarning[];
   effective: Record<string, Record<string, { value: Json; mode: string; source: string }> & {
     _naming_examples?: string[] }>;
 }
+export type EffectClass = "applied" | "conditioning_only" | "advisory_only" | "not_applicable" | "unsupported";
+/** Planned mechanism of one resolved setting; not evidence that anything ran. */
+export interface Effect { field: string; value: Json; source: string; consumer: string; classification: EffectClass; note: string }
+/** GET /config:effects (saved config, planned for new Jobs). 422 `unresolved` when no kind resolves. */
+export interface EffectsView { planned: true; category_id: string | null; recipe: { id: string; version: number; kind: Kind };
+  mode: "t2i" | "edit"; effects: Effect[] }
+export interface StyleProfile { label: string; guide: string; negative: string; palette: PaletteColor[] }
+export interface StyleRevision { style_id: string; sha256: string; content: StyleProfile; config_revision: number;
+  created_at: string; actor: string; current: boolean }
+export interface RefBinding { id: string; origin: "item" | "project_set"; artifact_id: string; sha256: string; crop: Crop | null; note: string }
+export interface RefSelection { limit: number; selected: RefBinding[]; excluded: { id: string; reason: string }[] }
+/** GET /jobs/{j}/items/{i}/effects: what the item's frozen snapshot does and which references reach which consumer. */
+export interface ItemEffects { planned: true; item_id: string; snapshot_sha: string; mode: "t2i" | "edit"; effects: Effect[];
+  references: { prompt_guidance: RefSelection; qa_reference: RefSelection } }
 export interface Override { mode: "inherit" | "value" | "disabled"; value: Json }
 export interface CategoryCfg { id: string; parent_id: string | null; slug: string; label: string; archived: boolean;
   defaults: Record<string, Override>; metadata: Record<string, string> }
@@ -256,7 +271,7 @@ export interface StudioConfig {
   defaults: Record<string, Override>; categories: CategoryCfg[];
   pipelines: Record<string, { recipe_version: number; parameters: Record<string, Json>; template: string | null }>;
   qa_rulesets: Record<string, { label: string; kind: Kind | null; rules: QaRuleCfg[]; policy: { minor_fail_limit: number } }>;
-  styles: Record<string, { label: string; guide: string; negative: string; palette: PaletteColor[] }>;
+  styles: Record<string, StyleProfile>;
   reference_sets: Record<string, { label: string; mode: string; images: { artifact_id: string; label: string;
     role: string; source_rights: string }[] }>;
   export_presets: Record<string, Json>;

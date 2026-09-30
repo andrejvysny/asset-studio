@@ -206,6 +206,8 @@ class FakeAux:
         self.loads: dict[str, int] = {"vlm": 0, "birefnet": 0}
         self.calls: list[str] = []
         self.vlm_answers: dict[str, Any] | None = None
+        self.enhance_images: list[list[tuple[str, str]]] = []  # per call: (role, sha256 hex) of each image
+        self.compare_images: list[list[tuple[str, str]]] = []
         self.during_compare: Callable[[int], None] | None = None  # test hook: called with the compare ordinal
         self.gpu = _FakeLease()
 
@@ -234,8 +236,11 @@ class FakeAux:
                 execution_id: str | None = None, preset: str = "conservative", mode: str = "t2i",
                 images: list[tuple[bytes, str, str]] | None = None, preserve: str = "",
                 change: str = "") -> dict[str, Any]:
+        if len(images or []) > 4:  # mirrors the real aux /enhance cap
+            raise EngineRejected(f"at most 4 images, got {len(images or [])}")
         self._use("vlm", epoch)
         self.calls.append("enhance")
+        self.enhance_images.append([(role, hashlib.sha256(b).hexdigest()) for b, role, _ in images or []])
         text = brief.strip().rstrip(".")
         if mode == "edit":
             desc = (f"Edit the source object: {change or text}. Keep: {preserve or 'its identity'}. "
@@ -255,6 +260,7 @@ class FakeAux:
                 epoch: int, execution_id: str | None = None) -> dict[str, Any]:
         self._use("vlm", epoch)
         self.calls.append("compare")
+        self.compare_images.append([(role, hashlib.sha256(b).hexdigest()) for b, role, _ in images])
         with self.gpu.activity(epoch):
             if self.during_compare is not None:
                 self.during_compare(len([c for c in self.calls if c == "compare"]))

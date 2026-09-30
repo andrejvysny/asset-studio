@@ -187,6 +187,7 @@ def build_snapshot(cfg: StudioConfig, category_id: str | None, item: dict[str, A
 
     snap = {
         "schema_version": 1,
+        "reference_routing": 1,  # project reference sets are routed to their consumers (absent = older snapshot)
         "project_id": cfg.project.id,
         "config_revision": cfg.revision,
         "category_id": category_id,

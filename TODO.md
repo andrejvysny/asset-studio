@@ -1,3 +1,22 @@
+# TODO — Style correctness + lean profiles (2026-09-30)
+
+Plan: ~/.claude/plans/ultra-snappy-castle.md (spec "Configurable Game Styles and 3D Production", Phase 0 + lean Phase 1).
+Owner: project reference sets route for new snapshots only; enhancer order source > item refs > project set, excluded
+recorded; no StylePackage/5-profile/schema v2 yet.
+
+- [x] 0a regression tests (FakeAux captures inputs + 4-image cap): set routing, qa_reference, image_conditioning 422,
+      legacy snapshot inert, variant source + 4 refs
+- [x] 0b reference_bindings resolver, `reference_routing` snapshot marker, prompt/qa_compare wiring, admission block
+- [x] 0c effects.py + config:effects / item effects endpoints + non-fatal config warnings
+- [x] 1a style revisions store + history API
+- [x] 1b web: multi-style, history, effect panel, labels, set refs in Job refs panel, "no effect yet" markers
+- [x] 1c docs (SPEC, architecture, style-effects.md), e2e, MCP read tools (config_effects, style_history)
+
+Result: lint clean, 410 backend + 33 e2e pass, web build ok (SIMULATED engines; no GPU run needed).
+Follow-ups:
+- [ ] spec Phase 2: exporter alpha mode (mask/blend + cutoff) + independent double_sided; typed geometry cleanup
+- [ ] effects panel follows the scope's resolved style, not the selected style chip
+
 # TODO — MCP server for remote agents (2026-09-30)
 
 Plan: ~/.claude/plans/act-as-senior-software-sunny-bonbon.md. Owner: agents pass all gates (actor recorded), in-process

@@ -14,6 +14,7 @@ from ..registry import ProjectContext
 from ..services import jobs as jsvc
 from ..services import production, prompts, references, review, runs
 from ..services import runtime as runtime_svc
+from ..services.effects_view import item_effects
 from ..services.records import load_job
 from ..studio import Studio
 from .deps import project, studio
@@ -58,6 +59,12 @@ def create(req: CreateJobV2, ctx: ProjectContext = Depends(project), s: Studio =
 def detail(job_id: str, ctx: ProjectContext = Depends(project), s: Studio = Depends(studio)) -> dict[str, Any]:
     job, _ = load_job(ctx.store, job_id)
     return jsvc.job_detail(s, ctx, job_id, runtime_svc.build_readiness(s, job.recipe_id))
+
+
+@router.get("/{job_id}/items/{item_id}/effects")
+def effects(job_id: str, item_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
+    """Planned effect of this item's frozen configuration + its reference routing (not execution evidence)."""
+    return item_effects(ctx, job_id, item_id)
 
 
 @router.get("/{job_id}/builds/{run_id}")

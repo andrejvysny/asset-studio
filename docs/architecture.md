@@ -38,6 +38,7 @@ The core imports no FastAPI, CUDA or ComfyUI.
 | runs, plans, waves | `runs/<brn_…>.json` (frozen selection), `runs/plans/<sel_…>.json` (frozen, hashed), `waves/<wav_…>.json` |
 | readable names | `names/<name_id>.json` (atomic create-if-absent: authoritative uniqueness; the index is only a cache) |
 | media library | `media/<med_…>.json` (id derived from content sha256: same bytes = same item; name, note, tags, source rights/URL, `archived_at`, revision) → `reference` + `preview` artifacts. Every `references:upload` lands here. Guidance only; archive hides, never deletes (Job refs keep working). A future blob GC must treat these artifacts as roots |
+| style history | `styles/<style_id>/<sha256>.json` (immutable, one per distinct content; sha = the prompt revision's `style_sha`; written after each config save, backfilled on read). `studio.yaml` stays the authority |
 | publication / import receipts | `publications/<op>.json`, `imports/<imp>.json` (written before any cleanup) |
 | live dispatch | instance journal (SQLite, same host only): the ONLY authority for task state |
 | search | instance index (SQLite, rebuilt from manifests: `storage:rebuild-index`) |
@@ -55,6 +56,21 @@ The core imports no FastAPI, CUDA or ComfyUI.
   `:accept-builds`, `:publish`). Each binds the exact then-current revisions; every unit still gets its own immutable
   decision record. Unselected rows stay where they are and can join a later wave or a later run.
 - A Job in an open run cannot be started elsewhere (409); its Job-level actions become scoped continuations of that run.
+
+## Style and reference routing
+
+A Job item freezes its effective configuration in a snapshot. What each field is planned to do is reported by
+`assetstudio_core.effects.field_effects` (`GET …/config:effects` for a new Job, `GET …/jobs/{j}/items/{i}/effects` for an
+existing item): `applied`, `conditioning_only` (sent to a model, compliance not guaranteed), `advisory_only`,
+`not_applicable` or `unsupported` (nothing reads it). This is the planned mechanism, not execution evidence. Config
+responses list set-but-inert fields as non-fatal `warnings`. Field-by-field trace: `docs/style-effects.md`.
+
+References are selected by `services/reference_bindings.resolve_references` for both consumers: item references first,
+then the snapshot's project reference set when its mode names the consumer (`prompt_guidance` → enhancer,
+`qa_reference` → compare QA). The enhancer takes at most 4 images and a variant's source uses one of them. Everything
+left out is recorded with a reason in the prompt revision's `references_excluded` (and in compare-QA inputs). A set in
+`image_conditioning` mode blocks generation (`reference_conditioning_unavailable`). Snapshots written before routing
+existed (no `reference_routing` key) never route their set; their images are listed as excluded.
 
 ## Lifecycle
 

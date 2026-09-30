@@ -123,8 +123,10 @@ safe connectivity, delivered-GLB validation and final previews; versioned safe r
 
 ## 10. Style, references, LoRAs
 
-Optional style profiles (guide feeds enhancer/QA, not pasted verbatim), palettes with scopes, immutable reference sets
-with explicit modes (prompt guidance / image conditioning / QA reference; block rather than silently downgrade), LoRAs
+Optional style profiles (guide feeds enhancer/QA, not pasted verbatim) with immutable revision history, palettes with
+scopes, immutable reference sets with explicit modes (prompt guidance → enhancer / QA reference → compare QA / image
+conditioning → blocked; never silently downgraded), a planned-effect report per field (`unsupported` when nothing reads
+it), LoRAs
 registered with hash, base, triggers, licence; `none`, disabled and strength 0.0 are real values; no runtime downloads.
 
 ## 11. Library, imports, publication
@@ -240,3 +242,4 @@ portable data; self-hosted generation; offline local acceptance; recoverable fai
 | 2026-09-29 | 2026-09-29 owner request: all projects consolidated into "Demo 3D" (6 assets republished with `transferred_from` provenance; 4 projects removed; backup `~/assetstudio-backups/2026-09-29-consolidate`). |
 | 2026-09-29 | **Media Library** (owner request): per-project brainstorm images (PNG/JPEG; WebP stored as PNG), flat grid + search + tags, soft archive, source rights default `unknown`. Items are picked as guidance-only references (New Job, Job refs panel, Style reference sets, "New Job from media"); Job refs record `origin: media` + `media_id`; archived media is refused for new refs. Non-image files, boards and hard delete are out of scope. |
 | 2026-09-30 | **MCP server for remote agents** (owner request). The endpoint runs in the Studio process on its own listener (:8191) so `/api` and the UI are never exposed. Bearer tokens (read/full), CLI-managed. Tools are a facade over REST (in-process ASGI loopback), with no second implementation of invariants. Owner decision: agents may pass all human gates; decisions record `actor=agent:<token>` (persisted in the command intent, survives replay). Binaries: inline base64 ≤16 MiB + one-time signed upload URL / signed download URL. No URL fetching (SSRF). OAuth deferred. |
+| 2026-09-30 | **Style correctness + lean profiles** (owner spec "Configurable Game Styles and 3D Production", Phase 0 + lean Phase 1). Project reference sets now reach their consumer by mode (new Jobs only; older snapshots unchanged); `image_conditioning` blocks generation; enhancer order source > item refs > project set with exclusions recorded (fixes a 5-image enhancer overflow on variants). Field effect report + non-fatal warnings for inert fields (`build_profile`, `export_presets`, budget `size_px`/`frames`). Multi-style editing with immutable revisions. StylePackage/typed production-runtime profiles deferred until they have consumers. |

@@ -60,7 +60,7 @@ Python SDK: `streamable_http_client(url, http_client=httpx.AsyncClient(headers={
 | Group | Tools |
 |---|---|
 | Studio | studio_overviewᴿ, create_project, register_project, project_summaryᴿ, list_recipesᴿ, list_lorasᴿ, runtime_statusᴿ |
-| Config | config_getᴿ, config_effectiveᴿ, config_set, config_delete, config_validateᴿ, config_replace_yaml |
+| Config | config_getᴿ, config_effectiveᴿ, config_effectsᴿ, style_historyᴿ, config_set, config_delete, config_validateᴿ, config_replace_yaml |
 | Library | list_categoriesᴿ, search_assetsᴿ, get_assetᴿ, update_asset, set_current_version, list_familiesᴿ, update_family, get_artifactᴿ, get_download_urlᴿ |
 | Files, media, import | upload_file, create_upload_url, search_mediaᴿ, add_media, update_media, archive_media, import_asset, shot_list_getᴿ, shot_list_put, shot_list_import |
 | Jobs | create_job, list_jobsᴿ, get_jobᴿ, run_job, cancel_job, item_reference, set_item_preset, wait_for_jobᴿ |
