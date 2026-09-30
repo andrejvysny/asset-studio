@@ -263,3 +263,35 @@ activation, direct mode is reachable only through the switch command on a quiesc
 
 A route-table dependency (method + path group) enforces roles and fails closed for unmapped mutating routes. In
 profile S (loopback, no proxy) the local operator is `owner`.
+
+## R17 HTTP surface (`/api/runner/v1`)
+
+Bodies are the `assetstudio_protocol` DTOs. Errors are `ErrorBody` JSON with the HTTP status below. Every route except
+the first three requires `Authorization: Bearer <access token>`; routes taking a session also check that the session
+is the runner's active one (`stale_session`, 409).
+
+| Method + path | Body → response | Notes |
+|---|---|---|
+| `POST /register` | `RegisterRequest` → `RegisterResponse` | unauthenticated; 403 `unauthorized` with reason on refusal |
+| `POST /token/challenge` | `ChallengeRequest` → `Challenge` | unauthenticated; rate-limited (R14) |
+| `POST /token` | `TokenRequest` → `AccessToken` | 401 on a bad signature, consumed/expired nonce or revoked runner |
+| `POST /sessions` | `SessionHello` → `SessionAccepted` | idempotent by `boot_id`; 409 `protocol_incompatible` |
+| `PUT /sessions/{sid}/inventory` | `Inventory` → `InventoryAck` | 409 `forbidden_scope` on a device already claimed by another runner |
+| `POST /sessions/{sid}/heartbeat` | `Heartbeat` → `HeartbeatResponse` | renews leases, returns controls and receipts |
+| `POST /sessions/{sid}/acquire` | `AcquireRequest` → `Offer` or 204 | long-poll up to `wait_s`; same `request_id` ⇒ same offer |
+| `POST /attempts/{id}/accept` | `AcceptRequest` → `AcceptResponse` | commit point (R5); 409 `stale_generation` / `cancelled_by_operator` |
+| `POST /attempts/{id}/reject` | `RejectRequest` → 204 | re-placement |
+| `POST /attempts/{id}/report` | `ReportRequest` → `ReportAck` | progress/state; late stale generation ⇒ 409 `stale_generation` |
+| `POST /attempts/{id}/complete` | `CompleteRequest` → `ReportAck` | result manifest referencing finalized uploads |
+| `GET /attempts/{id}/receipt` | → `DispositionReceipt` or 404 | lost-receipt recovery |
+| `GET /attempts/{id}/inputs/{sha256}` | → bytes | `Range` supported; only hashes bound to the attempt |
+| `POST /uploads` | `UploadCreate` → `UploadCreated` | storage reservation; 507 `resource_exhausted` |
+| `PUT /uploads/{uid}/chunks/{n}` | bytes (`X-Chunk-Sha256`, exact `Content-Length`) → `ChunkAck` | 409 on a conflicting chunk |
+| `GET /uploads/{uid}` | → `UploadStatus` | resume |
+| `POST /uploads/{uid}/finalize` | → `IngestReceipt` | full-file verification |
+| `DELETE /runners/self` | → 204 | ephemeral deregistration after `safe_to_terminate` |
+
+Small DTOs added for this surface: `ChallengeRequest{runner_id}`, `AcquireRequest{request_id (uuid4), free_slots,
+cached_residencies, wait_s 0..50}`, `ReportRequest{session_id, report: AttemptReport}`, `CompleteRequest{session_id,
+manifest: ResultManifest}`, `InventoryAck{accepted, revision}`, `ReportAck{state}`, `ChunkAck{status:
+stored|duplicate}`.
