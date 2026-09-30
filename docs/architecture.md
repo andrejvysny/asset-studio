@@ -1,5 +1,9 @@
 # Architecture and data ownership
 
+In progress: split into Studio + compute runners (+ MacBook companion). Target: `Modular_system_spec.html`;
+runner protocol: `docs/modular/compute-runner.md`; status and cutover: `docs/modular/migration.md`. This file
+describes the implemented system.
+
 ## Components
 
 ```
