@@ -34,7 +34,15 @@ FORBIDDEN = {
     "assetstudio_server": {"assetstudio_node"},
 }
 # Transitional direct-mode shims (docs/modular/migration.md): "<server module>" -> allowed import. Emptied in WP2.10.
-ALLOWED: dict[str, set[str]] = {}
+ALLOWED: dict[str, set[str]] = {
+    "services/studio/assetstudio_server/adapters/aux.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/adapters/comfyui.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/adapters/fake.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/adapters/worker3d.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/adapters/base.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/gpu.py": {"assetstudio_node"},
+    "services/studio/assetstudio_server/models.py": {"assetstudio_node"},
+}
 
 
 def _imports(path: Path) -> set[str]:

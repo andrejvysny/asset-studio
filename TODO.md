@@ -15,7 +15,7 @@ Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
 - [x] WP1.7 web: generated types + Runners panel
 
 Phase 2 — extract compute, single machine, public profile
-- [x] WP2.0 pin model hashes (already pinned; guard test) · [ ] WP2.1 move execution code · [x] WP2.1b lease hardening · [ ] WP2.2 runner runtime
+- [x] WP2.0 pin model hashes (already pinned; guard test) · [x] WP2.1 move execution code · [x] WP2.1b lease hardening · [ ] WP2.2 runner runtime
 - [ ] WP2.3 ExecutionBackend seam · [ ] WP2.4 remote adapters · [ ] WP2.5 continuations/placement · [ ] WP2.5b fences
 - [ ] WP2.6 readiness · [ ] WP2.7 single-machine compose · [ ] WP2.8 failure injection · [ ] WP2.9 real acceptance
 - [ ] WP2.10 remove direct mode (needs user confirmation) · [ ] WP2.11 public profile · [ ] WP2.12 ephemeral
