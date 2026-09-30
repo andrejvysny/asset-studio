@@ -31,21 +31,24 @@ def model_statuses(studio: Studio) -> dict[str, ModelStatus]:
 
 
 def engine_check(studio: Studio) -> dict[str, Any]:
-    if studio.engine is None:
+    engine = studio.execution.engine()
+    if engine is None:
         return {"reachable": False, "ready": False, "problems": ["no image engine configured (library-only mode)"]}
-    return _cached(f"engine:{id(studio)}", 10.0, studio.engine.check)
+    return _cached(f"engine:{id(studio)}", 10.0, engine.check)
 
 
 def aux_health(studio: Studio) -> dict[str, Any]:
-    if studio.aux is None:
+    aux = studio.execution.aux()
+    if aux is None:
         return {"reachable": False, "problems": ["no aux service configured"]}
-    return _cached(f"aux:{id(studio)}", 5.0, studio.aux.health)
+    return _cached(f"aux:{id(studio)}", 5.0, aux.health)
 
 
 def worker3d_health(studio: Studio) -> dict[str, Any]:
-    if studio.worker3d is None:
+    w3d = studio.execution.worker3d()
+    if w3d is None:
         return {"reachable": False, "problems": ["no 3D worker configured (WORKER3D_URL)"]}
-    return _cached(f"w3d:{id(studio)}", 5.0, studio.worker3d.health)
+    return _cached(f"w3d:{id(studio)}", 5.0, w3d.health)
 
 
 def _build_state(r: Any, build_missing: list[str], w3d: dict[str, Any]) -> dict[str, Any]:

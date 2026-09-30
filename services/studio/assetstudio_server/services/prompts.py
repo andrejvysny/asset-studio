@@ -185,13 +185,14 @@ def generation_residency(studio: Studio, ctx: ProjectContext, item: JobItem) -> 
     recipe = RECIPES[snap["recipe"]["id"]]
     if recipe.generation is None:
         raise ApiError(422, "generation_unavailable", f"{recipe.label}: {recipe.generation_blocked_reason}")
-    if studio.engine is None:
+    engine = studio.execution.engine()
+    if engine is None:
         raise ApiError(503, "engine_unconfigured", "no image engine configured (library-only mode)")
     job = load_job(ctx.store, item.job_id)[0]
     edit = bool(job.variant) and not job.direct
-    if edit and not studio.engine.supports("image_edit"):
+    if edit and not engine.supports("image_edit"):
         raise ApiError(422, "editing_model_unavailable", "the image engine cannot run source-conditioned edits")
-    if not studio.engine.simulated:
+    if not engine.simulated:
         from .runtime import model_statuses
 
         statuses = model_statuses(studio)

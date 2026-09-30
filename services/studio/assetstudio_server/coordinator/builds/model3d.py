@@ -47,7 +47,7 @@ def target_triangles(inp: BuildInput) -> dict[str, Any]:
 
 
 def _worker(inp: BuildInput) -> tuple[Any, int]:
-    w = inp.env.studio.worker3d
+    w = inp.env.worker3d
     if w is None:
         raise Blocked("no 3D worker configured (WORKER3D_URL)", "worker3d_unconfigured", operator=True)
     return w, inp.env.epoch("worker3d")
@@ -64,7 +64,8 @@ def _execute(inp: BuildInput, stage: str, op: str, params: dict[str, Any], body:
         except Cancelled:
             return True
     try:
-        data, meta = w.execute(eid, op, params, body, epoch=epoch, should_cancel=cancelled)
+        with inp.env.call(stage):
+            data, meta = w.execute(eid, op, params, body, epoch=epoch, should_cancel=cancelled)
     except ExecutionCancelled as e:
         raise Cancelled() from e
     except ExecutionLost as e:
@@ -82,7 +83,7 @@ def _preflight(inp: BuildInput) -> None:
     if (variant := legacy_variant(inp.snap)) is not None:
         raise BuildFailed(f"legacy recipe snapshot ({variant}): parameters changed meaning; fork the Job to the "
                           "current recipe before building", "legacy_recipe")
-    w = inp.env.studio.worker3d
+    w = inp.env.worker3d
     if w is None:
         raise Blocked("no 3D worker configured (WORKER3D_URL)", "worker3d_unconfigured", operator=True)
     health = w.health()
@@ -130,12 +131,12 @@ def sample(inp: BuildInput) -> str:
             raise BuildFailed(f"raw intermediate from the worker is invalid: {e}", "output_invalid") from e
     art = store.register_artifact(raw, "raw", RAW_MIME, lineage=[cutout_id], retention="raw",
                                   meta={"format": meta.get("raw_format"), "faces": meta.get("raw_faces")},
-                                  source={"engine": meta}, artifact_id=inp.artifact_id("raw", eid))
+                                  source={"engine": meta}, artifact_id=inp.artifact_id("raw", eid, call="sample"))
     inp.checkpoint("sample", {"raw": art.id}, inputs={"cutout": cutout_id}, settings=params,
                    identities={"engine": meta.get("engine"), "trellis_ref": meta.get("trellis_ref"),
                                "worker_session": meta.get("worker_session")},
                    receipt={**meta, "execution_id": eid})
-    inp.env.studio.worker3d.ack(eid)  # type: ignore[union-attr]
+    inp.env.worker3d.ack(eid)  # type: ignore[union-attr]
     inp.meta["generation"] = meta
     return art.id
 
@@ -154,12 +155,12 @@ def bake(inp: BuildInput) -> str:
     glb, meta, eid = _execute(inp, "bake", "export", params, store.artifact_bytes(raw_id))
     model_id = store.register_artifact(glb, "model", "model/gltf-binary", lineage=[raw_id],
                                        meta={"exporter": exporter}, source={"export": meta},
-                                       artifact_id=inp.artifact_id("model", eid)).id
+                                       artifact_id=inp.artifact_id("model", eid, call="bake")).id
     inp.roles["raw"] = raw_id
     inp.checkpoint("bake", {"model": model_id}, inputs={"raw": raw_id}, settings={**params, "budget": budget},
                    identities={"exporter": exporter, "licence": meta.get("licence")},
                    receipt={**meta, "execution_id": eid})
-    inp.env.studio.worker3d.ack(eid)  # type: ignore[union-attr]
+    inp.env.worker3d.ack(eid)  # type: ignore[union-attr]
     return model_id
 
 

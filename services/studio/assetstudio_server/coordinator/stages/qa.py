@@ -54,30 +54,32 @@ def mask(env: TaskEnv) -> dict[str, Any]:
     if cur is None:
         return {"skipped": "candidate set superseded"}
     _, cset = cur
-    aux, store = env.studio.aux, env.ctx.store
+    aux, store = env.aux, env.ctx.store
     masks, errors = {}, {}
     for c in cset.candidates:
         env.check_cancel()
         try:
             assert aux is not None
-            res = aux.cutout(image=store.artifact_bytes(c.artifact_id), epoch=env.epoch("aux"),
-                             execution_id=derived_id("att", env.task.id, c.id))
+            with env.call(c.id):
+                res = aux.cutout(image=store.artifact_bytes(c.artifact_id), epoch=env.epoch("aux"),
+                                 execution_id=derived_id("att", env.task.id, c.id))
         except EngineRejected as e:
             errors[c.id] = f"segmentation rejected the image: {e}"[:300]
             continue
         art = store.register_artifact(res["mask_png"], "candidate_mask", "image/png", lineage=[c.artifact_id],
                                       retention="candidate", source={"model": res.get("meta", {})},
-                                      artifact_id=derived_id("art", env.task.id, c.id))
+                                      artifact_id=env.output_id("art", env.task.id, c.id, call=c.id))
         masks[c.id] = art.id
     return {"masks": masks, "errors": errors, "model": "birefnet"}
 
 
 def _vlm(env: TaskEnv, vlm_rules: list[QaRule], image: bytes, context: str, cid: str) -> list[CheckResult]:
-    aux = env.studio.aux
+    aux = env.aux
     assert aux is not None
     try:
-        res = aux.qa(image=image, questions=[(r.id, r.question or "") for r in vlm_rules], context=context,
-                     epoch=env.epoch("aux"), execution_id=derived_id("att", env.task.id, cid))
+        with env.call(cid):
+            res = aux.qa(image=image, questions=[(r.id, r.question or "") for r in vlm_rules], context=context,
+                         epoch=env.epoch("aux"), execution_id=derived_id("att", env.task.id, cid))
     except EngineRejected as e:
         return [CheckResult(rule_id=r.id, source="vlm", severity=r.severity, result="unavailable",
                             reason=f"VLM rejected the request: {e}"[:300], evaluator="aux.vlm") for r in vlm_rules]
@@ -146,7 +148,7 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
     job, _ = load_job(store, t.job_id)
     cmp_checks = compare_checks(job, item, snap)
     cmp_rules = compare_rules(cmp_checks)
-    no_service = "" if env.studio.aux is not None else "no VLM/segmentation service configured"
+    no_service = "" if env.aux is not None else "no VLM/segmentation service configured"
     reserved = reserved_colours(snap)
     evaluated: dict[str, str] = {}
     for c in cset.candidates:
@@ -180,7 +182,7 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
                     "qa_ruleset") else None, results=[x.model_dump() for x in results], policy=policy,
                 evaluators={"mask_artifact_id": mask_id, "mask_task": next(
                     (d for d in t.deps if (dt := env.studio.journal.tasks.get(d)) and dt.stage == "mask"), None),
-                    "simulated": bool(env.studio.aux and env.studio.aux.simulated),
+                    "simulated": bool(env.aux and env.aux.simulated),
                     **({"compare": cmp_res.get("inputs") or {}} if cmp_checks else {})},
                 evaluated_at=now_iso(), op_id=t.id))
         evaluated[c.id] = qid

@@ -36,6 +36,7 @@ class Settings:
     worker3d_url: str = field(default_factory=lambda: os.environ.get("WORKER3D_URL", "http://127.0.0.1:8003"))
     # "comfyui" (real), "fake" (clearly-labelled simulation for tests/demo) or "none" (library-only).
     engine: str = field(default_factory=lambda: os.environ.get("STUDIO_ENGINE", "comfyui"))
+    execution: str = field(default_factory=lambda: os.environ.get("STUDIO_EXECUTION", "direct"))
     gpu_ids: dict[str, str] = field(default_factory=lambda: {
         "gpu0": os.environ.get("GPU_IMAGE_ID", "0"), "gpu1": os.environ.get("GPU_AUX_ID", "1")})
     instance_id: str = field(default_factory=lambda: os.environ.get(

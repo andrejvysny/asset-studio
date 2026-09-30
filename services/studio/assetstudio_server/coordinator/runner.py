@@ -10,14 +10,16 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.ids import is_id
+from assetstudio_core.ids import derived_id, is_id
 
+from ..adapters.base import AuxService, ImageEngine, Worker3dService
 from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import Busy, RunNotOpen, StageTask
@@ -52,6 +54,38 @@ class TaskEnv:
     studio: Studio
     ctx: ProjectContext
     task: StageTask
+    _calls: list[str] = field(default_factory=list)
+
+    @property
+    def engine(self) -> ImageEngine | None:
+        return self.studio.execution.engine(self)
+
+    @property
+    def aux(self) -> AuxService | None:
+        return self.studio.execution.aux(self)
+
+    @property
+    def worker3d(self) -> Worker3dService | None:
+        return self.studio.execution.worker3d(self)
+
+    @contextmanager
+    def call(self, key: str) -> Iterator[None]:
+        """Name the engine call in flight (docs/modular/compute-runner.md operation identity table)."""
+        self._calls.append(key)
+        try:
+            yield
+        finally:
+            self._calls.pop()
+
+    @property
+    def current_call(self) -> str | None:
+        return self._calls[-1] if self._calls else None
+
+    def output_id(self, prefix: str, *parts: str, call: str | None = None) -> str:
+        """Output artifact id: legacy form at generation 1, suffixed `g<N>` once a call was re-placed."""
+        legacy = derived_id(prefix, *parts)
+        generation = self.studio.execution.generation(self, call) if call is not None else 1
+        return legacy if generation == 1 else derived_id(prefix, *parts, f"g{generation}")
 
     def progress(self, **fields: Any) -> None:
         self.task.progress.update(fields)
@@ -74,7 +108,7 @@ class TaskEnv:
 
     def epoch(self, worker: str) -> int:
         """Lease epoch for a GPU1 worker (acquires the device if another worker holds it)."""
-        return self.studio.lanes["gpu1"].acquire(worker)
+        return self.studio.execution.acquire("gpu1", worker)
 
 
 def _age_s(iso: str) -> float:
@@ -100,28 +134,12 @@ class Coordinator:
         self._admission_failures: dict[str, dict[str, Any]] = {}  # residency -> {"count", "since"}
 
     # --- lifecycle ------------------------------------------------------------------------------------------
-    def _cancel_orphaned_prompts(self, orphans: list[dict[str, Any]]) -> None:
-        """Cancelled-while-down generation tasks: stop their own unfinished engine prompts by exact id."""
-        engine = self.studio.engine
-        if engine is None:
-            return
-        for t in orphans:
-            if t["stage"] != "generate":
-                continue
-            for slot in (t["progress"].get("engine") or {}).values():
-                if isinstance(slot, dict) and slot.get("prompt_id") and "artifact_id" not in slot:
-                    try:
-                        engine.cancel(slot["prompt_id"])
-                    except Exception as e:  # noqa: BLE001 - unknown outcome: logged, the prompt id stays recorded
-                        log.warning("cancel of orphaned prompt %s (task %s) not confirmed: %s",
-                                    slot["prompt_id"], t["id"], e)
-
     def start(self) -> None:
         rec = self.studio.journal.tasks.recover_after_restart()
         orphans = rec.pop("orphans", [])
         if rec["requeued"] or rec["cancelled"]:
             log.warning("restart reconciliation: %s", rec)
-        self._cancel_orphaned_prompts(orphans)
+        self.studio.execution.cancel_orphans(orphans)
         from .reconcile import reconcile_on_start
 
         reconcile_on_start(self.studio)
@@ -207,7 +225,7 @@ class Coordinator:
         return getattr(self.stages[task.stage], "worker", None)
 
     def _loads(self, worker: str | None) -> dict[str, Any] | None:
-        w = {"aux": self.studio.aux, "worker3d": self.studio.worker3d}.get(worker or "")
+        w = {"aux": self.studio.execution.aux(), "worker3d": self.studio.execution.worker3d()}.get(worker or "")
         if w is None:
             return None  # e.g. ComfyUI exposes no model-load counter: reported as unavailable, never as 0
         try:
@@ -227,7 +245,7 @@ class Coordinator:
         epoch = None
         if lane == "gpu1" and worker is not None:
             try:
-                epoch = self.studio.lanes["gpu1"].acquire(worker)
+                epoch = self.studio.execution.acquire("gpu1", worker)
                 self._admission_failures.pop(residency, None)
                 for t in members:
                     if t.progress.pop("admission", None) is not None:

@@ -25,13 +25,14 @@ def _pair_result(env: TaskEnv, sel: list[dict[str, Any]], i: int, j: int) -> dic
     base = {"a": a["job_id"], "b": b["job_id"]}
     if a["sha256"] == b["sha256"]:
         return {**base, "result": "fail", "reason": "identical image (same sha256)", "evaluated": "deterministic"}
-    aux, store = env.studio.aux, env.ctx.store
+    aux, store = env.aux, env.ctx.store
     assert aux is not None
     try:
-        res = aux.compare(images=[(store.artifact_bytes(a["artifact_id"]), "candidate", "A"),
-                                  (store.artifact_bytes(b["artifact_id"]), "candidate", "B")],
-                          questions=[(QUESTION_ID, QUESTION)], context="", epoch=env.epoch("aux"),
-                          execution_id=derived_id("att", env.task.id, str(i), str(j)))
+        with env.call(f"{i}/{j}"):
+            res = aux.compare(images=[(store.artifact_bytes(a["artifact_id"]), "candidate", "A"),
+                                      (store.artifact_bytes(b["artifact_id"]), "candidate", "B")],
+                              questions=[(QUESTION_ID, QUESTION)], context="", epoch=env.epoch("aux"),
+                              execution_id=derived_id("att", env.task.id, str(i), str(j)))
     except EngineRejected as e:
         return {**base, "result": "unavailable", "reason": f"VLM rejected the request: {e}"[:300]}
     answer = (res.get("checks") or {}).get(QUESTION_ID)
@@ -54,7 +55,7 @@ def run(env: TaskEnv) -> dict[str, Any]:
         pairs.append(_pair_result(env, sel, i, j))
         env.progress(done=n + 1, total=len(ins["pairs"]))
     total = len(sel) * (len(sel) - 1) // 2
-    aux = env.studio.aux
+    aux = env.aux
     store.create_or_same(key, {
         "id": ins["report_id"], "plan_id": ins["plan_id"], "selection": sel, "digest": ins["digest"],
         "ruleset": RULESET, "evaluator": next((p["evaluator"] for p in pairs if p.get("evaluator")), "aux.vlm"),
