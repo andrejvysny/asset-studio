@@ -193,6 +193,23 @@ CPU evidence only (SIMULATED engines). Lint clean; `uv run pytest` 358 pass; `ma
 | Experimental | source-conditioned generative variants (no egress-blocked edit-model run) |
 | Deferred | files + manifest exporter (folder/ZIP), project style wizard, Surface/Seamless materials, S3/GC, style-LoRA registration, Docker (non-Podman) run |
 
+### Process-level failure injection
+
+`make test-process` (`tests/process/`, marker `process`, not part of `make test`): Studio (`assetstudio serve`,
+`STUDIO_EXECUTION=nodes`), a compute runner (`assetstudio-node run`, real HTTP engine clients, `simulated: false`) and a
+fake aux engine server (`tests/process/fake_engines.py`, real `worker_common.lease` semantics, controllable delay/hold)
+run as separate OS processes and are killed with SIGKILL independently. Model receipts are the one simulated part
+(pre-seeded for Studio's real catalog sha; real ones need the weights). Evidence is CPU/simulated, not GPU proof.
+
+| Scenario | Proves |
+|---|---|
+| A07 Studio killed mid-attempt | task `reconciling`, attempt keeps its runner and generation 1 (never re-placed), runner delivers, engine computed once |
+| A08 runner killed after spooling | spooled output recovered from the runner's spool after restart, committed, spool empty, no recompute |
+| A09/A10 runner killed while executing | lease expiry -> attempt and device claim `uncertain` (not freed); `:declare-lost` offers generation 2 but the device stays uncertain; restarted runner's fresh inventory releases it; generation 2 commits |
+| R7 engine outlives the agent | agent process killed with a request in flight in the engine process; a new agent's barrier reports the slot `unknown`, admits nothing (late request fenced) until the request ends, then `ready` |
+
+Results: run with `make test-process`.
+
 ## Known limitations (this release)
 
 - 3D: upstream CuMesh simplification is not deterministic (same raw → e.g. 99 808 vs 99 221 faces); upstream export

@@ -15,7 +15,7 @@ PY = uv run
 NODES = -f compose.yml -f compose.nodes.yml
 
 .PHONY: help doctor build up down logs ps models verify verify-full test lint web-build web-types \
-        e2e acceptance-cpu acceptance-gpu acceptance-offline lock-comfyui \
+        e2e test-process acceptance-cpu acceptance-gpu acceptance-offline lock-comfyui \
         runner-token up-nodes down-nodes switch-nodes
 
 help:         ; @grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -39,7 +39,9 @@ web-types:
 	$(NODE_RUN) npm run gen:api
 e2e: web-build
 	uv run --group e2e python -m playwright install chromium && uv run --group e2e pytest tests/e2e -v -m e2e
-acceptance-cpu: lint test web-build e2e
+# Studio, runner and fake engines as separate OS processes, SIGKILLed independently (tests/process, docs/acceptance.md).
+test-process: ; $(PY) pytest tests/process -v -m process
+acceptance-cpu: lint test test-process web-build e2e
 # Real stack on the 2x4090 host: STRICT (a failed build or missing publication is a failure).
 acceptance-gpu: ; STUDIO_URL=http://127.0.0.1:$${STUDIO_PORT:-8190} uv run pytest tests/gpu -v -s -m gpu
 acceptance-offline: ; ./scripts/offline-check.sh
