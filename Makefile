@@ -25,7 +25,7 @@ ps:           ; $(COMPOSE) ps
 models:       ; set -a; [ -f .env ] && . ./.env; set +a; uv run --script scripts/download_models.py $(ARGS)
 verify:       ; $(PY) assetstudio models verify
 verify-full:  ; $(PY) assetstudio models verify --full
-lint:         ; $(PY) ruff check packages services/studio tests && $(PY) ruff check --target-version py310 --ignore UP046,UP047 services/worker3d
+lint:         ; $(PY) ruff check packages services/studio services/compute_node tests && $(PY) ruff check --target-version py310 --ignore UP046,UP047 services/worker3d
 test:         ; $(PY) pytest -q
 # Frontend: built in a Node container (no Node needed on the host).
 web-build:    ; $(NODE_RUN) sh -c "npm ci --no-audit --no-fund && npx tsc -b --noEmit && npx vite build"

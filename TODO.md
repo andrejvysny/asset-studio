@@ -7,7 +7,7 @@ Phase 0 — baseline, hardening, specs, scaffold
 - [x] WP0.1 baseline lint/test/web-build/e2e counts in docs/acceptance.md (3 test defects stabilised; 3 e2e need models/)
 - [x] WP0.2 GLB JSON-shape hardening (A31): check_document_shape at every reader, 25 tests
 - [x] WP0.3 docs/modular/compute-runner.md (R0–R16 + operation identity table) + docs/modular/migration.md
-- [ ] WP0.4 layout scaffold (protocol, client, compute_node, companion, blender) + import-boundary test
+- [x] WP0.4 layout scaffold (protocol, client, compute_node, companion, blender) + import-boundary test
 
 Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
 - [ ] WP1.1 protocol DTOs · [ ] WP1.2 stores (auth.sqlite, journal v4) · [ ] WP1.3 runner API + auth

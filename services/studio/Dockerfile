@@ -14,6 +14,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY packages/ packages/
 COPY services/studio/ services/studio/
+COPY services/compute_node/ services/compute_node/
 RUN uv sync --frozen --no-dev
 COPY config/ /app/config/
 COPY comfyui/workflows/ /app/comfyui/workflows/

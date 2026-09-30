@@ -33,11 +33,14 @@ packages = [
   "packages/assetstudio_core",
   "packages/assetstudio_storage",
   "packages/assetstudio_processing",
+  "packages/assetstudio_protocol",
+  "packages/assetstudio_client",
   "services/studio/assetstudio_server",
+  "services/compute_node/assetstudio_node",
 ]
 
 [tool.hatch.build]
-dev-mode-dirs = ["packages", "services/studio"]
+dev-mode-dirs = ["packages", "services/studio", "services/compute_node"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/contract", "tests/regression"]
