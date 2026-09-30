@@ -104,6 +104,7 @@ class RunnerAgent:
         self._pushed: queue.Queue[Offer] = queue.Queue()
         self._queued: set[tuple[str, int]] = set()
         self._qlock = threading.Lock()
+        self._hb_lock = threading.Lock()
 
     @property
     def studio_keys(self) -> list[StudioKey]:
@@ -230,6 +231,8 @@ class RunnerAgent:
         return worked
 
     def run_forever(self, stop: threading.Event) -> None:
+        beats = threading.Thread(target=self._heartbeat_loop, args=(stop,), name="runner-heartbeat", daemon=True)
+        beats.start()
         backoff = 1.0
         while not stop.is_set() and not self.stopped:
             try:
@@ -280,8 +283,21 @@ class RunnerAgent:
 
     # -- heartbeat -----------------------------------------------------------------------------------------------
 
+    def _heartbeat_loop(self, stop: threading.Event) -> None:
+        """Leases must keep renewing while an engine call blocks the main loop for minutes (TRELLIS sampling, VLM
+        batches); a healthy runner must never turn its own work `uncertain`."""
+        while not stop.wait(1.0) and not self.stopped:
+            try:
+                self._heartbeat_if_due()
+            except (TransportError, ApiError) as e:  # the main loop owns recovery (re-session, backoff)
+                log.warning("background heartbeat failed: %s", e)
+
     def _heartbeat_if_due(self, *, force: bool = False, lifecycle: str | None = None) -> None:
-        if not force and self.clock() < self._next_hb:
+        with self._hb_lock:
+            self._heartbeat_locked(force, lifecycle)
+
+    def _heartbeat_locked(self, force: bool, lifecycle: str | None) -> None:
+        if not self._session_id or (not force and self.clock() < self._next_hb):
             return
         local = self.state.local_attempts(self.spool)[:256]
         reports = [AttemptReport(attempt_id=a.attempt_id, generation=a.generation, state=a.state) for a in local]

@@ -536,6 +536,43 @@ def test_run_forever_survives_transport_errors(tmp_path: Path) -> None:
     assert not t.is_alive() and calls["n"] >= 2
 
 
+def test_leases_renew_while_an_engine_call_blocks(tmp_path: Path) -> None:
+    """A long engine call that never polls should_cancel (aux/VLM) must not starve heartbeats: the background thread
+    keeps renewing the lease so a healthy runner never makes its own attempt `uncertain`."""
+    import time
+
+    window: dict[str, float] = {}
+
+    class Blocking(FakeExecutor):
+        def execute(self, offer: Any, inputs: Any, out_dir: Path, should_cancel: Any) -> Any:
+            window["start"] = time.monotonic()
+            time.sleep(2.6)  # never calls should_cancel
+            window["end"] = time.monotonic()
+            return super().execute(offer, inputs, out_dir, lambda: False)
+
+    agent, stub, _ = make_agent(tmp_path, executor=Blocking())
+    agent._heartbeat_s, agent._next_hb, agent._idle_s = 0.0, 0.0, 0.0
+    beats: list[float] = []
+    original = stub.heartbeat
+
+    def timed(sid: str, hb: Any) -> HeartbeatResponse:
+        beats.append(time.monotonic())
+        return original(sid, hb)
+
+    stub.heartbeat = timed  # type: ignore[method-assign]
+    stub.offers.append(make_offer())
+    stop = threading.Event()
+    t = threading.Thread(target=agent.run_forever, args=(stop,))
+    t.start()
+    deadline = time.monotonic() + 10
+    while "end" not in window and time.monotonic() < deadline:
+        time.sleep(0.05)
+    stop.set()
+    t.join(timeout=10)
+    during = [b for b in beats if window["start"] < b < window["end"]]
+    assert len(during) >= 2, (window, beats)
+
+
 # -- cli ------------------------------------------------------------------------------------------------------------
 
 
