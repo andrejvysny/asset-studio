@@ -82,6 +82,31 @@ GPU1 handed aux → worker3d with acknowledged unload → re-export at 1024² te
 publish (licence `review`: DINOv3 licence + Lightning LoRA; `exporter_clean` cleared; no nvdiffrast) →
 `storage verify` 0 problems.
 
+## Build profiles, real GPU (2026-09-30)
+
+`tests/gpu/test_model3d_profiles.py`: **1 pass in 9 m 19 s**. It ran on the real podman stack (2x RTX 4090, worker3d
+image with `geometry_policy.v1`) at commit 2099d48 plus the roughness-rounding fix below. Evidence is in
+`tests/gpu/artifacts/profiles/` (report.json, previews; git-ignored). Previews are CPU renders, not a game-engine render.
+
+| Asset (profile) | Build | Triangles | Components | alphaMode / doubleSided | Roughness median before → after | Notes |
+|---|---|---|---|---|---|---|
+| Mossy boulder (stone: metallic 0, roughness ≥ 0.7) | 206 s | 32 476 | 2 839 | OPAQUE / true | 0.988 → 0.988 (min 0.910) | already rough; metallic factor 0 |
+| Wooden barrel (painted: metallic 0, roughness ≥ 0.75, single-sided) | 166 s | 38 904 | 140 | OPAQUE / false | 0.580 → 0.749 | clamp raised the glossy parts |
+| Oak tree (foliage: preserve parts, no hole filling, alpha auto, two-sided, roughness ≥ 0.8) | 169 s | 39 742 | 463 | **MASK** / true | 0.624 → 0.800 | auto: 29.5 % texels below cutoff 0.5 |
+| Oak tree, A/B rebuild of the same raw with default geometry + opaque | 18 s | 36 936 | 452 | OPAQUE / false | (profile clamp kept) | no resampling (same sample checkpoint) |
+
+Findings:
+- Auto alpha separated the assets. The tree measured 29.5 % transparent texels (15.8 % in an earlier run). The boulder
+  and barrel measured 0.0 %. The 1 % threshold held on this sample of three assets, which is not a calibration.
+- The exporter cleanup did not visibly delete foliage. Preserving small parts and disabling hole filling changed the
+  part count by a few percent (463 vs 452; 1 087 vs 1 177 in the earlier run), and the previews are nearly identical.
+  TRELLIS.2 reconstructs leaves as geometry, and MASK mainly opens small gaps at leaf edges. Decode-time hole filling
+  (before the raw is stored) is still uncontrolled.
+- `components` counts connected geometry islands. Rocks also come out as thousands of islands (moss and debris), so
+  the advisory `single_component` check says little about generated organic assets.
+- An earlier run found 8-bit rounding putting a clamped value just below the minimum (0.698 for 0.7). The bounds now
+  round inward (unit test `test_roughness_bounds_round_inward`).
+
 ## Asset variants and families + design-v2 UI (2026-09-29)
 
 CPU evidence (SIMULATED engines; fake edit engine derives its output from the source image). Commits 2a197fa..d24337a.

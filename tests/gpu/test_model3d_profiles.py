@@ -76,21 +76,35 @@ def _summary(cl: Any, pid: str, b: dict, tag: str) -> dict:
             "checks": {x["id"]: (x["ok"], x.get("detail", "")) for x in b["validation"]["checks"]}}
 
 
+def _item(cl: Any, pid: str, bid: str) -> dict:
+    return detail(cl, pid, bid)["items"][0]
+
+
+def _settled(b: dict | None) -> bool:
+    """The preview renders after the build is marked succeeded (isolated), so wait for it too."""
+    return bool(b) and (b["status"] == "failed" or (b["status"] == "succeeded" and "preview" in b["artifacts"]))
+
+
 def _build_asset(cl: Any, pid: str, cat: str, name: str, brief: str) -> tuple[str, dict]:
+    """Waits on item state, not only on idle operations: a just-created Job may not have queued its task yet."""
     bid = cl.post(f"/api/v1/projects/{pid}/batches", json={
         "title": name, "category_id": cat, "idempotency_key": str(uuid.uuid4()),
         "items": [{"name": name, "brief": brief}]}).json()["batch"]["id"]
-    wait(cl, lambda: ops_idle(cl, pid), 900, "enhancement")
-    it = detail(cl, pid, bid)["items"][0]
-    cl.post(f"/api/v1/projects/{pid}/batches/{bid}:confirm-and-generate", json={
+    it = wait(cl, lambda: (x := _item(cl, pid, bid))["current_prompt"] and ops_idle(cl, pid) and x, 900,
+              "enhancement")
+    res = cl.post(f"/api/v1/projects/{pid}/batches/{bid}:confirm-and-generate", json={
         "idempotency_key": str(uuid.uuid4()), "items": [{"item_id": it["id"], "prompt_revision_id": it["current_prompt"],
-                                                       "expected_item_revision": it["revision"]}]})
-    wait(cl, lambda: ops_idle(cl, pid), 1800, "generation + QA")
+                                                       "expected_item_revision": it["revision"]}]}).json()
+    assert res["results"][0]["ok"], res
+    wait(cl, lambda: (x := _item(cl, pid, bid))["candidate_set"] and all(
+        c["qa"] for c in x["candidate_set"]["candidates"]) and ops_idle(cl, pid), 1800, "generation + QA")
     it = _approve_best(cl, pid, bid)
-    cl.post(f"/api/v1/projects/{pid}/batches/{bid}:build-approved", json={"idempotency_key": str(uuid.uuid4()),
-            "items": [{"item_id": it["id"], "approval_id": it["approval"], "expected_item_revision": it["revision"]}]})
-    wait(cl, lambda: ops_idle(cl, pid), 2400, "3D build")
-    return bid, detail(cl, pid, bid)["items"][0]
+    res = cl.post(f"/api/v1/projects/{pid}/batches/{bid}:build-approved", json={"idempotency_key": str(uuid.uuid4()),
+                  "items": [{"item_id": it["id"], "approval_id": it["approval"],
+                             "expected_item_revision": it["revision"]}]}).json()
+    assert all(r["ok"] for r in res.get("results", [{"ok": True}])), res
+    wait(cl, lambda: _settled(_item(cl, pid, bid)["build"]) and ops_idle(cl, pid), 2400, "3D build")
+    return bid, _item(cl, pid, bid)
 
 
 def _rebuild_defaults(cl: Any, pid: str, bid: str) -> dict:
@@ -98,8 +112,9 @@ def _rebuild_defaults(cl: Any, pid: str, bid: str) -> dict:
     cl.post(f"/api/v1/projects/{pid}/batches/{bid}:build-approved", json={"idempotency_key": str(uuid.uuid4()),
             "items": [{"item_id": it["id"], "approval_id": it["approval"], "expected_item_revision": it["revision"],
                        "mode": "rebuild", "overrides": DEFAULTS}]})
-    wait(cl, lambda: ops_idle(cl, pid), 1200, "A/B rebuild")
-    return detail(cl, pid, bid)["items"][0]
+    wait(cl, lambda: (x := _item(cl, pid, bid))["build"]["id"] != it["build"]["id"] and _settled(x["build"])
+         and ops_idle(cl, pid), 1200, "A/B rebuild")
+    return _item(cl, pid, bid)
 
 
 def test_build_profiles_real_stack(project: str) -> None:
@@ -114,7 +129,7 @@ def test_build_profiles_real_stack(project: str) -> None:
             prof_sum = _summary(cl, pid, b, f"{cat}-profile")
             assert prof_sum["checks"]["material_policy"][0], prof_sum["checks"]
             rmin = PROFILES[prof]["material"]["roughness_min"]
-            assert prof_sum["roughness_after"]["min"] >= rmin - 1 / 255, prof_sum["roughness_after"]
+            assert prof_sum["roughness_after"]["min"] >= rmin, prof_sum["roughness_after"]
             assert prof_sum["material_glb"]["pbr"].get("metallicFactor") == 0.0
             entry: dict[str, Any] = {"build_s": round(time.monotonic() - t0), "profile": prof_sum}
             if prof == "foliage":

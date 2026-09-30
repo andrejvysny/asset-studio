@@ -67,7 +67,7 @@ def test_roughness_clamp_rewrites_linear_texture() -> None:
     src = _glb(rough=100)  # 100/255 = 0.392 effective
     out, rep = apply_material_policy(src, {"roughness_min": 0.75})
     g = _mr_pixels(out)[..., 1]
-    assert int(g.min()) == int(g.max()) == round(0.75 * 255)  # linear value, no sRGB curve
+    assert int(g.min()) == int(g.max()) == 192  # ceil(0.75 * 255): linear value, no sRGB curve, never below min
     assert _mat(out)["pbrMetallicRoughness"]["roughnessFactor"] == 1.0
     assert rep["materials"][0]["roughness_before"]["median"] == pytest.approx(100 / 255, abs=1e-3)
     checks = preservation_checks(src, out, rep["rewritten_views"])
@@ -105,3 +105,10 @@ def test_no_materials_rejected() -> None:
 
     with pytest.raises(MaterialRejected):
         apply_material_policy(write_glb(doc, payload), {"alpha_mode": "mask"})
+
+
+def test_roughness_bounds_round_inward() -> None:
+    out, _ = apply_material_policy(_glb(rough=100), {"roughness_min": 0.7})
+    assert int(_mr_pixels(out)[..., 1].min()) / 255 >= 0.7  # 0.7 * 255 = 178.5 -> 179
+    out, _ = apply_material_policy(_glb(rough=250), {"roughness_max": 0.3})
+    assert int(_mr_pixels(out)[..., 1].max()) / 255 <= 0.3

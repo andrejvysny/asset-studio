@@ -171,7 +171,9 @@ def _metal_rough(doc: dict[str, Any], payload: bytes, mat: dict[str, Any], polic
     rough = rgba[..., 1] / 255.0 * rf  # effective linear roughness
     rep: dict[str, Any] = {"image": image, "roughness_before": _stats(rough)}
     if lo is not None or hi is not None:
-        rgba[..., 1] = np.round(np.clip(rough, lo_v, hi_v) * 255).astype(np.uint8)
+        # 8-bit bounds round inward, so a stored texel never falls outside [min, max] (0.7 -> 179/255, not 178)
+        q_lo, q_hi = int(np.ceil(lo_v * 255 - 1e-6)), int(np.floor(hi_v * 255 + 1e-6))
+        rgba[..., 1] = np.clip(np.round(rough * 255), q_lo, q_hi).astype(np.uint8)
         pbr["roughnessFactor"] = 1.0
     if metal is not None:  # exact value via the factor; the texture channel is saturated so factor x 1 = metal
         rgba[..., 2] = 255

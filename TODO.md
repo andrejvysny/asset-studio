@@ -9,8 +9,15 @@ fixes, renderer accuracy. No image->3D fast path, no Godot.
 - [x] 3 worker geometry policy: params, to_glb, health feature, preflight, worker tests
 - [x] 4 web: profile editor, reference select, rebuild fields, style preview, media restore/download
 - [x] 5 renderer: linear factor, real BLEND
-- [ ] 6 GPU acceptance: rebuild stack, rock/prop/tree A/B, docs/acceptance.md
-- [ ] 7 docs
+- [x] 6 GPU acceptance: rebuild stack, rock/prop/tree A/B, docs/acceptance.md
+- [x] 7 docs
+
+Result: lint clean, 448+ backend + 36 e2e pass, worker3d tests pass; real GPU `test_model3d_profiles` 1 pass (9 m 19 s).
+Follow-ups:
+- [ ] tests/gpu/test_model3d.py waits on ops_idle only (same race fixed in test_model3d_profiles): switch to item state
+- [ ] calibrate `auto` alpha threshold on more assets; decode-time fill_holes needs a TRELLIS decode adapter
+- [ ] single_component check is weak for generated organic assets (rocks = thousands of islands)
+- [ ] per-part material bindings (profile applies to the whole asset); image->3D fast path; Godot runtime validation
 
 # TODO — Style correctness + lean profiles (2026-09-30)
 
