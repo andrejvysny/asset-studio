@@ -10,8 +10,8 @@ Phase 0 — baseline, hardening, specs, scaffold
 - [x] WP0.4 layout scaffold (protocol, client, compute_node, companion, blender) + import-boundary test
 
 Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
-- [x] WP1.1 protocol DTOs · [ ] WP1.2 stores (auth.sqlite, journal v4) · [ ] WP1.3 runner API + auth
-- [ ] WP1.4 registry + placement · [ ] WP1.5 attempt service · [ ] WP1.6 client + runner skeleton + tests
+- [x] WP1.1 protocol DTOs · [x] WP1.2 stores (auth.sqlite, journal v4) · [ ] WP1.3 runner API + auth
+- [ ] WP1.4 registry + placement · [ ] WP1.5 attempt service · [~] WP1.6 client (done: 6a client+keys) + runner skeleton + tests
 - [ ] WP1.7 web: generated types + Runners panel
 
 Phase 2 — extract compute, single machine, public profile

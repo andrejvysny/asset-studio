@@ -14,6 +14,8 @@ from typing import Any
 from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.ids import new_id
 
+from .attemptstore import AttemptStore
+from .runnerstore import RunnerStore
 from .taskstore import TaskStore
 
 ACTIVE_STATES = ("held", "queued", "running", "cancel_requested", "reconciling")
@@ -44,7 +46,53 @@ INSERT OR IGNORE INTO scoped_commands SELECT '', 'legacy', key, payload_hash, re
 _V3 = """
 CREATE TABLE IF NOT EXISTS lane_epochs (lane TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
 """
-_MIGRATIONS = ((2, _V2), (3, _V3))
+# v4: compute runners (sessions, devices, slots), execution attempts + events, resumable uploads, journal meta.
+_V4 = """
+CREATE TABLE IF NOT EXISTS journal_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS runner_sessions (
+  id TEXT PRIMARY KEY, runner_id TEXT NOT NULL, boot_id TEXT NOT NULL, protocol_version INTEGER NOT NULL,
+  dispatch TEXT NOT NULL, platform TEXT NOT NULL, software TEXT NOT NULL, state TEXT NOT NULL,
+  lifecycle TEXT NOT NULL DEFAULT 'active', inventory TEXT, inventory_revision INTEGER NOT NULL DEFAULT -1,
+  created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, UNIQUE(runner_id, boot_id));
+CREATE INDEX IF NOT EXISTS rse_runner_state ON runner_sessions(runner_id, state);
+CREATE TABLE IF NOT EXISTS devices (
+  uuid TEXT PRIMARY KEY, runner_id TEXT NOT NULL, idx INTEGER NOT NULL, name TEXT NOT NULL,
+  memory_mb INTEGER NOT NULL, fallback INTEGER NOT NULL, claim TEXT NOT NULL DEFAULT 'free', claim_attempt TEXT,
+  updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS slots (
+  runner_id TEXT NOT NULL, slot_id TEXT NOT NULL, capability TEXT NOT NULL, device_uuids TEXT NOT NULL,
+  engines TEXT NOT NULL, loaded_residency TEXT, state TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(runner_id, slot_id));
+CREATE TABLE IF NOT EXISTS attempts (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, call_key TEXT NOT NULL, generation INTEGER NOT NULL,
+  project_id TEXT NOT NULL, operation TEXT NOT NULL, operation_version INTEGER NOT NULL,
+  input_digest TEXT NOT NULL, offer TEXT NOT NULL, runner_id TEXT, session_id TEXT, slot_id TEXT,
+  state TEXT NOT NULL, control TEXT NOT NULL DEFAULT 'run', offer_expires_at TEXT, lease_until TEXT,
+  manifest TEXT, disposition TEXT, disposition_at TEXT, receipt_delivered INTEGER NOT NULL DEFAULT 0,
+  error TEXT, progress TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(task_id, call_key, generation));
+CREATE INDEX IF NOT EXISTS atp_state ON attempts(state);
+CREATE INDEX IF NOT EXISTS atp_runner_state ON attempts(runner_id, state);
+CREATE INDEX IF NOT EXISTS atp_task ON attempts(task_id);
+CREATE TABLE IF NOT EXISTS attempt_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT NOT NULL, at TEXT NOT NULL, event TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS ate_attempt ON attempt_events(attempt_id);
+CREATE TABLE IF NOT EXISTS uploads (
+  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, generation INTEGER NOT NULL, project_id TEXT NOT NULL,
+  runner_id TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL, role TEXT NOT NULL, mime TEXT NOT NULL,
+  chunk_size INTEGER NOT NULL, received TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL,
+  reserved_bytes INTEGER NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, finalized_at TEXT,
+  UNIQUE(attempt_id, generation, sha256));
+"""
+_MIGRATIONS = ((2, _V2), (3, _V3), (4, _V4))
+# Absent row means "direct" (Studio-local execution); no data migration writes it.
+EXECUTION_MODE_KEY = "execution_mode"
+
+
+class JournalTooNew(Exception):
+    pass
 
 
 class IdempotencyConflict(Exception):
@@ -91,6 +139,11 @@ class Journal:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
+        found = self._db.execute("PRAGMA user_version").fetchone()[0]
+        known = max(v for v, _ in _MIGRATIONS)
+        if found > known:
+            self._db.close()
+            raise JournalTooNew(f"journal schema v{found} is newer than this Studio (v{known})")
         self._db.executescript(_DDL)
         for version, script in _MIGRATIONS:
             if self._db.execute("PRAGMA user_version").fetchone()[0] < version:
@@ -98,9 +151,24 @@ class Journal:
         self._lock = threading.RLock()
         self.changed = threading.Condition(self._lock)
         self.tasks = TaskStore(self._db, self._lock, self.changed)
+        self.runners = RunnerStore(self._db, self._lock, self.changed)
+        self.attempts = AttemptStore(self._db, self._lock, self.changed)
 
     def close(self) -> None:
         self._db.close()
+
+    def meta_get(self, key: str) -> str | None:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def meta_set(self, key: str, value: str) -> None:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO journal_meta(key, value, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, value, now_iso()))
+            self.changed.notify_all()
 
     def enqueue(self, *, project_id: str, kind: str, lane: str, affinity: str, payload: dict[str, Any],
                 idempotency_key: str, batch_id: str | None = None, hold: bool = False) -> tuple[Operation, bool]:

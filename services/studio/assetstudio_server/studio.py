@@ -10,6 +10,7 @@ from .adapters.base import AuxService, ImageEngine, Worker3dService
 from .adapters.comfyui import ComfyEngine, WorkflowRegistry
 from .adapters.fake import FakeAux, FakeEngine, FakeWorker3d
 from .adapters.worker3d import Worker3dClient
+from .authstore import AuthStore
 from .events import EventBus
 from .gpu import GpuLane, LaneWorker
 from .journal import Journal
@@ -25,6 +26,7 @@ class Studio:
     settings: Settings
     registry: Registry
     journal: Journal
+    auth: AuthStore
     events: EventBus
     engine: ImageEngine | None
     aux: AuxService | None
@@ -40,6 +42,7 @@ class Studio:
     def close(self) -> None:
         self.registry.close_all()
         self.journal.close()
+        self.auth.close()
 
 
 def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: AuxService | None = None,
@@ -56,6 +59,7 @@ def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: Aux
     journal = Journal(settings.instance_dir / "journal" / "operations.sqlite")
     workers = {w.name: LaneWorker(w.lease, w.unload) for w in (aux, worker3d) if w is not None}
     lanes = {"gpu1": GpuLane("gpu1", workers, lambda: journal.next_epoch("gpu1"))}
-    return Studio(settings=settings, registry=Registry(settings), journal=journal, events=EventBus(),
+    return Studio(settings=settings, registry=Registry(settings), journal=journal,
+                  auth=AuthStore(settings.instance_dir / "auth.sqlite"), events=EventBus(),
                   engine=engine, aux=aux, worker3d=worker3d, lanes=lanes,
                   hash_cache=HashCache(settings.instance_dir / "model-hashes.json"))
