@@ -13,6 +13,8 @@ PREFIXES = {
     "fam", "vdr", "vpl", "srs", "vsa", "div", "row", "jrf",
     # Media library.
     "med",
+    # Compute runners.
+    "rnr", "rgp", "rse", "atp", "xfr",
 }
 JOB_PREFIXES = ("job", "bat")
 _ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32, lowercase
