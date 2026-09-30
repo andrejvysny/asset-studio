@@ -8,7 +8,7 @@ import { clone, useConfig, useProject } from "../lib/project";
 type FieldType = "kind" | "text" | "int" | "budget" | "ref" | "lora";
 const FIELDS: [string, string, FieldType, string?][] = [
   ["kind", "Asset type", "kind"], ["recipe_id", "Pipeline", "ref", "recipes"], ["naming", "Naming rule", "text"],
-  ["budget", "Budget (triangles)", "budget"], ["build_profile", "Texturing / build", "text"],
+  ["budget", "Budget (triangles)", "budget"], ["build_profile", "Build profile", "ref", "profiles"],
   ["qa_ruleset", "QA rule set", "ref", "qa"], ["reference_set", "Reference set", "ref", "refs"],
   ["style", "Style", "ref", "styles"], ["style_lora", "Style LoRA", "lora"], ["candidate_count", "Candidates", "int"],
 ];
@@ -51,7 +51,7 @@ export function Schema() {
   const cat = draft.categories.find((c) => c.id === selId) ?? draft.categories[0];
   const eff = cat ? cfg.data.effective[cat.id] : undefined;
   const opts = { recipes: RECIPES, qa: Object.keys(draft.qa_rulesets), refs: Object.keys(draft.reference_sets),
-    styles: Object.keys(draft.styles) } as Record<string, string[]>;
+    styles: Object.keys(draft.styles), profiles: Object.keys(draft.build_profiles) } as Record<string, string[]>;
   const setCat = (patch: (c: CategoryCfg) => void) => {
     const next = clone(draft);
     const c = next.categories.find((x) => x.id === cat!.id);
@@ -133,6 +133,7 @@ export function Schema() {
                 const here = ov.mode !== "inherit";
                 const src = ov.mode === "disabled" ? "disabled here" : here ? "set here"
                   : e?.source?.startsWith("category:") ? `inherited from ${e.source.slice(9)}` : e?.source ?? "unset";
+                const warn = (cfg.data?.warnings ?? []).find((w) => w.path === `categories.${cat.id}.defaults.${name}`)?.message;
                 const placeholder = ov.mode === "inherit" && e?.value != null ? display(e.value) : "";
                 const onChange = (raw: string) => {
                   const v = parseValue(type, raw);
@@ -153,7 +154,8 @@ export function Schema() {
                         placeholder={ov.mode === "disabled" ? "disabled" : placeholder || (type === "budget" ? "min–max" : type === "lora" ? "lora_id @ 0.6" : "")}
                         onBlur={(ev) => onChange(ev.target.value)} />
                     )}
-                    <span style={{ fontSize: 11.5, color: here ? "var(--text-2)" : "var(--dim)" }}>{src}</span>
+                    <span style={{ fontSize: 11.5, color: here ? "var(--text-2)" : "var(--dim)" }}>{src}
+                      {warn && <span style={{ display: "block", color: "var(--warn)" }} title={warn}>⚠ {warn}</span>}</span>
                     <div className="row" style={{ gap: 8 }}>
                       {here && <button className="btn-link" style={{ padding: 0, fontSize: 11.5 }} onClick={() => setField(name, { mode: "inherit", value: null })}>reset</button>}
                       {ov.mode !== "disabled" && ["style_lora", "qa_ruleset", "reference_set", "style"].includes(name) &&

@@ -90,16 +90,31 @@ def test_nodes_simulated_all_none_mixed(w: World) -> None:  # noqa: F811
     assert NodeBackend(w.studio).simulated is True
 
 
-def test_exporters_follow_slots_and_the_research_label(w: World) -> None:  # noqa: F811
-    h = w.runner("r")
-    assert nr.node_exporters(w.studio) == {"clean": False, "research": False}  # no worker3d.export slot
+def _with_3d(h: Handle) -> Any:
     inv = h.inventory(None, 1)
     ops = [{"op": "worker3d.generate", "version": 1}, {"op": "worker3d.export", "version": 1}]
     aux: dict[str, Any] = inv.model_dump()["slots"][1]
     slot = {**aux, "engines": [{"engine": "worker3d", "version": "1", "operations": ops}]}
-    with_3d = inv.model_copy(update={"slots": [inv.slots[0], type(inv.slots[1]).model_validate(slot)]})
+    return inv.model_copy(update={"slots": [inv.slots[0], type(inv.slots[1]).model_validate(slot)]})
+
+
+def test_exporters_follow_slots_and_the_research_label(w: World) -> None:  # noqa: F811
+    h = w.runner("r")
+    assert nr.node_exporters(w.studio) == {"clean": False, "research": False}  # no worker3d.export slot
+    with_3d = _with_3d(h)
     h.put_inventory(inv=with_3d)
     assert nr.node_exporters(w.studio) == {"clean": True, "research": False}
     h.put_inventory(inv=with_3d.model_copy(update={"revision": 2, "labels": ["exporter-research"]}))
     assert nr.node_exporters(w.studio) == {"clean": True, "research": True}
     assert NodeBackend(w.studio).worker3d().health()["exporters"] == {"clean": True, "research": True}  # type: ignore[union-attr]
+
+
+def test_export_features_are_the_intersection_over_export_capable_runners(w: World) -> None:  # noqa: F811
+    feat = "export-feature.geometry_policy.v1"
+    a, b, c = w.runner("a"), w.runner("b"), w.runner("c")
+    a.put_inventory(inv=_with_3d(a).model_copy(update={"labels": [feat]}))
+    _put(c, labels=[])  # no export slot: does not narrow the set
+    assert nr.node_export_features(w.studio) == ["geometry_policy.v1"]
+    assert NodeBackend(w.studio).worker3d().health()["export_features"] == ["geometry_policy.v1"]  # type: ignore[union-attr]
+    b.put_inventory(inv=_with_3d(b))  # an older worker without the feature may receive the export
+    assert nr.node_export_features(w.studio) == []

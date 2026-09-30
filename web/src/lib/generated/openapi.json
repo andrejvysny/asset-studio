@@ -786,7 +786,7 @@
           "overrides": {
             "additionalProperties": true,
             "default": {},
-            "maxProperties": 4,
+            "maxProperties": 12,
             "title": "Overrides",
             "type": "object"
           }
@@ -6279,6 +6279,22 @@
               "title": "Download",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
           }
         ],
         "responses": {
@@ -7849,6 +7865,110 @@
         "summary": "Patch Config"
       }
     },
+    "/api/v1/projects/{project_id}/config:effects": {
+      "get": {
+        "description": "Planned effect of every setting a new Job in this scope would freeze. Side-effect free.\n`style` previews a style other than the resolved one.",
+        "operationId": "config_effects_api_v1_projects__project_id__config_effects_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Kind"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "t2i",
+              "enum": [
+                "t2i",
+                "edit"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "style",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Style"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Config Effects Api V1 Projects  Project Id  Config Effects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Config Effects"
+      }
+    },
     "/api/v1/projects/{project_id}/config:validate": {
       "post": {
         "operationId": "validate_config_api_v1_projects__project_id__config_validate_post",
@@ -8933,6 +9053,57 @@
           }
         },
         "summary": "Storage Test"
+      }
+    },
+    "/api/v1/projects/{project_id}/styles/{style_id}/revisions": {
+      "get": {
+        "description": "Immutable history of one style profile, newest first. Restore = save the old content as a new config.",
+        "operationId": "style_revisions_api_v1_projects__project_id__styles__style_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "style_id",
+            "required": true,
+            "schema": {
+              "title": "Style Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Style Revisions Api V1 Projects  Project Id  Styles  Style Id  Revisions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Style Revisions"
       }
     },
     "/api/v1/projects/{project_id}/summary": {
@@ -10555,6 +10726,69 @@
           }
         },
         "summary": "Build Run",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v2/projects/{project_id}/jobs/{job_id}/items/{item_id}/effects": {
+      "get": {
+        "description": "Planned effect of this item's frozen configuration + its reference routing (not execution evidence).",
+        "operationId": "effects_api_v2_projects__project_id__jobs__job_id__items__item_id__effects_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Effects Api V2 Projects  Project Id  Jobs  Job Id  Items  Item Id  Effects Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Effects",
         "tags": [
           "jobs"
         ]

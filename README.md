@@ -7,6 +7,8 @@ inference runs only on your machine (ComfyUI + local models). Nothing about a pa
 - **Studio** (`services/studio`, :8190): UI + product API + scheduler. Owns all state and every human gate.
 - **ComfyUI** (GPU0, :8188 localhost): image engine behind a versioned adapter; its UI stays available as an advanced tool.
 - **aux** (GPU1): text enhancement, advisory visual QA (Qwen3-VL), segmentation (BiRefNet). Stateless.
+- **MCP** (:8191, in the Studio process): remote AI agents drive everything the UI can do, bearer-token auth
+  (`assetstudio mcp create <name>`). See `docs/mcp.md`.
 
 ## Quick start (Linux, 2 × 24 GB NVIDIA GPUs)
 

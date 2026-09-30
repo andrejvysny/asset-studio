@@ -9,12 +9,13 @@ from assetstudio_core.domain import Job, JobItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.qa import CheckResult, QaRule
 from assetstudio_processing.images import crop_png
+from assetstudio_storage.project import ProjectStore
 
 from ...adapters.base import EngineRejected
 from ...services.records import load_cset, load_item, load_job, load_prompt
+from ...services.reference_bindings import COMPARE_MAX_REFERENCES, resolve_references
 from ..runner import TaskEnv
 
-MAX_REFERENCES = 4
 SOURCE_QUESTIONS = {
     "variant_resemblance": "Is the candidate recognisably the same kind of object as the source, sharing its "
                            "identity and material treatment?",
@@ -44,7 +45,7 @@ def is_generative_variant(job: Job) -> bool:
     return job.variant is not None and not job.direct
 
 
-def compare_checks(job: Job, item: JobItem, snap: dict[str, Any]) -> list[Check]:
+def compare_checks(job: Job, item: JobItem, snap: dict[str, Any], store: ProjectStore) -> list[Check]:
     """The deterministic list of comparison checks for this item (same answer at task and finalize time)."""
     checks: list[Check] = []
     if is_generative_variant(job):
@@ -58,16 +59,18 @@ def compare_checks(job: Job, item: JobItem, snap: dict[str, Any]) -> list[Check]
                    Check("variant_single_object", SOURCE_QUESTIONS["variant_single_object"], "source"),
                    Check("variant_style", f"Does the candidate match this project style: {guide}?", "source",
                          applicable=bool(guide))]
-    for i, ref in enumerate(item.references[:MAX_REFERENCES]):
-        note = str(ref.get("note") or "").strip()
+    sel = resolve_references(store, item, snap, "qa_reference", COMPARE_MAX_REFERENCES)
+    for i, b in enumerate(sel.selected):
+        note = b.note.strip()
         checks.append(Check(f"ref_{i}", "Does the candidate match what matters in the reference: "
-                            f"{note or 'overall appearance'}?", f"ref_{i}", reference_id=ref.get("artifact_id"),
-                            crop=ref.get("crop"), note=note))
+                            f"{note or 'overall appearance'}?", f"ref_{i}", reference_id=b.artifact_id,
+                            crop=b.crop, note=note))
     return checks
 
 
-def compare_needed(job: Job, item: JobItem) -> bool:
-    return is_generative_variant(job) or bool(item.references)
+def compare_needed(job: Job, item: JobItem, snap: dict[str, Any], store: ProjectStore) -> bool:
+    return is_generative_variant(job) or bool(resolve_references(store, item, snap, "qa_reference",
+                                                                 COMPARE_MAX_REFERENCES).selected)
 
 
 # A variant that does not show its requested change is not a verified variant (GPU acceptance published a source
@@ -172,7 +175,7 @@ def qa_compare(env: TaskEnv) -> dict[str, Any]:
     cset = load_cset(store, t.job_id, item.current_set)
     job, _ = load_job(store, t.job_id)
     snap = store.read_snapshot(item.snapshot_sha)
-    checks = compare_checks(job, item, snap)
+    checks = compare_checks(job, item, snap, store)
     source, source_sha = _source_bytes(env, job) if is_generative_variant(job) else (None, None)
     refs = _load_references(env, checks)
     context = load_prompt(store, t.job_id, cset.prompt_revision_id).positive
@@ -183,4 +186,8 @@ def qa_compare(env: TaskEnv) -> dict[str, Any]:
                                      refs)
         out[cand.id] = [r.model_dump() for r in results]
     shas = {c.id: store.artifact(c.reference_id).sha256 for c in checks if c.reference_id and c.id in refs}
-    return {"compare": out, "inputs": {"source_reference_sha": source_sha, "reference_shas": shas}}
+    excluded = resolve_references(store, item, snap, "qa_reference", COMPARE_MAX_REFERENCES).excluded_list()
+    inputs: dict[str, Any] = {"source_reference_sha": source_sha, "reference_shas": shas}
+    if excluded:
+        inputs["references_excluded"] = excluded
+    return {"compare": out, "inputs": inputs}

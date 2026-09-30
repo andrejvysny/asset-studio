@@ -146,7 +146,7 @@ def qa_finalize(env: TaskEnv) -> dict[str, Any]:
     deps = _dep_results(env)
     masks_res, vlm_res, cmp_res = deps.get("mask", {}), deps.get("qa_vlm", {}), deps.get("qa_compare", {})
     job, _ = load_job(store, t.job_id)
-    cmp_checks = compare_checks(job, item, snap)
+    cmp_checks = compare_checks(job, item, snap, store)
     cmp_rules = compare_rules(cmp_checks)
     no_service = "" if env.aux is not None else "no VLM/segmentation service configured"
     reserved = reserved_colours(snap)

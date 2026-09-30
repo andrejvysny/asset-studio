@@ -651,6 +651,7 @@ def test_inventory_carries_barrier_states_receipts_and_rechecks(tmp_path: Path) 
     (inv,) = stub.names("put_inventory")
     assert inv.revision == 1 and [(s.slot_id, s.state) for s in inv.slots] == [("gpu1", "unknown")]
     assert [(m.key, m.status) for m in inv.models] == [("m1", "ok")]  # only models of this runner's engines
+    assert "export-feature.geometry_policy.v1" in inv.labels  # FakeWorker3d reports it in /health
     agent.step()
     assert stub.names("acquire") == [] and stub.names("heartbeat")[-1].inventory_revision == 1
     clock.t += 10  # inside the 30 s retry window: no barrier re-run
@@ -663,6 +664,15 @@ def test_inventory_carries_barrier_states_receipts_and_rechecks(tmp_path: Path) 
     assert inv2.revision == 2 and [s.state for s in inv2.slots] == ["ready"]
     agent.step()
     assert stub.names("acquire")[-1].free_slots == ["gpu1"]
+
+
+def test_engine_labels_drop_features_that_are_not_valid_labels(tmp_path: Path) -> None:
+    w3d = FakeWorker3d()
+    w3d.export_features = ["geometry_policy.v1", "Bad Feature", "x" * 49]
+    agent, _, _ = make_agent(
+        tmp_path, StubClient(), slots=AUX_SLOT, clock=Clock(),
+        executor=lambda c, s: EngineExecutor(c, s, Engines(None, FakeAux(), w3d), sleep=lambda _s: None))
+    assert agent._engine_labels() == ["export-feature.geometry_policy.v1"]
 
 
 def test_cli_models_verify_prints_receipts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

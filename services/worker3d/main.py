@@ -33,7 +33,7 @@ IDLE_UNLOAD_S = float(os.environ.get("IDLE_UNLOAD_S", "300"))
 SPOOL = spool.SPOOL
 TRELLIS_REF = "75fbf0183001ed9876c8dbb35de6b68552ee08bd"
 MAX_IMAGE_BYTES = 64 * 2**20
-LIMITATIONS = [f"export always fills holes with perimeter < {0.03} (upstream constant)"]
+LIMITATIONS = [f"export fills holes with perimeter < {0.03} (upstream constant) unless fill_holes=disabled"]
 EXPORTER_LICENCE = {"clean": "MIT (TRELLIS.2 o-voxel port + AssetStudio UV rasteriser)",
                     "research": "NVIDIA Source Code License (nvdiffrast v0.4.0): research/evaluation only"}
 TERMINAL = spool.TERMINAL
@@ -107,7 +107,7 @@ def _run_export(eid: str, params: dict[str, Any], body: bytes) -> tuple[bytes, d
     cuda_raw = rawio.to_cuda(raw)
     try:
         glb, meta = to_glb(cuda_raw, params["exporter"], params["decimation_target"], params["texture_size"],
-                           params["remesh"])
+                           params["remesh"], params["small_components"], params["fill_holes"])
     finally:
         del cuda_raw
         torch.cuda.empty_cache()
@@ -180,19 +180,30 @@ async def submit(eid: str, request: Request, op: Literal["generate", "export"],
     return _state(eid) or {}
 
 
+EXPORT_KEYS = {"exporter", "decimation_target", "texture_size", "remesh", "small_components", "fill_holes"}
+
+
 def _params(op: str, p: dict[str, Any]) -> dict[str, Any]:
     if op == "generate":
+        if unknown := set(p) - {"seed", "pipeline_type"}:
+            raise ValueError(f"unknown generate params: {sorted(unknown)}")
         pt = p["pipeline_type"]
         if pt not in ("512", "1024", "1024_cascade", "1536_cascade") or not 0 <= int(p["seed"]) < 2**31:
             raise ValueError("pipeline_type/seed out of range")
         return {"seed": int(p["seed"]), "pipeline_type": pt}
+    if unknown := set(p) - EXPORT_KEYS:
+        raise ValueError(f"unknown export params: {sorted(unknown)}")
     exporter = p["exporter"]
     if exporter not in ("clean", "research"):
         raise ValueError("unknown exporter")
     target, size = int(p["decimation_target"]), int(p["texture_size"])
     if not (1_000 <= target <= 2_000_000 and 256 <= size <= 8192):
         raise ValueError("decimation_target/texture_size out of range")
-    return {"exporter": exporter, "decimation_target": target, "texture_size": size, "remesh": bool(p["remesh"])}
+    small, holes = p.get("small_components", "remove"), p.get("fill_holes", "upstream")
+    if small not in ("remove", "preserve") or holes not in ("upstream", "disabled"):
+        raise ValueError("small_components/fill_holes out of range")
+    return {"exporter": exporter, "decimation_target": target, "texture_size": size, "remesh": bool(p["remesh"]),
+            "small_components": small, "fill_holes": holes}
 
 
 def _validate_input(op: str, params: dict[str, Any], body: bytes) -> None:
@@ -263,6 +274,7 @@ def health() -> dict:
     return {"ok": not missing and torch.cuda.is_available() and ex["alive"], "executor": ex, "missing_models": missing,
             "models_present": {k: k not in missing for k in ("trellis2", "trellis_image_large", "dinov3_vitl16")},
             "loaded": {"trellis2": trellis.loaded}, "loads": {"trellis2": trellis.loads}, "exporters": available(),
+            "export_features": ["geometry_policy.v1"],
             "trellis_ref": TRELLIS_REF, "cuda": torch.cuda.is_available(), "gpu": gpu_info(),
             "lease": lease.info(), "queued": jobs.qsize(), "spooled": spooled}
 

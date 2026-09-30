@@ -14,6 +14,7 @@ from typing import Any
 
 from assetstudio_core.ids import derived_id
 
+from .. import actor
 from ..errors import ApiError
 from ..journal import IdempotencyConflict
 from ..registry import ProjectContext
@@ -50,6 +51,7 @@ def execute(studio: Studio, ctx: ProjectContext, action: str, key: str, request:
     existing = journal.tasks.intent(ctx.id, action, key)
     if existing is None:
         p = plan(cid)
+        p.setdefault("actor", actor.current())  # persisted with the intent: a crash replay keeps who decided
         with journal.tasks.txn() as db:
             journal.tasks.record_intent(ctx.id, action, key, cid, {"request": request, "plan": p}, db)
     else:

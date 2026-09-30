@@ -212,6 +212,8 @@ class FakeAux:
         self.loads: dict[str, int] = {"vlm": 0, "birefnet": 0}
         self.calls: list[str] = []
         self.vlm_answers: dict[str, Any] | None = None
+        self.enhance_images: list[list[tuple[str, str]]] = []  # per call: (role, sha256 hex) of each image
+        self.compare_images: list[list[tuple[str, str]]] = []
         self.during_compare: Callable[[int], None] | None = None  # test hook: called with the compare ordinal
         self.gpu = _FakeLease()
 
@@ -240,8 +242,11 @@ class FakeAux:
                 execution_id: str | None = None, preset: str = "conservative", mode: str = "t2i",
                 images: list[tuple[bytes, str, str]] | None = None, preserve: str = "",
                 change: str = "") -> dict[str, Any]:
+        if len(images or []) > 4:  # mirrors the real aux /enhance cap
+            raise EngineRejected(f"at most 4 images, got {len(images or [])}")
         self._use("vlm", epoch)
         self.calls.append("enhance")
+        self.enhance_images.append([(role, hashlib.sha256(b).hexdigest()) for b, role, _ in images or []])
         text = brief.strip().rstrip(".")
         if mode == "edit":
             desc = (f"Edit the source object: {change or text}. Keep: {preserve or 'its identity'}. "
@@ -261,6 +266,7 @@ class FakeAux:
                 epoch: int, execution_id: str | None = None) -> dict[str, Any]:
         self._use("vlm", epoch)
         self.calls.append("compare")
+        self.compare_images.append([(role, hashlib.sha256(b).hexdigest()) for b, role, _ in images])
         with self.gpu.activity(epoch):
             if self.during_compare is not None:
                 self.during_compare(len([c for c in self.calls if c == "compare"]))
@@ -350,6 +356,8 @@ class FakeWorker3d:
         self.fail_ops: dict[str, str] = {}  # op -> failure code for the next execution of that op
         self.lose_submit_response = 0  # admitted, but the HTTP response is "lost"
         self.hold = False  # keep new executions "running" until release_held()
+        self.export_features: list[str] = ["geometry_policy.v1"]  # tests remove it to simulate an older worker
+        self.export_params: list[dict[str, Any]] = []
 
     @property
     def unload_response(self) -> dict[str, Any] | Exception | None:
@@ -361,6 +369,7 @@ class FakeWorker3d:
 
     def health(self) -> dict[str, Any]:
         return {"reachable": True, "ok": True, "missing_models": [], "exporters": {"clean": True, "research": False},
+                "export_features": list(self.export_features),
                 "loaded": {"trellis2": self.loaded}, "loads": {"trellis2": self.loads}, "simulated": True,
                 "lease": self.gpu.info(), "spooled": len(self.executions)}
 
@@ -406,6 +415,8 @@ class FakeWorker3d:
             if op == "export" and not body.startswith(b"SIMULATED-RAW:"):
                 raise ExecutionFailed("invalid raw intermediate", "input_invalid")
             self.calls.append(op if op == "generate" else f"export:{params['exporter']}")
+            if op == "export":
+                self.export_params.append(dict(params))
             self.executions[execution_id] = e = {"state": "running", "op": op, "params": params, "body": body,
                                                  "request_sha256": req, "session_id": self.gpu.session_id}
             if not self.hold:
@@ -442,7 +453,8 @@ class FakeWorker3d:
 
     @staticmethod
     def _export(raw: bytes, exporter: str, decimation_target: int, texture_size: int,
-                remesh: bool) -> tuple[bytes, dict[str, Any]]:
+                remesh: bool, small_components: str = "remove",
+                fill_holes: str = "upstream") -> tuple[bytes, dict[str, Any]]:
         import numpy as np
         import trimesh
 
@@ -456,4 +468,7 @@ class FakeWorker3d:
         return sphere.export(file_type="glb"), {"exporter": exporter, "faces_out": int(len(sphere.faces)),
                                                 "decimation_target": decimation_target, "texture_size": 64,
                                                 "remesh": remesh, "simulated": True,
+                                                "geometry_policy": {"small_components": small_components,
+                                                                    "fill_holes": fill_holes,
+                                                                    "applies": not remesh},
                                                 "licence": "SIMULATED", "limitations": []}

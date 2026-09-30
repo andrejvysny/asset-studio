@@ -918,6 +918,27 @@ export interface paths {
         patch: operations["patch_config_api_v1_projects__project_id__config_patch"];
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/config:effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Config Effects
+         * @description Planned effect of every setting a new Job in this scope would freeze. Side-effect free.
+         *     `style` previews a style other than the resolved one.
+         */
+        get: operations["config_effects_api_v1_projects__project_id__config_effects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/config:validate": {
         parameters: {
             query?: never;
@@ -1225,6 +1246,26 @@ export interface paths {
         put?: never;
         /** Storage Test */
         post: operations["storage_test_api_v1_projects__project_id__storage_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/styles/{style_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Style Revisions
+         * @description Immutable history of one style profile, newest first. Restore = save the old content as a new config.
+         */
+        get: operations["style_revisions_api_v1_projects__project_id__styles__style_id__revisions_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1710,6 +1751,26 @@ export interface paths {
          * @description One build attempt (any of the item's history): artifacts, checkpoints, validation, meta report.
          */
         get: operations["build_run_api_v2_projects__project_id__jobs__job_id__builds__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v2/projects/{project_id}/jobs/{job_id}/items/{item_id}/effects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Effects
+         * @description Planned effect of this item's frozen configuration + its reference routing (not execution evidence).
+         */
+        get: operations["effects_api_v2_projects__project_id__jobs__job_id__items__item_id__effects_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5020,6 +5081,7 @@ export interface operations {
         parameters: {
             query?: {
                 download?: boolean;
+                name?: string | null;
             };
             header?: never;
             path: {
@@ -5956,6 +6018,44 @@ export interface operations {
             };
         };
     };
+    config_effects_api_v1_projects__project_id__config_effects_get: {
+        parameters: {
+            query?: {
+                category_id?: string | null;
+                kind?: components["schemas"]["Kind"] | null;
+                mode?: "t2i" | "edit";
+                style?: string | null;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     validate_config_api_v1_projects__project_id__config_validate_post: {
         parameters: {
             query?: never;
@@ -6685,6 +6785,40 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    style_revisions_api_v1_projects__project_id__styles__style_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                style_id: string;
                 project_id: string;
             };
             cookie?: never;
@@ -7793,6 +7927,41 @@ export interface operations {
             path: {
                 job_id: string;
                 run_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    effects_api_v2_projects__project_id__jobs__job_id__items__item_id__effects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+                item_id: string;
                 project_id: string;
             };
             cookie?: never;

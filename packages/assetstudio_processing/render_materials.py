@@ -1,6 +1,9 @@
 """Material model for the CPU reference renderer: what a glTF material contributes to a fragment colour, and the
 honest list of features the renderer cannot reproduce. Colours are float32 in 0..1; textures stay uint8 until sampled.
 
+Colour maths is linear: sRGB textures are decoded, multiplied by the (linear) baseColorFactor and vertex colours, and
+the renderer encodes to sRGB once at the end. Alpha is linear throughout.
+
 Array shapes: texture (H, W, 4) uint8 RGBA; uv (V, 2); per-fragment barycentric weights (N, 3); fragment RGBA (N, 4).
 """
 from __future__ import annotations
@@ -15,7 +18,21 @@ import trimesh
 
 from .glb import GlbRejected, check_document_shape
 
-UNTEXTURED = np.float32(190 / 255)  # flat grey base when a material has no colour at all
+
+def srgb_to_linear(c: np.ndarray) -> np.ndarray:
+    """Piecewise sRGB EOTF, float32 0..1 in and out."""
+    c = np.asarray(c, dtype=np.float32)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** np.float32(2.4)).astype(np.float32)
+
+
+def linear_to_srgb(c: np.ndarray) -> np.ndarray:
+    """Piecewise sRGB OETF, float32 0..1 in (clipped) and out."""
+    c = np.clip(np.asarray(c, dtype=np.float32), 0, 1)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** np.float32(1 / 2.4) - 0.055).astype(np.float32)
+
+
+_SRGB_LUT = srgb_to_linear(np.arange(256, dtype=np.float32) / 255)
+UNTEXTURED = srgb_to_linear(np.float32(190 / 255))  # flat grey base (linear) when a material has no colour at all
 SUPPORTED_EXTENSIONS = frozenset({"KHR_materials_emissive_strength", "KHR_materials_ior", "KHR_materials_specular",
                                   "KHR_lights_punctual", "KHR_materials_variants"})
 UNSUPPORTED_WRAP = (33071, 33648)  # CLAMP_TO_EDGE, MIRRORED_REPEAT: only REPEAT is sampled
@@ -47,7 +64,7 @@ class MeshMaterial:
         return self.cutoff if self.alpha_mode == "MASK" else DEFAULT_CUTOFF
 
     def sample(self, faces: np.ndarray, idx: np.ndarray, w: np.ndarray) -> np.ndarray:
-        """RGBA (N, 4) float32 for fragments of face idx (N,) with barycentric weights w (N, 3)."""
+        """Linear RGBA (N, 4) float32 for fragments of face idx (N,) with barycentric weights w (N, 3)."""
         n = len(idx)
         rgba = np.ones((n, 4), np.float32)
         if self.tex is not None and self.uv is not None:
@@ -55,7 +72,8 @@ class MeshMaterial:
             th, tw = self.tex.shape[:2]
             tx = np.clip(np.floor((t[:, 0] % 1.0) * tw), 0, tw - 1).astype(np.int64)
             ty = np.clip(np.floor((1 - t[:, 1] % 1.0) * th), 0, th - 1).astype(np.int64)
-            rgba = self.tex[ty, tx].astype(np.float32) / 255
+            texel = self.tex[ty, tx]
+            rgba = np.concatenate([_SRGB_LUT[texel[:, :3]], texel[:, 3:].astype(np.float32) / 255], 1)
         else:
             rgba[:, :3] = UNTEXTURED
         rgba *= self.factor

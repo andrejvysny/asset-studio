@@ -18,6 +18,7 @@ web/node_modules/
 web/tsconfig.tsbuildinfo
 tests/e2e/artifacts/
 tests/gpu/artifacts/variants/
+tests/gpu/artifacts/profiles/
 # ComfyUI runtime state (advanced UI user data)
 comfyui/user/
 projects/*

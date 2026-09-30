@@ -4,7 +4,7 @@ import { TagChips } from "../components/MediaPicker";
 import { Empty, ErrorLine, Loading, PageHead } from "../components/ui";
 import { artifactUrl } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
-import { type MediaItem, type MediaList, mediaListPath, uploadMedia, type UploadResult } from "../lib/mediaApi";
+import { type MediaItem, type MediaList, mediaListPath, restoreMedia, uploadMedia, type UploadResult } from "../lib/mediaApi";
 import { useProject } from "../lib/project";
 import { MediaPreview } from "./MediaPreview";
 
@@ -61,6 +61,12 @@ export function Media() {
   };
   const onDrop = (e: DragEvent<HTMLElement>) => { e.preventDefault(); setOver(false); send([...e.dataTransfer.files]); };
   const rejected = (results ?? []).filter((r) => !r.ok);
+  const archivedHits = (results ?? []).filter((r) => r.ok && r.archived && r.item);
+  const restore = (r: UploadResult) => void act.run(async () => {
+    await restoreMedia(id, r.item!.id, r.item!.revision);
+    setResults((cur) => (cur ?? []).map((x) => (x === r ? { ...x, archived: false } : x)));
+    list.reload();
+  });
 
   return (
     <section className="content" aria-label="media library" style={{ outline: over ? "2px dashed var(--dim)" : undefined, outlineOffset: -6 }}
@@ -87,6 +93,10 @@ export function Media() {
           {rejected.length > 0 && (
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {rejected.map((r, i) => <li key={i}>{r.filename}: {r.error?.message ?? "rejected"}</li>)}</ul>)}
+          {archivedHits.length > 0 && (
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {archivedHits.map((r, i) => <li key={i}>{r.filename}: archived — <button className="btn-link" disabled={act.busy}
+                onClick={() => restore(r)}>Restore</button></li>)}</ul>)}
         </div>)}
       {!list.data ? <Loading what="media" /> : list.data.items.length === 0
         ? <Empty>No media yet. Drop images here or use Upload.</Empty> : (

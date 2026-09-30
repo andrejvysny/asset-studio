@@ -1,8 +1,8 @@
-import { type PointerEvent, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useRef, useState } from "react";
 
 import { MediaPicker } from "../../components/MediaPicker";
 import { Dialog, ErrorLine, Loading, WARN } from "../../components/ui";
-import { artifactUrl, type AssetList, type AssetRow, type Crop, type ItemView, type JobReference, P } from "../../lib/api";
+import { artifactUrl, type AssetList, type AssetRow, type Crop, type ItemEffects, type ItemView, type JobReference, P, type RefBinding } from "../../lib/api";
 import { useAction, useApi } from "../../lib/hooks";
 import * as api from "../../lib/jobsApi";
 import { useProject } from "../../lib/project";
@@ -110,6 +110,39 @@ function LibraryPicker({ onPick, onClose }: { onPick: (row: AssetRow) => void; o
   );
 }
 
+/** Read-only: project reference-set images that reach the enhancer / compare QA, and references left out (with why). */
+function SetReferences({ fx }: { fx: ItemEffects }) {
+  const { id } = useProject();
+  const g = fx.references.prompt_guidance;
+  const q = fx.references.qa_reference;
+  const fromSet: [RefBinding, string][] = [...g.selected.map((b): [RefBinding, string] => [b, "set · guidance"]),
+    ...q.selected.map((b): [RefBinding, string] => [b, "set · QA"])].filter(([b]) => b.origin === "project_set");
+  const excluded = [...g.excluded, ...q.excluded];
+  if (fromSet.length === 0 && excluded.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {fromSet.length > 0 && <>
+        <span className="label">From project reference set</span>
+        <div className="jw-refs" aria-label="from project reference set">
+          {fromSet.map(([b, badge], i) => (
+            <div key={`${b.id}-${i}`} className="jw-ref">
+              <div className="media checker"><img src={artifactUrl(id, b.artifact_id)} alt={`set reference ${b.note || b.id}`} />
+                <span className="badge">{badge}</span></div>
+              {b.note && <div className="body"><span className="mono ellipsis" style={{ fontSize: 11 }} title={b.note}>{b.note}</span></div>}
+            </div>
+          ))}
+        </div>
+      </>}
+      {excluded.length > 0 && <>
+        <span className="label">Not used</span>
+        <ul aria-label="references not used" style={{ margin: 0, paddingLeft: 18, fontSize: 11.5, color: DIM }}>
+          {excluded.map((x, i) => <li key={`${x.id}-${i}`}><span className="mono">{x.id}</span> — {x.reason}</li>)}
+        </ul>
+      </>}
+    </div>
+  );
+}
+
 interface Props { item: ItemView; jobId: string; locked: boolean; changed: boolean; reload: () => void }
 
 export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props) {
@@ -119,6 +152,12 @@ export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props)
   const [picking, setPicking] = useState(false);
   const [pickingMedia, setPickingMedia] = useState(false);
   const refs = item.references;
+  const [fx, setFx] = useState<ItemEffects | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.getItemEffects(id, jobId, item.id).then((v) => { if (live) setFx(v); }).catch(() => { if (live) setFx(null); });
+    return () => { live = false; };
+  }, [id, jobId, item.id, item.revision]);
   const disabled = locked || act.busy;
   const rev = async () => (await freshItem(id, jobId, item.id)).revision;
   const run = (fn: () => Promise<unknown>) => void act.run(async () => { await fn(); reload(); });
@@ -151,6 +190,7 @@ export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props)
           </div>
         )}
       </div>
+      {fx && <SetReferences fx={fx} />}
       <span className="muted" style={{ fontSize: 11.5 }}>Guidance only. Notes become reference cues in the prompt, and QA checks
         candidates against these images.</span>
       <ErrorLine error={act.error} />

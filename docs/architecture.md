@@ -42,6 +42,7 @@ The core imports no FastAPI, CUDA or ComfyUI.
 | runs, plans, waves | `runs/<brn_…>.json` (frozen selection), `runs/plans/<sel_…>.json` (frozen, hashed), `waves/<wav_…>.json` |
 | readable names | `names/<name_id>.json` (atomic create-if-absent: authoritative uniqueness; the index is only a cache) |
 | media library | `media/<med_…>.json` (id derived from content sha256: same bytes = same item; name, note, tags, source rights/URL, `archived_at`, revision) → `reference` + `preview` artifacts. Every `references:upload` lands here. Guidance only; archive hides, never deletes (Job refs keep working). A future blob GC must treat these artifacts as roots |
+| style history | `styles/<style_id>/<sha256>.json` (immutable, one per distinct content; sha = the prompt revision's `style_sha`; written after each config save, backfilled on read). `studio.yaml` stays the authority |
 | publication / import receipts | `publications/<op>.json`, `imports/<imp>.json` (written before any cleanup) |
 | live dispatch | instance journal (SQLite, same host only): the ONLY authority for task state |
 | search | instance index (SQLite, rebuilt from manifests: `storage:rebuild-index`) |
@@ -59,6 +60,21 @@ The core imports no FastAPI, CUDA or ComfyUI.
   `:accept-builds`, `:publish`). Each binds the exact then-current revisions; every unit still gets its own immutable
   decision record. Unselected rows stay where they are and can join a later wave or a later run.
 - A Job in an open run cannot be started elsewhere (409); its Job-level actions become scoped continuations of that run.
+
+## Style and reference routing
+
+A Job item freezes its effective configuration in a snapshot. What each field is planned to do is reported by
+`assetstudio_core.effects.field_effects` (`GET …/config:effects` for a new Job, `GET …/jobs/{j}/items/{i}/effects` for an
+existing item): `applied`, `conditioning_only` (sent to a model, compliance not guaranteed), `advisory_only`,
+`not_applicable` or `unsupported` (nothing reads it). This is the planned mechanism, not execution evidence. Config
+responses list set-but-inert fields as non-fatal `warnings`. Field-by-field trace: `docs/style-effects.md`.
+
+References are selected by `services/reference_bindings.resolve_references` for both consumers: item references first,
+then the snapshot's project reference set when its mode names the consumer (`prompt_guidance` → enhancer,
+`qa_reference` → compare QA). The enhancer takes at most 4 images and a variant's source uses one of them. Everything
+left out is recorded with a reason in the prompt revision's `references_excluded` (and in compare-QA inputs). A set in
+`image_conditioning` mode blocks generation (`reference_conditioning_unavailable`). Snapshots written before routing
+existed (no `reference_routing` key) never route their set; their images are listed as excluded.
 
 ## Lifecycle
 
@@ -128,7 +144,11 @@ intermediate validated on CPU (`assetstudio_processing/raw_npz.py`, shared with 
 artifact (retention `raw`) → worker3d `export` execution → GLB → structural checks on the delivered bytes (container, reload, finite
 vertices, indices, UVs, base-colour texture) + advisory triangle budget (requested → effective → actual) → CPU preview
 (4 views, `assetstudio_processing.render`; a preview failure never invalidates the model and can be retried alone)
-→ final human accept → publish. Each stage commits a checkpoint on the BuildRun; building the same approval again
+→ final human accept → publish. With a build profile, its geometry policy (`small_components`,
+`fill_holes`) is passed to the export, and a CPU **material stage** rewrites the baked GLB before checks and sizing:
+alpha mode and cutoff (`auto` measures transparent texels), culling, metallic replace and a linear roughness clamp
+applied to the packed texture. A preservation proof accompanies the rewrite (checkpoint `material`; see
+`docs/style-effects.md`). Each stage commits a checkpoint on the BuildRun; building the same approval again
 after a failed attempt inherits its segment/sample checkpoints (no second TRELLIS.2 run). Raw/cut-out/mask stay on the build run
 (`sources.intermediates` in the version record) and are not shipped as version files. **Re-export** (`:reexport`)
 creates a new build run from the stored raw (also of a failed attempt) with changed exporter/texture/triangles/remesh
@@ -180,3 +200,18 @@ answers are `unsure`), `/analyze_source`, `/suggest_variants`. QA that cannot ru
 Single trusted operator, loopback bindings. Mutations require the `X-AssetStudio: 1` header and same-origin `Origin`.
 Uploads are inspected before storage (pixel caps, full decode, GLB container with no URIs). No user field is executable;
 QA metrics are an allowlist; workflows are versioned files with node-id bindings validated against `/object_info`.
+
+**MCP for remote agents** (`mcp_api/`, see `docs/mcp.md`). A second listener in the Studio process
+(`STUDIO_MCP_HOST:STUDIO_MCP_PORT`, default `127.0.0.1:8191`) serves only Streamable HTTP `/mcp` and signed `/files/…`.
+The UI/REST port stays loopback and unauthenticated, so only the MCP port may be exposed, behind a TLS proxy.
+- Bearer tokens (`assetstudio mcp create|list|revoke`) are stored as sha256 in `instance/mcp_tokens.json` (0600). Scope
+  is `read` or `full`. The store reloads on change, so revocation takes effect immediately.
+- Tools call the REST API in-process (`httpx.ASGITransport`): validation, CSRF, idempotency, events and errors are shared
+  with the UI.
+- An agent may pass every gate (owner decision). Its identity reaches the REST layer as `x-assetstudio-actor`,
+  accepted only together with a per-process secret. Commands persist the actor in their intent plan, and
+  `ReviewDecision`/`WaveSelection` record `actor=agent:<token>`. New Jobs record `source=agent:<token>`.
+- Bytes: inline base64 (≤ `STUDIO_MCP_MAX_INLINE_BYTES`, 16 MiB), or HMAC-signed URLs (per-process key, 15 min).
+  An upload URL works once (exclusive spool file). Downloads stream the sha-verified artifact route. Studio never
+  fetches agent-supplied URLs.
+- DNS-rebinding protection admits loopback Host headers plus the host of `STUDIO_MCP_PUBLIC_URL`.

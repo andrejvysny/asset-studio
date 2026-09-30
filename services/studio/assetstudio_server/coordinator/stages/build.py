@@ -33,7 +33,7 @@ from ..errors import ItemFailed
 from ..runner import TaskEnv
 
 # Kept on the build run (re-export, provenance) but not shipped as version files: raw TRELLIS output is ~100-300 MB.
-INTERMEDIATE_ROLES = ("raw", "cutout", "mask", "model_unsized")
+INTERMEDIATE_ROLES = ("raw", "cutout", "mask", "model_unsized", "model_unmaterialized")
 
 
 def segment(env: TaskEnv) -> dict[str, Any]:

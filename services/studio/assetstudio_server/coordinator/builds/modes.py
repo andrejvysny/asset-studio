@@ -3,12 +3,14 @@
   build, retry  resume the durable upstream checkpoints of the latest unfinished attempt (same settings)
   resample      a NEW seed: keeps the segmentation, never the sample checkpoint
   rebuild       changed settings: keeps segmentation and the sampled raw, unless `pipeline_type` changed (that
-                changes what TRELLIS.2 samples, so it resamples)
+                changes what TRELLIS.2 samples, so it resamples); material-only changes also keep the bake (only
+                the CPU material stage runs again)
 Re-export from a stored raw is its own command (services.production.reexport)."""
 from __future__ import annotations
 
 from typing import Any
 
+from assetstudio_core.config import MATERIAL_KEYS
 from assetstudio_core.domain import BuildRun, Checkpoint, JobItem
 from assetstudio_core.seeds import derive_seed
 
@@ -43,7 +45,10 @@ def inherit(ctx: Any, job_id: str, item: JobItem, approval_id: str, mode: str,
     if mode == "resample":
         return _pick(priors, ("segment",))
     if mode == "rebuild":
-        return _pick(priors, ("segment",) if "pipeline_type" in overrides else RESUMABLE_STAGES)
+        if "pipeline_type" in overrides:
+            return _pick(priors, ("segment",))
+        material_only = bool(overrides) and set(overrides) <= set(MATERIAL_KEYS)
+        return _pick(priors, RESUMABLE_STAGES + ("bake",) if material_only else RESUMABLE_STAGES)
     for prior in priors:  # build / retry: only an UNFINISHED attempt is resumed
         if prior.status == "succeeded":
             return None, {}

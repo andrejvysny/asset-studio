@@ -159,6 +159,41 @@ class Retention(Strict):
     full_logs: RetentionRule = RetentionRule()
 
 
+GEOMETRY_KEYS: tuple[str, ...] = ("small_components", "fill_holes")
+MATERIAL_KEYS: tuple[str, ...] = (
+    "alpha_mode", "alpha_cutoff", "double_sided", "metallic", "roughness_min", "roughness_max",
+)
+
+
+class GeometryPolicy(Strict):
+    small_components: Literal["remove", "preserve"] | None = None  # None = exporter default (remove)
+    fill_holes: Literal["upstream", "disabled"] | None = None  # None = exporter default (upstream)
+    expect_single_component: bool | None = None  # None = advisory check as today
+
+
+class MaterialPolicy(Strict):
+    alpha_mode: Literal["opaque", "mask", "blend", "auto"] | None = None
+    alpha_cutoff: float | None = Field(default=None, ge=0.0, le=1.0)
+    double_sided: bool | None = None
+    metallic: float | None = Field(default=None, ge=0.0, le=1.0)  # replace
+    roughness_min: float | None = Field(default=None, ge=0.0, le=1.0)  # clamp
+    roughness_max: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> MaterialPolicy:
+        if None not in (self.roughness_min, self.roughness_max) and self.roughness_min > self.roughness_max:  # type: ignore[operator]
+            raise ValueError("roughness_min must be <= roughness_max")
+        if self.alpha_cutoff is not None and self.alpha_mode in ("opaque", "blend"):
+            raise ValueError("alpha_cutoff only applies to alpha_mode mask or auto")
+        return self
+
+
+class BuildProfile(Strict):
+    label: str = ""
+    geometry: GeometryPolicy = GeometryPolicy()
+    material: MaterialPolicy = MaterialPolicy()
+
+
 class ProjectInfo(Strict):
     id: str
     name: str = Field(min_length=1, max_length=120)
@@ -173,9 +208,17 @@ class StudioConfig(Strict):
     pipelines: dict[str, PipelineSettings] = {}
     qa_rulesets: dict[str, QaRuleset] = {}
     styles: dict[str, StyleProfile] = {}
+    build_profiles: dict[str, BuildProfile] = {}
     reference_sets: dict[str, ReferenceSet] = {}
     export_presets: dict[str, ExportPreset] = {}
     retention: Retention = Retention()
+
+    @field_validator("build_profiles")
+    @classmethod
+    def _profile_keys(cls, v: dict[str, BuildProfile]) -> dict[str, BuildProfile]:
+        for key in v:
+            validate_config_key(key)
+        return v
 
     def category(self, category_id: str) -> Category | None:
         return next((c for c in self.categories if c.id == category_id), None)

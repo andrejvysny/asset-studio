@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from assetstudio_protocol import calls as pc
 
 from ..services import attempts
-from ..services.node_readiness import node_exporters, operation_readiness
+from ..services.node_readiness import node_export_features, node_exporters, operation_readiness
 from .calls import result_simulated, run_call
 
 if TYPE_CHECKING:
@@ -63,7 +63,8 @@ class RemoteWorker3d:
         gen, why_gen = operation_readiness(self.studio, "worker3d.generate")
         exp, why_exp = operation_readiness(self.studio, "worker3d.export")
         ok = gen and exp
-        return {"reachable": ok, "ok": ok, "exporters": node_exporters(self.studio), "loads": None, "loaded": None,
+        return {"reachable": ok, "ok": ok, "exporters": node_exporters(self.studio),
+                "export_features": node_export_features(self.studio), "loads": None, "loaded": None,
                 "problems": [] if ok else (why_gen if not gen else why_exp)}
 
     def lease(self, epoch: int) -> dict[str, Any]:

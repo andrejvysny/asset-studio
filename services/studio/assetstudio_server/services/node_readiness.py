@@ -15,8 +15,8 @@ from ..models import ModelStatus, load_lock
 from ..studio import Studio
 from .placement import catalog_sha256, session_fresh, slot_problem
 
-__all__ = ["RunnerFacts", "fresh_inventories", "node_exporters", "node_model_statuses", "nodes_simulated",
-           "node_gpus", "node_slot_urls", "operation_readiness", "runner_readiness"]
+__all__ = ["RunnerFacts", "fresh_inventories", "node_export_features", "node_exporters", "node_model_statuses",
+           "nodes_simulated", "node_gpus", "node_slot_urls", "operation_readiness", "runner_readiness"]
 
 NO_RUNNER = "no runner is connected (active runner with a fresh session and inventory)"
 _SEVERITY = {"corrupt": 3, "invalid_lock": 2, "missing": 1}  # receipt "unpinned" is reported as invalid_lock
@@ -130,6 +130,22 @@ def node_exporters(studio: Studio) -> dict[str, bool]:
         clean = clean or can_export
         research = research or (can_export and "exporter-research" in f.inventory.labels)
     return {"clean": clean, "research": research}
+
+
+def node_export_features(studio: Studio) -> list[str]:
+    """Worker3d export features every export-capable runner advertises (`export-feature.<name>` labels).
+
+    Intersection, not union: placement does not route on these labels, so a feature counts only when any runner
+    that may receive the export supports it."""
+    common: set[str] | None = None
+    for f in fresh_inventories(studio):
+        devices = {d["uuid"]: d for d in studio.journal.runners.devices(f.runner_id)}
+        if not any(slot_problem(s, devices, set(), "worker3d.export", transient=False) is None
+                   for s in studio.journal.runners.slots(f.runner_id)):
+            continue
+        feats = {x.removeprefix("export-feature.") for x in f.inventory.labels if x.startswith("export-feature.")}
+        common = feats if common is None else common & feats
+    return sorted(common or ())
 
 
 def node_gpus(studio: Studio) -> list[dict[str, Any]]:

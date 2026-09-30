@@ -4,7 +4,7 @@
 
 import {
   J, P, get, key, send, upload,
-  type BuildMode, type BuildRunDetail, type CommandAccepted, type Crop, type EnhancePreset, type JobDetail, type JobRunResult,
+  type BuildMode, type BuildRunDetail, type CommandAccepted, type Crop, type ItemEffects, type EnhancePreset, type JobDetail, type JobRunResult,
   type JobSummary, type PublishPreviewRow, type RebuildOverrides, type ReferencesState, type ItemOutcome,
 } from "./api";
 
@@ -13,6 +13,8 @@ const item = (project: string, jobId: string, itemId: string) => `${J(project)}/
 export const listJobs = (project: string) => get<{ jobs: JobSummary[] }>(J(project));
 export const getBuildRun = (project: string, jobId: string, runId: string) =>
   get<BuildRunDetail>(`${J(project)}/${jobId}/builds/${runId}`);
+export const getItemEffects = (project: string, jobId: string, itemId: string) =>
+  get<ItemEffects>(`${item(project, jobId, itemId)}/effects`);
 export const getJob = (project: string, jobId: string) => get<JobDetail>(`${J(project)}/${jobId}`);
 
 /** Runs a Job standalone (409 `job_in_active_run` if a Batch run owns it). 202. Enhances prompts, then stops at

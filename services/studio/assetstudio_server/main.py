@@ -1,16 +1,21 @@
 """Studio API: the product API and sole owner of production state. ComfyUI/aux are internal adapters."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import FrameType
 
+import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
-from . import errors
+from . import actor, errors
 from .coordinator.runner import Coordinator
 from .journal import IdempotencyConflict
 from .operator_auth import AuthError, authorize
@@ -105,6 +110,16 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None) -
                 return JSONResponse(errors.body("csrf", "cross-origin request refused"), status_code=403)
         return await call_next(request)
 
+    @app.middleware("http")
+    async def acting_as(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """Agent identity from the in-process MCP loopback only (see actor.py); everyone else is the operator."""
+        token = actor.set_current(actor.from_headers(request.headers.get(actor.ACTOR_HEADER),
+                                                     request.headers.get(actor.INTERNAL_HEADER)))
+        try:
+            return await call_next(request)
+        finally:
+            actor.reset(token)
+
     app.include_router(projects.router)
     app.include_router(library.router)
     app.include_router(media.router)
@@ -134,12 +149,40 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None) -
     return app
 
 
+class _MainServer(uvicorn.Server):
+    """Owns signal handling and forwards shutdown to companion servers (which must not install handlers)."""
+
+    def __init__(self, config: uvicorn.Config, companions: list[uvicorn.Server]) -> None:
+        super().__init__(config)
+        self.companions = companions
+
+    def handle_exit(self, sig: int, frame: FrameType | None) -> None:
+        super().handle_exit(sig, frame)
+        for c in self.companions:
+            c.should_exit, c.force_exit = self.should_exit, self.force_exit
+
+
+class _CompanionServer(uvicorn.Server):
+    def capture_signals(self) -> contextlib.AbstractContextManager[None]:  # type: ignore[override]
+        return contextlib.nullcontext()
+
+
 def run() -> None:
-    import os
-
-    import uvicorn
-
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(create_app(), host=os.environ.get("STUDIO_HOST", "127.0.0.1"),
-                port=int(os.environ.get("STUDIO_PORT", "8190")), log_level="info",
-                timeout_graceful_shutdown=3)  # open SSE streams must not block shutdown
+    settings = Settings()
+    app = create_app(settings)
+    companions: list[uvicorn.Server] = []
+    if settings.mcp_enabled:
+        from .mcp_api.server import build_mcp_app
+
+        mcp_app = build_mcp_app(app, app.state.studio, settings)
+        companions.append(_CompanionServer(uvicorn.Config(
+            mcp_app, host=settings.mcp_host, port=settings.mcp_port, log_level="info", timeout_graceful_shutdown=3)))
+    main = _MainServer(uvicorn.Config(app, host=os.environ.get("STUDIO_HOST", "127.0.0.1"),
+                                      port=int(os.environ.get("STUDIO_PORT", "8190")), log_level="info",
+                                      timeout_graceful_shutdown=3),  # open SSE streams must not block shutdown
+                       companions)
+
+    async def serve() -> None:
+        await asyncio.gather(main.serve(), *(c.serve() for c in companions))
+    asyncio.run(serve())

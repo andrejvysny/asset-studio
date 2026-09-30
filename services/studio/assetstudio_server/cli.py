@@ -307,6 +307,29 @@ def cmd_execution_switch(s: Settings, a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp_token(s: Settings, a: argparse.Namespace) -> int:
+    from .mcp_api.server import token_store
+
+    store = token_store(s)
+    if a.sub == "create":
+        try:
+            token = store.create(a.name, a.scope)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(f"token {a.name!r} ({a.scope}) created; it is shown only once:\n{token}")
+        print(f"MCP endpoint: {s.mcp_base_url}/mcp  (header  Authorization: Bearer <token>)")
+        return 0
+    if a.sub == "revoke":
+        if not store.revoke(a.name):
+            print(f"error: no token named {a.name!r}", file=sys.stderr)
+            return 1
+        print(f"token {a.name!r} revoked")
+        return 0
+    _print(store.list())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="assetstudio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -384,6 +407,15 @@ def main(argv: list[str] | None = None) -> int:
     oa = sub.add_parser("openapi", help="write Studio's OpenAPI schema (default: stdout)")
     oa.add_argument("--out", help="file to write")
     oa.set_defaults(fn=cmd_openapi)
+    mcp = sub.add_parser("mcp", help="bearer tokens for the MCP endpoint (remote agents)")
+    mt = mcp.add_subparsers(dest="sub", required=True)
+    tc = mt.add_parser("create", help="new token; printed once")
+    tc.add_argument("name")
+    tc.add_argument("--scope", choices=("full", "read"), default="full")
+    tr = mt.add_parser("revoke")
+    tr.add_argument("name")
+    for q in (tc, tr, mt.add_parser("list")):
+        q.set_defaults(fn=cmd_mcp_token)
     args = p.parse_args(argv)
     if args.cmd == "serve":
         from .main import run

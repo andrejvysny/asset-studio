@@ -89,7 +89,8 @@ def validate_semantics(cfg: StudioConfig) -> list[FieldError]:
 
 def _validate_defaults(cfg: StudioConfig, d: CategoryDefaults, path: str) -> list[FieldError]:
     errs: list[FieldError] = []
-    refs = {"qa_ruleset": cfg.qa_rulesets, "reference_set": cfg.reference_sets, "style": cfg.styles}
+    refs = {"qa_ruleset": cfg.qa_rulesets, "build_profile": cfg.build_profiles,
+            "reference_set": cfg.reference_sets, "style": cfg.styles}
     for name, table in refs.items():
         ov = getattr(d, name)
         if ov.mode == Mode.value and ov.value not in table:
@@ -187,6 +188,7 @@ def build_snapshot(cfg: StudioConfig, category_id: str | None, item: dict[str, A
 
     snap = {
         "schema_version": 1,
+        "reference_routing": 1,  # project reference sets are routed to their consumers (absent = older snapshot)
         "project_id": cfg.project.id,
         "config_revision": cfg.revision,
         "category_id": category_id,
@@ -200,6 +202,7 @@ def build_snapshot(cfg: StudioConfig, category_id: str | None, item: dict[str, A
         "negative": recipe.negative,
         "qa_ruleset": ref(cfg.qa_rulesets, values["qa_ruleset"]),
         "style": ref(cfg.styles, values["style"]),
+        "build_profile": ref(cfg.build_profiles, values["build_profile"]),
         "reference_set": ref(cfg.reference_sets, values["reference_set"]),
     }
     snap["sha256"] = sha256_json(snap)

@@ -10,7 +10,7 @@ export interface MediaItem {
 }
 export interface MediaList { items: MediaItem[]; tags: { tag: string; count: number }[] }
 export interface UploadResult {
-  filename: string; ok: boolean; item?: MediaItem; duplicate?: boolean; error?: { code: string; message: string };
+  filename: string; ok: boolean; item?: MediaItem; duplicate?: boolean; archived?: boolean; error?: { code: string; message: string };
 }
 export interface MediaPatch {
   expected_revision: number; name?: string; note?: string; tags?: string[]; source_rights?: string; source_url?: string;

@@ -30,9 +30,77 @@ Open:
 - [ ] Runtime UI: show runner_readiness + audit view; node-mode GPU usage shows as unknown, not idle
 - [ ] aux calls lose Studio execution_id reconciliation in node mode (attempt id is the identity instead)
 - [ ] research exporter in node mode depends on runner label `exporter-research` (untested on hardware)
+- [ ] merge of master (MCP, build profiles): geometry_policy in node mode needs every export-capable runner to
+      advertise `export-feature.geometry_policy.v1` (placement does not route on it)
+- [ ] MCP in proxy auth mode: in-process loopback carries no proxy credential, so every MCP call gets 401 —
+      decide how the operator gate should trust the MCP loopback (security decision)
 - [ ] reviewer role cannot cancel/retry tasks (owner only) — product decision
 - [ ] tests/unit/test_runner_agent.py and test_runner_services.py exceed 500 lines — split
 - [ ] P3–P7 detailed planning (source lifecycle, companion, providers, delivery, scale)
+
+# TODO — Build profiles + GPU check (2026-09-30)
+
+Plan: ~/.claude/plans/ultra-snappy-castle.md (spec Phase 2 slice). Owner: typed build_profiles (material CPU stage with
+texture rewrite + worker geometry params), real-GPU A/B on rock/prop/tree; ride-alongs: effects style preview, media
+fixes, renderer accuracy. No image->3D fast path, no Godot.
+
+- [x] 1 profiles core: config, validation, snapshot, effects, config:effects?style=
+- [x] 2 material stage: materials.py (JSON + texture rewrite), finalize checkpoint, checks, material-only rebuild
+- [x] 3 worker geometry policy: params, to_glb, health feature, preflight, worker tests
+- [x] 4 web: profile editor, reference select, rebuild fields, style preview, media restore/download
+- [x] 5 renderer: linear factor, real BLEND
+- [x] 6 GPU acceptance: rebuild stack, rock/prop/tree A/B, docs/acceptance.md
+- [x] 7 docs
+
+Result: lint clean, 448+ backend + 36 e2e pass, worker3d tests pass; real GPU `test_model3d_profiles` 1 pass (9 m 19 s).
+Follow-ups:
+- [ ] tests/gpu/test_model3d.py waits on ops_idle only (same race fixed in test_model3d_profiles): switch to item state
+- [ ] calibrate `auto` alpha threshold on more assets; decode-time fill_holes needs a TRELLIS decode adapter
+- [ ] single_component check is weak for generated organic assets (rocks = thousands of islands)
+- [ ] per-part material bindings (profile applies to the whole asset); image->3D fast path; Godot runtime validation
+
+# TODO — Style correctness + lean profiles (2026-09-30)
+
+Plan: ~/.claude/plans/ultra-snappy-castle.md (spec "Configurable Game Styles and 3D Production", Phase 0 + lean Phase 1).
+Owner: project reference sets route for new snapshots only; enhancer order source > item refs > project set, excluded
+recorded; no StylePackage/5-profile/schema v2 yet.
+
+- [x] 0a regression tests (FakeAux captures inputs + 4-image cap): set routing, qa_reference, image_conditioning 422,
+      legacy snapshot inert, variant source + 4 refs
+- [x] 0b reference_bindings resolver, `reference_routing` snapshot marker, prompt/qa_compare wiring, admission block
+- [x] 0c effects.py + config:effects / item effects endpoints + non-fatal config warnings
+- [x] 1a style revisions store + history API
+- [x] 1b web: multi-style, history, effect panel, labels, set refs in Job refs panel, "no effect yet" markers
+- [x] 1c docs (SPEC, architecture, style-effects.md), e2e, MCP read tools (config_effects, style_history)
+
+Result: lint clean, 410 backend + 33 e2e pass, web build ok (SIMULATED engines; no GPU run needed).
+Follow-ups:
+- [ ] spec Phase 2: exporter alpha mode (mask/blend + cutoff) + independent double_sided; typed geometry cleanup
+- [ ] effects panel follows the scope's resolved style, not the selected style chip
+
+# TODO — MCP server for remote agents (2026-09-30)
+
+Plan: ~/.claude/plans/act-as-senior-software-sunny-bonbon.md. Owner: agents pass all gates (actor recorded), in-process
+listener :8191, bearer tokens (read/full), inline ≤16 MB + signed URLs. Facade over REST via ASGITransport.
+
+- [x] Phase 0 spike: mcp==1.30.0; FastMCP streamable HTTP on 2nd uvicorn server + auth middleware; contextvar through
+      ASGITransport into sync endpoints; test harness over ASGITransport + session_manager.run()
+- [x] Phase 1 foundation: settings, listener (:8191, clean SIGINT), token store + `assetstudio mcp create|list|revoke`,
+      StudioClient + error mapping, actor plumbing (intent plan -> decisions/waves), studio tools, guide resources,
+      file spool + signed URLs, views/binding; test_mcp_foundation (5)
+- [x] Phase 2 config/library/media tools (Sonnet impl, reviewed; import cap -> max_upload_bytes, images downscaled
+      for vision), test_mcp_config_library (7)
+- [x] Phase 3 jobs + gates (auto-binding), wait_for_job, batches/runs, ops (Sonnet impl, reviewed; fixed pinned
+      prompt scope, build `status` field), test_mcp_production (6, incl. actor on decisions + intent)
+- [x] Phase 4 variants, studio_api, produce_asset prompt, docs/mcp.md, compose/Dockerfile port, README/SPEC/arch
+
+Result: lint clean, 388 backend tests pass (19 MCP). Live smoke: real server + MCP client, fake engine, create project
+-> config -> job -> all gates -> publish -> signed download sha ok. Not committed.
+Follow-ups:
+- [ ] 75 tools: consider consolidating (clients with tool limits); variant tools + item_reference/reexport untested
+- [ ] OAuth 2.1 (needed for claude.ai custom connectors); token UI panel in Runtime
+- [ ] UI: show decision actor (operator vs agent:<name>) in history
+- [ ] real-GPU run driven through MCP
 
 # TODO — Media Library (2026-09-29)
 

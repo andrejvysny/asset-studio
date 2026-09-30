@@ -196,3 +196,29 @@ def test_summary_counts_media(make_api) -> None:
     assert api.get(f"{P}/{pid}/summary")["counts"]["media"] == 2
     api.post(f"{P}/{pid}/media/{a['id']}:archive", {"expected_revision": 1})
     assert api.get(f"{P}/{pid}/summary")["counts"]["media"] == 1
+
+
+def test_archived_duplicate_reports_archived(make_api) -> None:
+    api = make_api(coordinator=False)
+    pid = new_project(api)
+    m = _one(api, pid)
+    (fresh,) = _upload(api, pid, [("x.png", png_bytes())]).json()["results"]
+    assert fresh["duplicate"] is True and fresh["archived"] is False
+    api.post(f"{P}/{pid}/media/{m['id']}:archive", {"expected_revision": 1})
+    (res,) = _upload(api, pid, [("x.png", png_bytes())]).json()["results"]
+    assert res["ok"] and res["duplicate"] is True and res["archived"] is True
+    assert res["item"]["archived_at"] and api.get(f"{P}/{pid}/media")["items"] == []  # not auto-restored
+
+
+def test_download_filename_extension_and_sanitized_name(make_api) -> None:
+    api = make_api(coordinator=False)
+    pid = new_project(api)
+    m = _one(api, pid)
+    url = f"{P}/{pid}/artifacts/{m['artifact_id']}/content"
+    cd = api.raw("GET", url, params={"download": 1}).headers["content-disposition"]
+    assert cd == f'attachment; filename="reference-{m["sha256"][:12]}.png"'
+    cd = api.raw("GET", url, params={"download": 1, "name": 'Cas tle/../"Wall"\r\n'}).headers["content-disposition"]
+    assert cd == 'attachment; filename="Cas_tle_.._Wall.png"'
+    long = api.raw("GET", url, params={"download": 1, "name": "a" * 200}).headers["content-disposition"]
+    assert long == f'attachment; filename="{"a" * 80}.png"'
+    assert "attachment" not in api.raw("GET", url).headers.get("content-disposition", "")

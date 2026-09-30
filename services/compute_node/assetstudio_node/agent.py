@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import queue
+import re
 import shutil
 import socket
 import threading
@@ -53,6 +54,7 @@ log = logging.getLogger("assetstudio_node")
 
 _ERROR_CODES = {"input_invalid": "invalid_input", "oom": "resource_exhausted", "internal": "uncertain_execution"}
 _STALE_CODES = ("stale_generation", "cancelled_by_operator")
+_FEATURE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,47}")  # "export-feature." + this fits the 63-char Label
 _KEYS = TypeAdapter(list[StudioKey])
 _BACKOFF_MAX_S = 30.0
 _BARRIER_RETRY_S = 30.0
@@ -191,10 +193,14 @@ class RunnerAgent:
         if worker3d is None:
             return []
         try:
-            exporters = worker3d.health().get("exporters") or {}
+            health = worker3d.health()
         except Exception:  # noqa: BLE001 - an unreachable engine must not block inventory publication
             return []
-        return ["exporter-research"] if exporters.get("research") else []
+        labels = ["exporter-research"] if (health.get("exporters") or {}).get("research") else []
+        # Label pattern (protocol base.Label) is lowercase [a-z0-9_.-]; anything else would reject the inventory.
+        labels += [f"export-feature.{f}" for f in health.get("export_features") or []
+                   if isinstance(f, str) and _FEATURE.fullmatch(f)]
+        return labels
 
     def _put_inventory(self) -> None:
         self._inv_revision += 1

@@ -204,6 +204,10 @@ def generation_residency(studio: Studio, ctx: ProjectContext, item: JobItem) -> 
     if lora:
         raise ApiError(422, "style_lora_unavailable", f"this item's configuration requires style LoRA "
                        f"{lora['model_id']}; style LoRAs are planned separately — fork the Job without it")
+    if (snap.get("reference_set") or {}).get("mode") == "image_conditioning" and snap.get("reference_routing"):
+        raise ApiError(422, "reference_conditioning_unavailable", "this item's reference set is in "
+                       "image-conditioning mode; no reference-capable image adapter is installed — switch the set "
+                       "to prompt guidance or QA reference and fork the Job")
     if edit:
         return residency(studio, "generate", mode="image_edit")
     return residency(studio, "generate", speed_preset=snap["parameters"].get("speed_preset", "quality"))

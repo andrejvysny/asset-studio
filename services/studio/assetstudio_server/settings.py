@@ -98,11 +98,25 @@ class Settings:
     ratelimit_per_min: int = field(default_factory=lambda: _int("STUDIO_RATELIMIT_PER_MIN", 10))
     ratelimit_burst: int = field(default_factory=lambda: _int("STUDIO_RATELIMIT_BURST", 5))
 
+    # MCP endpoint for remote agents: its own listener, so only it (bearer tokens) is exposed, never /api or the UI.
+    mcp_enabled: bool = field(default_factory=lambda: os.environ.get("STUDIO_MCP", "1") == "1")
+    mcp_host: str = field(default_factory=lambda: os.environ.get("STUDIO_MCP_HOST", "127.0.0.1"))
+    mcp_port: int = field(default_factory=lambda: int(os.environ.get("STUDIO_MCP_PORT", "8191")))
+    # Externally visible base URL (reverse proxy/tunnel): allowed Host header + base of signed file URLs.
+    mcp_public_url: str = field(default_factory=lambda: os.environ.get("STUDIO_MCP_PUBLIC_URL", "").rstrip("/"))
+    mcp_max_inline_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("STUDIO_MCP_MAX_INLINE_BYTES", str(16 * 1024 * 1024))))
+
     def validate(self) -> None:
         if self.auth_mode not in ("local", "proxy"):
             raise ValueError(f"STUDIO_AUTH_MODE must be 'local' or 'proxy', got {self.auth_mode!r}")
         if self.auth_mode == "proxy" and not self.proxy_secret:
             raise ValueError("STUDIO_AUTH_MODE=proxy requires a non-empty STUDIO_PROXY_SECRET (or _FILE)")
+
+    @property
+    def mcp_base_url(self) -> str:
+        host = "127.0.0.1" if self.mcp_host in ("0.0.0.0", "::") else self.mcp_host
+        return self.mcp_public_url or f"http://{host}:{self.mcp_port}"
 
     def ensure(self) -> None:
         for sub in ("", "index", "staging", "journal"):
