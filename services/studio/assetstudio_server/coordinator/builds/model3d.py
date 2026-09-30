@@ -19,6 +19,7 @@ from assetstudio_processing.render import glb_stats, preview_png
 from ...adapters.base import EngineUnavailable, ExecutionCancelled, ExecutionFailed, ExecutionLost
 from ..errors import Blocked, Cancelled
 from .common import BuildFailed, BuildInput, foreground_mask
+from .material import apply_material
 from .sizing import apply_final_size
 
 EXPORT_RANGE = (1_000, 2_000_000)  # what the worker accepts
@@ -44,6 +45,18 @@ def target_triangles(inp: BuildInput) -> dict[str, Any]:
     return {"min": tri.get("min"), "max": tri.get("max"), "advisory": tri.get("advisory", True),
             "requested": requested, "effective": effective, "source": source,
             "clamp": None if effective == requested else f"clamped to the exporter range {EXPORT_RANGE}"}
+
+
+def geometry_policy(inp: BuildInput) -> dict[str, str]:
+    """Explicitly set geometry cleanup keys only (override > build profile); empty = worker defaults."""
+    geo = (inp.snap.get("build_profile") or {}).get("geometry") or {}
+    overrides = (inp.reexport or {}).get("overrides") or (inp.run.inputs.get("overrides") if inp.run else None) or {}
+    out: dict[str, str] = {}
+    for key in ("small_components", "fill_holes"):
+        value = overrides.get(key) or geo.get(key)
+        if value:
+            out[key] = str(value)
+    return out
 
 
 def _worker(inp: BuildInput) -> tuple[Any, int]:
@@ -91,6 +104,9 @@ def _preflight(inp: BuildInput) -> None:
         raise Blocked("3D worker unreachable", "engine_unavailable")
     if not (health.get("exporters") or {}).get(exporter):
         raise BuildFailed(f"exporter {exporter!r} is not installed in the 3D worker", "exporter_unavailable")
+    if geometry_policy(inp) and "geometry_policy.v1" not in (health.get("export_features") or []):
+        raise BuildFailed("the 3D worker does not support geometry cleanup policies; rebuild the worker3d image",
+                          "worker_feature_missing")
 
 
 def segment(inp: BuildInput) -> str:
@@ -140,17 +156,28 @@ def sample(inp: BuildInput) -> str:
     return art.id
 
 
+def _export_params(inp: BuildInput) -> tuple[dict[str, Any], dict[str, Any]]:
+    budget = target_triangles(inp)
+    params = {"exporter": inp.params["exporter"], "decimation_target": budget["effective"],
+              "texture_size": int(inp.params["texture_size"]), "remesh": bool(inp.params["remesh"]),
+              **geometry_policy(inp)}
+    return params, budget
+
+
+def _bake_matches(cp: Any, params: dict[str, Any]) -> bool:
+    """An inherited bake (material-only rebuild) is reused only when it was exported with exactly these settings."""
+    recorded = {k: v for k, v in cp.settings.items() if k != "budget"}
+    return recorded == params
+
+
 def bake(inp: BuildInput) -> str:
-    if (cp := inp.done("bake")) is not None:
+    params, budget = _export_params(inp)
+    if (cp := inp.done("bake")) is not None and _bake_matches(cp, params):
         return cp.outputs["model"]
     raw_id = sample(inp) if inp.reexport else inp.done("sample").outputs["raw"]  # type: ignore[union-attr]
-    if inp.reexport:
-        _preflight(inp)
-    budget = target_triangles(inp)
+    _preflight(inp)  # also when the sample was inherited (rebuild): the worker must support these settings now
     exporter = inp.params["exporter"]
     store = inp.env.ctx.store
-    params = {"exporter": exporter, "decimation_target": budget["effective"],
-              "texture_size": int(inp.params["texture_size"]), "remesh": bool(inp.params["remesh"])}
     glb, meta, eid = _execute(inp, "bake", "export", params, store.artifact_bytes(raw_id))
     model_id = store.register_artifact(glb, "model", "model/gltf-binary", lineage=[raw_id],
                                        meta={"exporter": exporter}, source={"export": meta},
@@ -169,7 +196,7 @@ def finalize(inp: BuildInput) -> None:
     inp.check("decode", True, f"{info.format} {info.width}x{info.height}")
     bake_cp, sample_cp = inp.done("bake"), inp.done("sample")
     assert bake_cp is not None
-    model_id, glb = apply_final_size(inp, bake_cp.outputs["model"])
+    model_id, glb = apply_final_size(inp, apply_material(inp, bake_cp.outputs["model"]))
     budget = bake_cp.settings.get("budget") or target_triangles(inp)
     _validate(inp, glb, budget)
     inp.roles["model"] = model_id
@@ -196,5 +223,9 @@ def _validate(inp: BuildInput, glb: bytes, budget: dict[str, Any]) -> None:
     within = (lo is None or tri >= lo) and (hi is None or tri <= hi)
     inp.check("triangle_budget", within, f"{tri} triangles (target {budget['effective']} from {budget['source']}"
               f"{f', advisory {lo}–{hi}' if lo or hi else ''})", advisory=bool(budget["advisory"]))
-    inp.check("single_component", stats["components"] == 1, f"{stats['components']} geometric components",
-              advisory=True)
+    geo = (inp.snap.get("build_profile") or {}).get("geometry") or {}
+    if geo.get("expect_single_component") is False or geometry_policy(inp).get("small_components") == "preserve":
+        inp.meta["single_component"] = f"not applicable: {stats['components']} components expected by the build profile"
+    else:
+        inp.check("single_component", stats["components"] == 1, f"{stats['components']} geometric components",
+                  advisory=True)

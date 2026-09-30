@@ -96,14 +96,14 @@ def test_effects_panel_reports_inert_and_conditioning_fields(page, studio_url: s
         cfg["styles"]["ink"] = {"label": "Ink", "guide": "bold ink lines", "negative": "", "palette": []}
         cfg["categories"] = [{"id": "concept", "slug": "concept", "label": "Concept", "defaults": {
             "kind": {"mode": "value", "value": "concept_art"}, "style": {"mode": "value", "value": "ink"},
-            "build_profile": {"mode": "value", "value": "hero"}}}]
+            "budget": {"mode": "value", "value": {"size_px": {"max": 64}}}}}]
 
     _patch(studio_url, pid, edit)
     page.goto(f"/p/{pid}/style")
     page.get_by_label("effects category").select_option("concept")
-    expect(page.get_by_label("effect build_profile unsupported")).to_be_visible(timeout=10000)
+    expect(page.get_by_label("effect budget.size_px unsupported")).to_be_visible(timeout=10000)
     expect(page.get_by_label("effect style.guide conditioning_only")).to_be_visible()
-    expect(page.get_by_label("config warnings").get_by_text("build_profile")).to_be_visible()
+    expect(page.get_by_label("config warnings").get_by_text("size_px")).to_be_visible()
     page.get_by_label("effects category").select_option("")
     expect(page.get_by_label("effects hint")).to_be_visible(timeout=10000)
     shot(page, "style_effects")

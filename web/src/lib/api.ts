@@ -251,6 +251,14 @@ export interface Effect { field: string; value: Json; source: string; consumer: 
 /** GET /config:effects (saved config, planned for new Jobs). 422 `unresolved` when no kind resolves. */
 export interface EffectsView { planned: true; category_id: string | null; recipe: { id: string; version: number; kind: Kind };
   mode: "t2i" | "edit"; effects: Effect[] }
+export interface BuildProfile {
+  label: string;
+  geometry: { small_components: "remove" | "preserve" | null; fill_holes: "upstream" | "disabled" | null;
+    expect_single_component: boolean | null };
+  material: { alpha_mode: "opaque" | "mask" | "blend" | "auto" | null; alpha_cutoff: number | null;
+    double_sided: boolean | null; metallic: number | null; roughness_min: number | null;
+    roughness_max: number | null };
+}
 export interface StyleProfile { label: string; guide: string; negative: string; palette: PaletteColor[] }
 export interface StyleRevision { style_id: string; sha256: string; content: StyleProfile; config_revision: number;
   created_at: string; actor: string; current: boolean }
@@ -272,6 +280,7 @@ export interface StudioConfig {
   pipelines: Record<string, { recipe_version: number; parameters: Record<string, Json>; template: string | null }>;
   qa_rulesets: Record<string, { label: string; kind: Kind | null; rules: QaRuleCfg[]; policy: { minor_fail_limit: number } }>;
   styles: Record<string, StyleProfile>;
+  build_profiles: Record<string, BuildProfile>;
   reference_sets: Record<string, { label: string; mode: string; images: { artifact_id: string; label: string;
     role: string; source_rights: string }[] }>;
   export_presets: Record<string, Json>;

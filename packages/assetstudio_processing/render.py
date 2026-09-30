@@ -1,5 +1,8 @@
 """CPU renders of a GLB (2x2 orbit previews, neutral reference views): base colour texture x factor x vertex colour,
-alpha MASK (BLEND approximated as MASK at 0.5), two-sided Lambert. NumPy z-buffer; no GPU, no NC code.
+alpha MASK, two-sided Lambert. NumPy z-buffer; no GPU, no NC code.
+
+Colour is computed in linear space (sRGB texture decoded, baseColorFactor / vertex colour / Lambert multiplied) and
+encoded to sRGB once. BLEND: nearest transparent layer over opaque; deeper transparent layers are dropped.
 
 Screen arrays are (H, W); triangles are rasterised at pixel centres, nearest surviving fragment wins.
 Fragment arrays: face index (N,), pixel (N,), barycentric weights (N, 3), depth (N,).
@@ -19,11 +22,14 @@ from .render_materials import (
     check_required,
     gltf_json,
     gltf_warnings,
+    linear_to_srgb,
     material_of,
+    srgb_to_linear,
 )
 
 __all__ = ["RenderUnsupported"]
 
+MIN_BLEND_ALPHA = 1 / 255
 BG = np.array([38, 39, 42], dtype=np.float32)
 MAX_CANDIDATES = 1 << 24
 
@@ -76,13 +82,18 @@ def _raster(mesh: trimesh.Trimesh, rot: np.ndarray, scale: float, center: np.nda
     return faces, idx, (py * size + px)[inside], w, z
 
 
-def _nearest(lin: np.ndarray, z: np.ndarray, depth: np.ndarray) -> np.ndarray:
-    """Positions of the fragments that win their pixel (nearest = largest z) and beat the buffer; updates depth."""
+def _first_per_pixel(lin: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Positions of the nearest fragment (largest z) of each pixel."""
     order = np.lexsort((-z, lin))
     ls = lin[order]
     first = np.ones(len(ls), dtype=bool)
     first[1:] = ls[1:] != ls[:-1]
-    sel = order[first]
+    return order[first]
+
+
+def _nearest(lin: np.ndarray, z: np.ndarray, depth: np.ndarray) -> np.ndarray:
+    """Positions of the fragments that win their pixel (nearest = largest z) and beat the buffer; updates depth."""
+    sel = _first_per_pixel(lin, z)
     sel = sel[z[sel] > depth.ravel()[lin[sel]]]
     depth.ravel()[lin[sel]] = z[sel]
     return sel
@@ -95,9 +106,17 @@ def _shade(mesh: trimesh.Trimesh, rot: np.ndarray, idx: np.ndarray) -> np.ndarra
     return 0.35 + 0.65 * np.clip(n @ np.array([0.3, 0.5, 0.81]), 0, 1)
 
 
+def _put(color: np.ndarray, lin: np.ndarray, linear_rgb: np.ndarray) -> None:
+    """Write linear RGB (N, 3) into the sRGB 0..255 colour buffer."""
+    color.reshape(-1, 3)[lin] = linear_to_srgb(linear_rgb) * 255
+
+
 def _draw(mesh: trimesh.Trimesh, rot: np.ndarray, scale: float, center: np.ndarray, size: int,
           color: np.ndarray, depth: np.ndarray, mat: MeshMaterial | None = None) -> None:
+    """Opaque and MASK fragments into the z-buffer; BLEND meshes are handled by _blend_pass."""
     mat = mat or material_of(mesh)
+    if mat.alpha_mode == "BLEND":
+        return
     faces, idx, lin, w, z = _raster(mesh, rot, scale, center, size)
     rgba = None
     if mat.discards:  # discarded fragments must not occlude what is behind them: filter before depth selection
@@ -107,7 +126,40 @@ def _draw(mesh: trimesh.Trimesh, rot: np.ndarray, scale: float, center: np.ndarr
     sel = _nearest(lin, z, depth)
     idx, lin, w = idx[sel], lin[sel], w[sel]
     rgba = mat.sample(faces, idx, w) if rgba is None else rgba[sel]
-    color.reshape(-1, 3)[lin] = rgba[:, :3] * 255 * _shade(mesh, rot, idx)[:, None]
+    _put(color, lin, rgba[:, :3] * _shade(mesh, rot, idx)[:, None])
+
+
+def _blend_pass(meshes: list[trimesh.Trimesh], mats: list[MeshMaterial], rot: np.ndarray, scale: float,
+                center: np.ndarray, size: int, color: np.ndarray, depth: np.ndarray) -> None:
+    """Composite the nearest BLEND fragment per pixel (in front of the opaque depth) over what is behind it, in
+    linear space. Depth is not written; deeper transparent layers are dropped."""
+    lins, zs, cols, alphas = [], [], [], []
+    for mesh, mat in zip(meshes, mats, strict=True):
+        if mat.alpha_mode != "BLEND":
+            continue
+        faces, idx, lin, w, z = _raster(mesh, rot, scale, center, size)
+        rgba = mat.sample(faces, idx, w)
+        keep = (z > depth.ravel()[lin]) & (rgba[:, 3] >= MIN_BLEND_ALPHA)
+        idx, lin, z, rgba = idx[keep], lin[keep], z[keep], rgba[keep]
+        lins.append(lin)
+        zs.append(z)
+        cols.append(rgba[:, :3] * _shade(mesh, rot, idx)[:, None])
+        alphas.append(rgba[:, 3])
+    if not lins:
+        return
+    lin, z, col, alpha = (np.concatenate(a) for a in (lins, zs, cols, alphas))
+    sel = _first_per_pixel(lin, z)
+    lin, col, alpha = lin[sel], col[sel], alpha[sel][:, None]
+    behind = srgb_to_linear(color.reshape(-1, 3)[lin] / 255)
+    _put(color, lin, alpha * col + (1 - alpha) * behind)
+
+
+def _render(meshes: list[trimesh.Trimesh], mats: list[MeshMaterial], rot: np.ndarray, scale: float,
+            center: np.ndarray, size: int, color: np.ndarray) -> None:
+    depth = np.full((size, size), -np.inf)
+    for m, mat in zip(meshes, mats, strict=True):
+        _draw(m, rot, scale, center, size, color, depth, mat)
+    _blend_pass(meshes, mats, rot, scale, center, size, color, depth)
 
 
 def preview_png(data: bytes, size: int = 384) -> bytes:
@@ -115,6 +167,7 @@ def preview_png(data: bytes, size: int = 384) -> bytes:
     meshes = _load(data)
     if not meshes:
         raise ValueError("no triangles to render")
+    mats = [material_of(m) for m in meshes]
     pts = np.concatenate([np.asarray(m.vertices) for m in meshes])
     center = (pts.min(0) + pts.max(0)) / 2
     radius = float(np.linalg.norm(pts - center, axis=1).max()) or 1.0
@@ -123,9 +176,7 @@ def preview_png(data: bytes, size: int = 384) -> bytes:
     for yaw in (-45, 45, 135, 225):
         rot = _camera(math.radians(yaw), math.radians(20))
         color = np.tile(BG, (size, size, 1))
-        depth = np.full((size, size), -np.inf)
-        for m in meshes:
-            _draw(m, rot, scale, center, size, color, depth)
+        _render(meshes, mats, rot, scale, center, size, color)
         tiles.append(np.clip(color, 0, 255).astype(np.uint8))
     grid = np.concatenate([np.concatenate(tiles[:2], 1), np.concatenate(tiles[2:], 1)], 0)
     out = io.BytesIO()
@@ -167,15 +218,13 @@ def render_view(data: bytes, yaw_deg: float, pitch_deg: float, size: int = 1024,
     radius = float(np.linalg.norm(pts - center, axis=1).max()) or 1.0
     scale = size * (0.5 - margin) / radius
     color = np.tile(np.array(background, dtype=np.float32), (size, size, 1))
-    depth = np.full((size, size), -np.inf)
     rot = _camera(math.radians(yaw_deg), math.radians(pitch_deg))
-    for m, mat in zip(meshes, mats, strict=True):
-        _draw(m, rot, scale, center, size, color, depth, mat)
+    _render(meshes, mats, rot, scale, center, size, color)
     out = io.BytesIO()
     Image.fromarray(np.clip(color, 0, 255).astype(np.uint8)).save(out, "PNG", optimize=True)
     return out.getvalue(), {"yaw": yaw_deg, "pitch": pitch_deg, "size": size, "background": list(background),
                             "renderer": RENDERER_ID, "culling": "none", "lighting": "two-sided Lambert",
-                            "shading": "base colour texture x factor x vertex colour; alpha MASK/BLEND as cutout",
+                            "shading": "linear texture x factor x vertex colour; MASK cutout, BLEND nearest layer",
                             "warnings": sorted(gltf_warnings(doc, mats))}
 
 

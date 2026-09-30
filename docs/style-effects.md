@@ -51,9 +51,27 @@ and is reported as `unsupported`.
 | `candidate_count` | image generation | applied (a recipe parameter) |
 | `budget.triangles` | 3D export decimation target + advisory `triangle_budget` check | applied (model3d), not_applicable (others) |
 | `budget.size_px`, `budget.frames` | none | unsupported |
-| `build_profile` | none; 3D export uses the recipe parameters | unsupported |
+| `build_profile` | see "Build profiles (model3d)" below | applied (model3d), not_applicable (others) |
 | `export_presets` | none; delivery exporters are planned | unsupported |
 | `style_lora` | none; generation fails with 422 `style_lora_unavailable` | unsupported |
+
+## Build profiles (model3d)
+
+`build_profiles.<id>` is a typed table; `build_profile` (a category default) references one by id, and unknown ids are
+rejected. Snapshots embed the resolved profile. Unset fields keep the exporter default. The consumers (material
+stage, worker parameters) land in follow-up phases of this milestone; until then the report states the planned
+mechanism.
+
+| Field | Consumer | Notes |
+|---|---|---|
+| `geometry.small_components` (`remove`/`preserve`) | 3D worker export cleanup | default remove |
+| `geometry.fill_holes` (`upstream`/`disabled`) | 3D worker export cleanup | TRELLIS decoding also fills holes before the raw is stored; that step is not controlled |
+| `geometry.expect_single_component` | build check `single_component` | unset = advisory as today |
+| `material.alpha_mode` (`opaque`/`mask`/`blend`/`auto`) | CPU material stage (GLB rewrite) | `auto`: MASK when >1% texels are below the cutoff, else OPAQUE |
+| `material.alpha_cutoff` | CPU material stage (GLB rewrite) | only with `mask`/`auto` |
+| `material.double_sided` | CPU material stage (GLB rewrite) | |
+| `material.metallic` | CPU material stage (GLB rewrite) | replaces metallic texture + factor |
+| `material.roughness_min`, `roughness_max` | CPU material stage (GLB rewrite) | clamps the packed roughness texture (linear), not a factor; min <= max |
 
 ## Recipe parameters
 

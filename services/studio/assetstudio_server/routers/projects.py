@@ -154,16 +154,24 @@ def validate_config(body: ConfigBody, ctx: ProjectContext = Depends(project)) ->
 
 @router.get("/projects/{project_id}/config:effects")
 def config_effects(ctx: ProjectContext = Depends(project), category_id: str | None = None,
-                   kind: Kind | None = None, mode: Literal["t2i", "edit"] = "t2i") -> dict[str, Any]:
-    """Planned effect of every setting a new Job in this scope would freeze. Side-effect free."""
+                   kind: Kind | None = None, mode: Literal["t2i", "edit"] = "t2i",
+                   style: str | None = None) -> dict[str, Any]:
+    """Planned effect of every setting a new Job in this scope would freeze. Side-effect free.
+    `style` previews a style other than the resolved one."""
     cfg, _ = ctx.config()
+    if style is not None and style not in cfg.styles:
+        raise ApiError(404, "unknown_style", f"no style {style!r}")
     if category_id is not None and cfg.category(category_id) is None:
         raise ApiError(404, "unknown_category", f"no category {category_id!r}")
     try:
         snap = build_snapshot(cfg, category_id, {"kind": kind.value} if kind else None)
     except ResolutionError as e:
         raise ApiError(422, "unresolved", str(e)) from e
+    if style is not None:
+        snap["style"] = cfg.styles[style].model_dump(mode="json")
+        snap["sources"]["style"] = "preview"
     return {"planned": True, "category_id": category_id, "recipe": snap["recipe"], "mode": mode,
+            "style_id": style or snap["values"].get("style"),
             "effects": [e.model_dump(mode="json") for e in field_effects(snap, mode)]}
 
 

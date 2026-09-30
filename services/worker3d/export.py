@@ -24,10 +24,12 @@ Rasterizer = Callable[[torch.Tensor, torch.Tensor, int], tuple[torch.Tensor, tor
 
 
 def _clean_and_simplify(mesh: Any, target: int, remesh: bool, bvh: Any, aabb: torch.Tensor, grid: torch.Tensor,
-                        verts: torch.Tensor, faces: torch.Tensor) -> None:
-    import cumesh
-
+                        verts: torch.Tensor, faces: torch.Tensor, small_components: str = "remove",
+                        fill_holes: str = "upstream") -> None:
+    """Cleanup policy applies to the non-remesh path only: remesh rebuilds the topology from scratch."""
     if remesh:
+        import cumesh
+
         resolution = int(grid.max())
         scale = float((aabb[1] - aabb[0]).max())
         mesh.init(*cumesh.remeshing.remesh_narrow_band_dc(
@@ -39,8 +41,10 @@ def _clean_and_simplify(mesh: Any, target: int, remesh: bool, bvh: Any, aabb: to
     for final in (False, True):
         mesh.remove_duplicate_faces()
         mesh.repair_non_manifold_edges()
-        mesh.remove_small_connected_components(1e-5)
-        mesh.fill_holes(max_hole_perimeter=HOLE_PERIMETER)
+        if small_components == "remove":
+            mesh.remove_small_connected_components(1e-5)
+        if fill_holes == "upstream":
+            mesh.fill_holes(max_hole_perimeter=HOLE_PERIMETER)
         if not final:
             mesh.simplify(target, verbose=False)
     mesh.unify_face_orientations()
@@ -84,7 +88,8 @@ def _material(attrs: torch.Tensor, mask: torch.Tensor, layout: dict[str, slice],
 
 
 def to_glb(raw: dict[str, Any], exporter: str, decimation_target: int, texture_size: int,
-           remesh: bool) -> tuple[bytes, dict[str, Any]]:
+           remesh: bool, small_components: str = "remove",
+           fill_holes: str = "upstream") -> tuple[bytes, dict[str, Any]]:
     import cumesh
 
     t0 = time.monotonic()
@@ -93,10 +98,11 @@ def to_glb(raw: dict[str, Any], exporter: str, decimation_target: int, texture_s
     grid = ((aabb[1] - aabb[0]) / voxel).round().int()
     mesh = cumesh.CuMesh()
     mesh.init(raw["vertices"], raw["faces"])
-    mesh.fill_holes(max_hole_perimeter=HOLE_PERIMETER)
+    if fill_holes == "upstream":
+        mesh.fill_holes(max_hole_perimeter=HOLE_PERIMETER)
     verts, faces = mesh.read()
     bvh = cumesh.cuBVH(verts, faces)
-    _clean_and_simplify(mesh, decimation_target, remesh, bvh, aabb, grid, verts, faces)
+    _clean_and_simplify(mesh, decimation_target, remesh, bvh, aabb, grid, verts, faces, small_components, fill_holes)
     out_v, out_f, out_uv, vmaps = mesh.uv_unwrap(
         compute_charts_kwargs={"threshold_cone_half_angle_rad": np.radians(90.0), "refine_iterations": 0,
                                "global_iterations": 1, "smooth_strength": 1}, return_vmaps=True, verbose=False)
@@ -120,6 +126,7 @@ def to_glb(raw: dict[str, Any], exporter: str, decimation_target: int, texture_s
         "exporter": exporter, "faces_in": int(raw["faces"].shape[0]), "faces_out": int(out_f.shape[0]),
         "vertices_out": int(out_v.shape[0]), "texture_size": texture_size, "texel_coverage": float(mask.float().mean()),
         "decimation_target": decimation_target, "remesh": remesh,
+        "geometry_policy": {"small_components": small_components, "fill_holes": fill_holes, "applies": not remesh},
         "timings_s": {"geometry": round(t1 - t0, 2), "bake": round(t2 - t1, 2),
                       "total": round(time.monotonic() - t0, 2)},
     }

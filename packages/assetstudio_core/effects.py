@@ -15,7 +15,6 @@ Mode = Literal["t2i", "edit"]
 ROUTING_VERSION = 1  # snapshots carrying this `reference_routing` value route their project reference set
 # Fields that exist in studio.yaml but have no consumer yet; a set value is reported, never silently accepted.
 INERT_DEFAULTS = {
-    "build_profile": "no build reads it yet; 3D export uses the recipe parameters",
     "export_presets": "no exporter reads it yet (files/Godot/git delivery is planned)",
 }
 INERT_BUDGET = {
@@ -118,6 +117,38 @@ def _values(snap: dict[str, Any], mode: Mode) -> list[Effect]:
     return out
 
 
+_PROFILE_CONSUMERS = {
+    "small_components": "3D worker export cleanup",
+    "fill_holes": "3D worker export cleanup",
+    "expect_single_component": "build check single_component",
+}
+_PROFILE_NOTES = {
+    "fill_holes": "TRELLIS decoding also fills holes before the raw is stored; that step is not controlled",
+    "roughness_min": "clamps the packed roughness texture (linear), not a factor",
+    "roughness_max": "clamps the packed roughness texture (linear), not a factor",
+    "metallic": "replaces metallic texture + factor",
+}
+
+
+def _build_profile(snap: dict[str, Any], mode: Mode) -> list[Effect]:
+    profile = snap.get("build_profile")
+    if not profile:
+        return []
+    src = (snap.get("sources") or {}).get("build_profile", "")
+    cls: Classification = "applied" if snap["recipe"]["kind"] == "model3d" else "not_applicable"
+    out = []
+    for group in ("geometry", "material"):
+        for name, value in (profile.get(group) or {}).items():
+            if value is None:
+                continue
+            note = _PROFILE_NOTES.get(name, "")
+            if name == "alpha_mode" and value == "auto":
+                note = "MASK when >1% texels are below the cutoff, else OPAQUE"
+            consumer = _PROFILE_CONSUMERS.get(name, "CPU material stage (GLB rewrite)")
+            out.append(_e(f"build_profile.{group}.{name}", value, src, consumer, cls, note))
+    return out
+
+
 def _parameters(snap: dict[str, Any], mode: Mode) -> list[Effect]:
     edit_ignored = {"steps", "cfg", "width", "height", "speed_preset"}
     sources = snap.get("parameter_sources") or {}
@@ -133,7 +164,8 @@ def _parameters(snap: dict[str, Any], mode: Mode) -> list[Effect]:
 
 def field_effects(snap: dict[str, Any], mode: Mode = "t2i") -> list[Effect]:
     """Every resolved setting of `snap` with its consumer. `mode`: "edit" for source-conditioned variant Jobs."""
-    return _values(snap, mode) + _parameters(snap, mode) + _style(snap, mode) + _references(snap, mode)
+    return (_values(snap, mode) + _build_profile(snap, mode) + _parameters(snap, mode) + _style(snap, mode)
+            + _references(snap, mode))
 
 
 def config_warnings(values_by_scope: dict[str, dict[str, Any]]) -> list[dict[str, str]]:

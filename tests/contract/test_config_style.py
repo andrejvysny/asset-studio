@@ -19,10 +19,11 @@ def _patch(api: Api, pid: str, fn: Any) -> dict:
 
 def test_inert_fields_warn_but_save(api: Api) -> None:
     pid = new_project(api)
-    out = _patch(api, pid, lambda c: c["defaults"].update(kind="model3d", build_profile="painted"))
-    assert {"path": "defaults.build_profile", "message": out["warnings"][0]["message"]} in out["warnings"]
+    out = _patch(api, pid, lambda c: c["defaults"].update(
+        kind="model3d", budget={"mode": "value", "value": {"size_px": {"max": 64}}}))
+    assert "defaults.budget.size_px" in {w["path"] for w in out["warnings"]}
     fx = api.get(f"{P}/{pid}/config:effects")["effects"]
-    assert next(e for e in fx if e["field"] == "build_profile")["classification"] == "unsupported"
+    assert next(e for e in fx if e["field"] == "budget.size_px")["classification"] == "unsupported"
     assert next(e for e in fx if e["field"] == "parameters.triangles")["classification"] == "applied"
 
 
@@ -56,3 +57,37 @@ def test_deleted_style_keeps_history_unknown_is_404(api: Api) -> None:
     assert len(revs) == 1 and revs[0]["current"] is False
     assert api.raw("GET", f"{P}/{pid}/styles/never/revisions").status_code == 404
     assert api.raw("GET", f"{P}/{pid}/styles/..%2Fx/revisions").status_code == 404
+
+
+def test_undefined_build_profile_is_rejected(api: Api) -> None:
+    pid = new_project(api)
+    view = api.get(f"{P}/{pid}/config")
+    cfg = view["config"]
+    cfg["defaults"]["build_profile"] = {"mode": "value", "value": "painted"}
+    r = api.raw("PATCH", f"{P}/{pid}/config", json={"expected_revision": view["revision"], "config": cfg})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_config"
+
+
+def test_build_profile_saves_and_reports_effects(api: Api) -> None:
+    pid = new_project(api)
+
+    def edit(c: dict) -> None:
+        c["build_profiles"]["foliage"] = {"material": {"alpha_mode": "mask", "alpha_cutoff": 0.5}}
+        c["defaults"].update(kind="model3d", build_profile={"mode": "value", "value": "foliage"})
+
+    _patch(api, pid, edit)
+    fx = api.get(f"{P}/{pid}/config:effects")["effects"]
+    e = next(e for e in fx if e["field"] == "build_profile.material.alpha_mode")
+    assert e["classification"] == "applied" and e["value"] == "mask"
+
+
+def test_effects_style_preview(api: Api) -> None:
+    pid = new_project(api)
+    _patch(api, pid, lambda c: (c["styles"].update(ink={"guide": "bold ink"}), c["defaults"].update(kind="model3d")))
+    out = api.get(f"{P}/{pid}/config:effects", params={"style": "ink"})
+    assert out["style_id"] == "ink"
+    g = next(e for e in out["effects"] if e["field"] == "style.guide")
+    assert g["value"] == "bold ink" and g["source"] == "preview"
+    assert api.get(f"{P}/{pid}/config:effects")["style_id"] is None
+    r = api.raw("GET", f"{P}/{pid}/config:effects", params={"style": "nope"})
+    assert r.status_code == 404 and r.json()["error"]["code"] == "unknown_style"

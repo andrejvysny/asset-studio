@@ -12,6 +12,7 @@ def _cfg(**defaults: Any) -> StudioConfig:
     return StudioConfig.model_validate({
         "project": {"id": "p", "name": "P"},
         "defaults": {"kind": "model3d", **defaults},
+        "build_profiles": {"painted": {"material": {"metallic": 0.0}}},
         "styles": {"fantasy": {"guide": "painterly", "negative": "photo",
                                "palette": [{"hex": "#ff0000", "reserved": True}]}},
         "reference_sets": {"mood": {"mode": "prompt_guidance", "images": [{"artifact_id": "art_x"}]},
@@ -37,10 +38,8 @@ def test_style_fields_name_their_consumers() -> None:
 
 
 def test_inert_fields_are_unsupported_not_applied() -> None:
-    snap = build_snapshot(_cfg(build_profile="painted", budget={"triangles": {"max": 5000}, "size_px": {"max": 64}}),
-                          None)
+    snap = build_snapshot(_cfg(budget={"triangles": {"max": 5000}, "size_px": {"max": 64}}), None)
     fx = field_effects(snap)
-    assert _by(fx, "build_profile")[0].classification == "unsupported"
     assert _by(fx, "budget.size_px")[0].classification == "unsupported"
     assert _by(fx, "budget.triangles")[0].classification == "applied"
 
@@ -55,7 +54,7 @@ def test_reference_set_routing_and_legacy() -> None:
 
 
 def test_config_warnings_only_for_explicit_inert_values() -> None:
-    cfg = _cfg(build_profile="painted", budget={"frames": {"max": 8}})
+    cfg = _cfg(export_presets=["x"], budget={"frames": {"max": 8}})
     warnings = config_warnings({"defaults": cfg.defaults.model_dump(mode="json")})
-    assert {w["path"] for w in warnings} == {"defaults.build_profile", "defaults.budget.frames"}
+    assert {w["path"] for w in warnings} == {"defaults.export_presets", "defaults.budget.frames"}
     assert config_warnings({"defaults": _cfg().defaults.model_dump(mode="json")}) == []

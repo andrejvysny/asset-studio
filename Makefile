@@ -41,5 +41,5 @@ lock-comfyui:
 	  | grep -v -E '^(torch|torchvision|torchaudio|nvidia-|triton)' > comfyui/constraints.txt
 # worker3d unit tests (raw schema, UV rasterizer) inside the worker image, CPU tensors, no network.
 test-worker3d: ; podman run --rm --network none -v "$$PWD":/src:ro,Z -w /src \
-	-e PYTHONPATH=/src/services/worker3d:/src/packages/assetstudio_processing \
-	localhost/assetstudio-worker3d:dev python tests/worker3d/test_raw_raster.py
+	-e PYTHONPATH=/src/services/worker3d:/src/services/worker_common:/src/packages/assetstudio_processing \
+	localhost/assetstudio-worker3d:dev sh -c "python tests/worker3d/test_raw_raster.py && python tests/worker3d/test_geometry_policy.py"
