@@ -210,6 +210,35 @@ run as separate OS processes and are killed with SIGKILL independently. Model re
 
 Results: run with `make test-process`.
 
+### Ephemeral runners (simulated)
+
+`tests/contract/test_ephemeral_runner.py` (WP2.12, in-process, SIMULATED engines, part of `make test`): an ephemeral
+group registers a runner (`RegisterResponse.ephemeral`), exactly one attempt runs and commits, the agent heartbeats
+`safe_to_terminate` only after the receipt was delivered (spool and state empty) and deregisters; the runner is then
+`revoked`, counts in neither `runner_readiness` nor `gpus`, and no second attempt is offered (a forced second accept
+returns 409 `admission_rejected`); deregistering with custody not transferred returns 409. Its device claim stays
+`free` (not retired); scheduling is prevented by the revoked runner.
+
+### Node mode — real GPU acceptance (tests/gpu_nodes)
+
+`make acceptance-gpu-nodes` (marker `gpu_nodes`, not part of `make test`). Operator-run on the 2 x 4090 host against a
+stack started with `make up-nodes` (Studio without `/models`, runner with the GPUs). Skips unless `STUDIO_URL` is set
+and `/api/v1/runtime` reports `engine_mode == "nodes"`; fails fast with `runner_readiness` reasons if a needed
+operation is not ready. Strict like `tests/gpu`: a failed stage is a failure. The direct-mode suite cannot certify node
+topology (it inspects ComfyUI directly and assumes fixed gpu0/gpu1 lanes), hence this separate suite.
+
+| Scenario | Spec | Env flag | Proves |
+|---|---|---|---|
+| Studio has no models | A01 | `GPU_NODES_DOCKER=1` for the container check | every ready model is runner-verified, GPUs come from runners; `/models` absent in the Studio container |
+| 2D lifecycle (concept_art, 2 items) | A02 | - | 8 candidates, 8 `image.t2i` attempts all committed on generation 1, QA, 2 publications, spool drained |
+| 3D lifecycle (model3d, 1 item) | A02 | - | generate/export attempts committed on the aux3d slot, valid GLB, published |
+| Runner killed mid-sample | A08 | `GPU_NODES_CHAOS=1` | `docker compose kill/start runner`; one TRELLIS attempt, generation 1, single publication |
+| Studio restarted mid-generation | A07 | `GPU_NODES_CHAOS=1` | `docker compose restart studio`; exactly 8 executions, no generation 2 |
+| Two runners | A02, A04 | `GPU_NODES_RUNNER_B=1` | distinct device UUIDs even at index 0; an operation only one runner can serve lands on it |
+
+`NODES_COMPOSE` overrides the compose flags (default `docker compose -f compose.yml -f compose.nodes.yml`).
+Results: **not yet run on hardware**.
+
 ## Known limitations (this release)
 
 - 3D: upstream CuMesh simplification is not deterministic (same raw → e.g. 99 808 vs 99 221 faces); upstream export

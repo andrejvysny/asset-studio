@@ -46,7 +46,7 @@ dev-mode-dirs = ["packages", "services/studio", "services/compute_node"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/contract", "tests/regression"]
-markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests", "process: process-level failure injection (make test-process)"]
+markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests", "process: process-level failure injection (make test-process)", "gpu_nodes: node-mode real GPU acceptance (make acceptance-gpu-nodes)"]
 addopts = "-p no:cacheprovider"
 
 [tool.ruff]
