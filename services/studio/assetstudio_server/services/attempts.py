@@ -25,6 +25,7 @@ from assetstudio_protocol.execution import (
 )
 
 from ..attemptstore import AttemptStore, StaleRevision
+from ..journal import ADMISSION_PAUSED_KEY
 from ..runner_errors import RunnerError
 from ..studio import Studio
 from ._runner_util import (
@@ -134,6 +135,8 @@ def place(studio: Studio, attempt_id: str, now: datetime | None = None) -> bool:
         a = studio.journal.attempts.get(attempt_id)
         if a is None or a["state"] != "offered" or a["control"] != "run":
             return False
+        if studio.journal.meta_get(ADMISSION_PAUSED_KEY) == "1" and not _task_in_flight(studio, a["task_id"]):
+            return False  # a mode switch is draining: calls of tasks already running may finish, nothing new starts
         if a["runner_id"] is not None and not expired(a["offer_expires_at"], now):
             return False
         spec, prefer = a["offer"], a["progress"].get("preferred")
@@ -168,6 +171,11 @@ def _maybe_push(studio: Studio, attempt_id: str, session_id: str, runner_id: str
     attempt = studio.journal.attempts.get(attempt_id)
     if session and runner and attempt and session["dispatch"] == "push" and runner.get("push_url"):
         push_offer(studio, attempt)
+
+
+def _task_in_flight(studio: Studio, task_id: str) -> bool:
+    t = studio.journal.tasks.get(task_id)
+    return t is not None and t.state in ("running", "reconciling")
 
 
 def place_pending(studio: Studio, now: datetime | None = None) -> int:

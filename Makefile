@@ -62,5 +62,5 @@ runner-token: nodes-guard
 	$(COMPOSE) run --rm studio assetstudio runners token --group local > secrets/runner_registration_token && chmod 600 secrets/runner_registration_token
 up-nodes: nodes-guard ; $(COMPOSE) $(NODES) up -d
 down-nodes: nodes-guard ; $(COMPOSE) $(NODES) down
-# Needs `assetstudio execution switch` (WP2.5b); fails with an argparse error until that lands.
+# Waits until nothing is in flight, then records the mode; restart Studio with STUDIO_EXECUTION=nodes afterwards.
 switch-nodes: nodes-guard ; $(COMPOSE) $(NODES) exec studio assetstudio execution switch --to nodes

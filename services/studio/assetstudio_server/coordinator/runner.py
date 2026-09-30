@@ -20,6 +20,7 @@ from assetstudio_core.canonical import now_iso
 from assetstudio_core.ids import derived_id, is_id
 
 from ..adapters.base import AuxService, ImageEngine, Worker3dService
+from ..journal import ADMISSION_PAUSED_KEY
 from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import Busy, RunNotOpen, StageTask
@@ -132,14 +133,39 @@ class Coordinator:
         self._current: dict[str, dict[str, Any]] = {}
         self._pick_lock = threading.Lock()
         self._admission_failures: dict[str, dict[str, Any]] = {}  # residency -> {"count", "since"}
+        self._pause_read: tuple[float, bool] = (float("-inf"), False)
 
     # --- lifecycle ------------------------------------------------------------------------------------------
+    def _kept_after_restart(self) -> frozenset[str]:
+        """Node mode (R8): a running/reconciling task whose runner attempt is still open is never requeued, so
+        its call is never re-placed on another runner; it reconciles against the attempt instead."""
+        if self.studio.execution.mode != "nodes":
+            return frozenset()
+        from ..services._runner_util import NON_TERMINAL
+
+        journal = self.studio.journal
+        return frozenset(t.id for t in journal.tasks.list(states=("running", "reconciling"))
+                         if journal.attempts.list(task_id=t.id, states=NON_TERMINAL, limit=1))
+
+    def paused(self) -> bool:
+        """`assetstudio execution switch` is draining the journal (R15); re-read at most once a second."""
+        at, value = self._pause_read
+        if time.monotonic() - at >= 1.0:
+            value = self.studio.journal.meta_get(ADMISSION_PAUSED_KEY) == "1"
+            self._pause_read = (time.monotonic(), value)
+        return value
+
     def start(self) -> None:
-        rec = self.studio.journal.tasks.recover_after_restart()
+        keep = self._kept_after_restart()
+        rec = self.studio.journal.tasks.recover_after_restart(keep)
         orphans = rec.pop("orphans", [])
-        if rec["requeued"] or rec["cancelled"]:
-            log.warning("restart reconciliation: %s", rec)
+        if rec["requeued"] or rec["cancelled"] or keep:
+            log.warning("restart reconciliation: %s (reconciling against live attempts: %d)", rec, len(keep))
         self.studio.execution.cancel_orphans(orphans)
+        if keep:
+            from ..services.runner_maintenance import reconcile_tasks
+
+            reconcile_tasks(self.studio)
         from .reconcile import reconcile_on_start
 
         reconcile_on_start(self.studio)
@@ -201,6 +227,8 @@ class Coordinator:
     def choose(self, lane: str) -> tuple[str, list[StageTask]] | None:
         """Pick the residency group to run next on `lane`: stay on the resident model while it has work (bounded
         by max_consecutive_passes), otherwise the group holding the highest-priority / oldest ready task."""
+        if self.paused():
+            return None
         with self._pick_lock:
             ready = [t for t in self.studio.journal.tasks.ready(lane) if t.stage in self.stages]
             if not ready:
@@ -258,6 +286,9 @@ class Coordinator:
                 members = []
         queue, seen = list(members), {t.id for t in members}
         while queue:
+            if self.paused():
+                reason = "admission_paused"
+                break
             t = queue.pop(0)
             if not tasks.claim(t.id, pid):
                 continue

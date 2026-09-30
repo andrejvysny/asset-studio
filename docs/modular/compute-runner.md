@@ -250,8 +250,9 @@ models, active attempts, unsynced spool bytes, upload progress, recent errors, a
 The journal records `execution_mode` and an activation marker. Startup refuses when the configured mode differs from
 the persisted one while non-terminal tasks or attempts exist. Switching is explicit:
 `assetstudio execution switch --to nodes|direct` pauses admission, waits until no task is running or reconciling and
-no attempt is non-terminal, then flips. The journal refuses to open a schema version newer than it knows. After node
-activation, direct mode is reachable only through the switch command on a quiesced journal.
+no attempt is non-terminal, then flips (calls of tasks already running may finish; nothing new starts). A configured
+mode that differs from the persisted one is recorded automatically only when nothing is in flight, so nothing can be
+orphaned; otherwise startup is refused. The journal refuses to open a schema version newer than it knows.
 
 ## R16 Operator roles
 

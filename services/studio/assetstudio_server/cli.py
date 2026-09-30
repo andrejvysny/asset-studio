@@ -5,9 +5,11 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from .gpu import nvidia_smi
+from .journal import ADMISSION_PAUSED_KEY, EXECUTION_MODE_KEY, Journal
 from .models import HashCache, verify_all
 from .registry import Registry
 from .settings import Settings
@@ -258,6 +260,53 @@ def cmd_openapi(_: Settings, a: argparse.Namespace) -> int:
     return 0
 
 
+def _journal(s: Settings) -> Journal:
+    s.ensure()
+    return Journal(s.instance_dir / "journal" / "operations.sqlite")
+
+
+def cmd_execution_status(s: Settings, _: argparse.Namespace) -> int:
+    j = _journal(s)
+    try:
+        _print({"persisted_mode": j.meta_get(EXECUTION_MODE_KEY) or "direct", "configured_mode": s.execution,
+                "admission_paused": j.meta_get(ADMISSION_PAUSED_KEY) == "1", "live": j.live_work()})
+    finally:
+        j.close()
+    return 0
+
+
+def _draining(live: dict[str, int]) -> bool:
+    return bool(live["running"] or live["reconciling"] or live["attempts"])
+
+
+def cmd_execution_switch(s: Settings, a: argparse.Namespace) -> int:
+    """R15: pause admission, wait for quiescence, flip the recorded mode. Works beside a running Studio (same
+    host, SQLite WAL); Studio reads the pause flag and stops claiming tasks and placing offers."""
+    j = _journal(s)
+    try:
+        j.meta_set(ADMISSION_PAUSED_KEY, "1")
+        deadline = time.monotonic() + a.timeout
+        live = j.live_work()
+        try:
+            while _draining(live) and time.monotonic() < deadline:
+                time.sleep(a.poll)
+                live = j.live_work()
+        except BaseException:  # Ctrl-C must not leave Studio paused
+            j.meta_set(ADMISSION_PAUSED_KEY, "0")
+            raise
+        if _draining(live):
+            j.meta_set(ADMISSION_PAUSED_KEY, "0")
+            print(f"timed out after {a.timeout:g}s with work in flight ({live}); admission restored, "
+                  "nothing changed", file=sys.stderr)
+            return 3
+        j.meta_set(EXECUTION_MODE_KEY, a.to)
+        j.meta_set(ADMISSION_PAUSED_KEY, "0")
+    finally:
+        j.close()
+    print(f"switched to {a.to}; restart Studio with STUDIO_EXECUTION={a.to}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="assetstudio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -324,6 +373,14 @@ def main(argv: list[str] | None = None) -> int:
     rr = rn.add_parser("revoke")
     rr.add_argument("runner")
     rr.set_defaults(fn=cmd_runners)
+    ex = sub.add_parser("execution").add_subparsers(dest="sub", required=True)
+    ex.add_parser("status", help="persisted vs configured execution mode and live work").set_defaults(
+        fn=cmd_execution_status)
+    sw = ex.add_parser("switch", help="pause admission, wait for quiescence, then change the recorded mode")
+    sw.add_argument("--to", choices=("nodes", "direct"), required=True)
+    sw.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for quiescence")
+    sw.add_argument("--poll", type=float, default=1.0, help="seconds between checks")
+    sw.set_defaults(fn=cmd_execution_switch)
     oa = sub.add_parser("openapi", help="write Studio's OpenAPI schema (default: stdout)")
     oa.add_argument("--out", help="file to write")
     oa.set_defaults(fn=cmd_openapi)

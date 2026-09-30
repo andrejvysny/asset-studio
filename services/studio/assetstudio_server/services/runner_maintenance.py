@@ -6,9 +6,28 @@ import threading
 from collections.abc import Callable
 
 from ..studio import Studio
+from ..taskstore import INFLIGHT_ATTEMPTS
 from . import attempts, transfers
+from ._runner_util import NON_TERMINAL
 
 log = logging.getLogger("assetstudio")
+
+
+def reconcile_tasks(studio: Studio) -> int:
+    """R8: a `reconciling` task waits for its runner attempts. Once none is in flight it is requeued (the stage
+    re-enters and replays ingested results); a pending cancel completes only when the runner has acknowledged it."""
+    store, settled = studio.journal, 0
+    for t in store.tasks.list(states=("reconciling",)):
+        if t.control == "cancel_requested":
+            for a in store.attempts.list(task_id=t.id, states=NON_TERMINAL):
+                if a["state"] == "ingested":
+                    attempts.dispose(studio, a["id"], "cancelled")
+                elif a["control"] != "cancel":
+                    attempts.cancel(studio, a["id"])
+        if store.attempts.list(task_id=t.id, states=INFLIGHT_ATTEMPTS, limit=1):
+            continue
+        settled += store.tasks.settle_reconciling(t.id, "cancelled" if t.control == "cancel_requested" else "queued")
+    return settled
 
 
 class RunnerMaintenance:
@@ -20,7 +39,7 @@ class RunnerMaintenance:
     def run_once(self) -> None:
         steps: tuple[tuple[str, Callable[[Studio], object]], ...] = (
             ("expire attempts", attempts.expire), ("place pending offers", attempts.place_pending),
-            ("expire uploads", transfers.expire_uploads))
+            ("expire uploads", transfers.expire_uploads), ("reconcile tasks", reconcile_tasks))
         for name, step in steps:
             try:
                 step(self.studio)

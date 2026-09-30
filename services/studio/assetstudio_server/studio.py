@@ -14,12 +14,16 @@ from .authstore import AuthStore
 from .events import EventBus
 from .execution import DirectBackend, ExecutionBackend, NodeBackend
 from .gpu import GpuLane, LaneWorker
-from .journal import Journal
+from .journal import EXECUTION_MODE_KEY, Journal
 from .models import HashCache
 from .registry import Registry
 from .settings import Settings
 
 log = logging.getLogger("assetstudio")
+
+
+class ExecutionModeMismatch(RuntimeError):
+    """Configured execution mode differs from the journal's while work is in flight (R15)."""
 
 
 @dataclass
@@ -47,6 +51,22 @@ class Studio:
         self.auth.close()
 
 
+def _fence(journal: Journal, configured: str) -> None:
+    persisted = journal.meta_get(EXECUTION_MODE_KEY) or "direct"
+    if configured == persisted:
+        return
+    live = journal.live_work()
+    if any(live.values()):
+        raise ExecutionModeMismatch(
+            f"journal is in {persisted!r} mode but STUDIO_EXECUTION={configured!r}, and work is in flight "
+            f"({live['running']} running, {live['reconciling']} reconciling, {live['queued']} queued tasks, "
+            f"{live['attempts']} open attempts). Restart with STUDIO_EXECUTION={persisted}, stop, then run "
+            f"`assetstudio execution switch --to {configured}`")
+    # Nothing in flight can be orphaned by the change, so a quiesced journal follows its configuration.
+    log.warning("execution mode changes %s -> %s on a quiesced journal", persisted, configured)
+    journal.meta_set(EXECUTION_MODE_KEY, configured)
+
+
 def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: AuxService | None = None,
                  worker3d: Worker3dService | None = None) -> Studio:
     nodes = settings.execution == "nodes"
@@ -62,6 +82,11 @@ def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: Aux
         elif settings.engine == "fake":
             engine, aux, worker3d = FakeEngine(), FakeAux(), FakeWorker3d()
     journal = Journal(settings.instance_dir / "journal" / "operations.sqlite")
+    try:
+        _fence(journal, settings.execution)
+    except ExecutionModeMismatch:
+        journal.close()
+        raise
     workers = {w.name: LaneWorker(w.lease, w.unload) for w in (aux, worker3d) if w is not None}
     lanes = {"gpu1": GpuLane("gpu1", workers, lambda: journal.next_epoch("gpu1"))}
     studio = Studio(settings=settings, registry=Registry(settings), journal=journal,

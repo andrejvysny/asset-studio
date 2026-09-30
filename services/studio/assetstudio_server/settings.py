@@ -57,6 +57,8 @@ class Settings:
     upload_quota_bytes: int = field(default_factory=lambda: _int("STUDIO_UPLOAD_QUOTA_BYTES", 64 * 1024**3))
     upload_runner_quota_bytes: int = field(
         default_factory=lambda: _int("STUDIO_UPLOAD_RUNNER_QUOTA_BYTES", 32 * 1024**3))
+    # Concurrent chunk uploads + input downloads; beyond it they get 503 so control routes never starve (R14).
+    transfer_concurrency: int = field(default_factory=lambda: _int("STUDIO_TRANSFER_CONCURRENCY", 4))
     disk_floor_bytes: int = field(default_factory=lambda: _int("STUDIO_DISK_FLOOR_BYTES", 2 * 1024**3))
 
     def ensure(self) -> None:

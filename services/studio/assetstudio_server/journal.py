@@ -13,6 +13,7 @@ from typing import Any
 
 from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.ids import new_id
+from assetstudio_protocol.execution import TERMINAL_STATES as ATTEMPT_TERMINAL
 
 from .attemptstore import AttemptStore
 from .runnerstore import RunnerStore
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS uploads (
 _MIGRATIONS = ((2, _V2), (3, _V3), (4, _V4))
 # Absent row means "direct" (Studio-local execution); no data migration writes it.
 EXECUTION_MODE_KEY = "execution_mode"
+ADMISSION_PAUSED_KEY = "admission_paused"  # "1" while `execution switch` drains the journal (R15)
 
 
 class JournalTooNew(Exception):
@@ -155,12 +157,26 @@ class Journal:
         self.attempts = AttemptStore(self._db, self._lock, self.changed)
 
     def close(self) -> None:
-        self._db.close()
+        with self._lock:  # never close under a thread that is mid-query
+            self._db.close()
 
     def meta_get(self, key: str) -> str | None:
         with self._lock:
             row = self._db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
         return None if row is None else str(row["value"])
+
+    def live_work(self) -> dict[str, int]:
+        """Work a mode change could orphan: running/reconciling tasks, queued tasks that may run, open attempts."""
+        terminal = tuple(sorted(ATTEMPT_TERMINAL))
+        with self._lock:
+            counts = {r["state"]: r["n"] for r in self._db.execute(
+                "SELECT state, COUNT(*) AS n FROM stage_tasks WHERE state IN ('running','reconciling') "
+                "OR (state='queued' AND control='run') GROUP BY state")}
+            attempts = self._db.execute(
+                f"SELECT COUNT(*) FROM attempts WHERE state NOT IN ({','.join('?' * len(terminal))})",
+                terminal).fetchone()[0]
+        return {"running": counts.get("running", 0), "reconciling": counts.get("reconciling", 0),
+                "queued": counts.get("queued", 0), "attempts": attempts}
 
     def meta_set(self, key: str, value: str) -> None:
         with self._lock:

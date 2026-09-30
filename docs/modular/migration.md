@@ -85,13 +85,28 @@ under `/api/runner/v1` with their own authentication (R3) and are the only CSRF 
 
 ## Cutover and rollback (R15)
 
+The journal records `execution_mode` (an absent row means `direct`; a never-switched direct instance writes nothing).
+
 1. Deploy with `STUDIO_EXECUTION=direct` (default); verify the journal migration.
-2. `assetstudio execution switch --to nodes` pauses admission, waits for quiescence (no running/reconciling task, no
-   non-terminal attempt), records `execution_mode=nodes`, resumes.
-3. Rollback to direct mode is possible only through `switch --to direct` on a quiesced journal. Starting a
-   direct-mode Studio against a node-active journal with live work is refused.
-4. After WP2.10 direct mode no longer exists; rollback means restoring a pre-cutover backup (journal + project +
+2. `assetstudio execution switch --to nodes [--timeout 300]` sets `admission_paused`, waits until no task is
+   running or reconciling and no attempt is non-terminal, records `execution_mode=nodes`, clears the pause and prints
+   the mode to restart with. While paused Studio claims no new tasks and places no new offers (the flag is re-read at
+   most once a second). On timeout it exits 3 with the live counts, restores admission and changes nothing.
+   `assetstudio execution status` prints the persisted and configured mode, live counts and the pause flag.
+3. Startup compares `STUDIO_EXECUTION` with the recorded mode. A difference with work in flight (running, reconciling
+   or queued tasks, non-terminal attempts) is refused, naming both modes, the counts and the switch command; Studio
+   never switches itself with live work. A difference on a quiesced journal is recorded and logged as a warning, since
+   nothing in flight can be orphaned (this also covers the first start of a fresh instance in `nodes` mode).
+4. In node mode a restart keeps running tasks whose attempts are still open as `reconciling` (never requeued, so never
+   re-placed on another runner) until those attempts settle; a pending cancel stays pending until the runner
+   acknowledges it. Runner maintenance then requeues the task (it replays ingested results) or completes the cancel.
+5. Rollback to direct mode is `switch --to direct` on a quiesced journal, or a direct start on a quiesced journal.
+   Starting a direct-mode Studio against a node-active journal with live work is refused.
+6. After WP2.10 direct mode no longer exists; rollback means restoring a pre-cutover backup (journal + project +
    instance auth store), accepting that work done after the backup must be redone.
+
+Runner transfers (chunk upload, input download) share `STUDIO_TRANSFER_CONCURRENCY` slots (default 4); beyond that
+they get `503 resource_exhausted` with `Retry-After: 1` while heartbeat, accept and acquire are never limited (R14).
 
 ## Behaviour changes log
 
