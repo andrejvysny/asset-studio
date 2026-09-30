@@ -8,18 +8,29 @@ from typing import Any
 import pytest
 from assetstudio_core.ids import new_id
 from assetstudio_protocol.execution import (
+    AcquireRequest,
     AttemptReport,
+    CompleteRequest,
     FileRef,
     InputRef,
     Offer,
     Policy,
+    ReportAck,
+    ReportRequest,
     Requirements,
     ResultManifest,
     compute_input_digest,
 )
 from assetstudio_protocol.inventory import Inventory
-from assetstudio_protocol.runners import Heartbeat, SessionHello, StudioKey, challenge_message
-from assetstudio_protocol.transfer import MIB, chunk_count, chunk_range
+from assetstudio_protocol.runners import (
+    ChallengeRequest,
+    Heartbeat,
+    InventoryAck,
+    SessionHello,
+    StudioKey,
+    challenge_message,
+)
+from assetstudio_protocol.transfer import MIB, ChunkAck, chunk_count, chunk_range
 from assetstudio_protocol.versions import negotiate
 from pydantic import ValidationError
 
@@ -148,3 +159,25 @@ def test_id_prefix_validation() -> None:
         make_offer(attempt_id=new_id("rnr"))
     with pytest.raises(ValidationError):
         Heartbeat(session_id=new_id("atp"), inventory_revision=0)
+
+
+def test_route_small_dtos_round_trip() -> None:
+    rid, sid, aid = new_id("rnr"), new_id("rse"), new_id("atp")
+    report = AttemptReport(attempt_id=aid, generation=1, state="executing")
+    manifest = ResultManifest(schema="assetstudio.result.v1", attempt_id=aid, generation=1, files=[])
+    for m in (ChallengeRequest(runner_id=rid), InventoryAck(accepted=True, revision=3),
+              AcquireRequest(request_id=str(uuid.uuid4()), free_slots=["gpu0"]),
+              ReportRequest(session_id=sid, report=report), CompleteRequest(session_id=sid, manifest=manifest),
+              ReportAck(state="spooled"), ChunkAck(status="stored")):
+        assert type(m).model_validate(m.model_dump(mode="json")) == m
+    assert AcquireRequest(request_id=str(uuid.uuid4())).wait_s == 25
+
+
+def test_acquire_request_limits() -> None:
+    ok = str(uuid.uuid4())
+    for bad in ({"request_id": str(uuid.uuid1())}, {"request_id": ok, "wait_s": 51}, {"request_id": ok, "wait_s": -1},
+                {"request_id": ok, "cached_residencies": ["x"] * 65}, {"request_id": ok, "free_slots": ["BAD"]}):
+        with pytest.raises(ValidationError):
+            AcquireRequest(**bad)
+    with pytest.raises(ValidationError):
+        ChunkAck(status="other")  # type: ignore[arg-type]

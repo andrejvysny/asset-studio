@@ -43,6 +43,10 @@ class IngestReceipt(Msg):
     stored_at: Timestamp
 
 
+class ChunkAck(Msg):
+    status: Literal["stored", "duplicate"]
+
+
 def chunk_count(size: int, chunk_size: int) -> int:
     return -(-size // chunk_size)
 

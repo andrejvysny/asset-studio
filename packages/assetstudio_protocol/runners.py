@@ -52,6 +52,10 @@ class TokenRequest(Msg):
     signature: SignatureB64
 
 
+class ChallengeRequest(Msg):
+    runner_id: RunnerId
+
+
 class AccessToken(Msg):
     access_token: str
     expires_at: Timestamp
@@ -122,3 +126,8 @@ class HeartbeatResponse(Msg):
     receipts: list[DispositionReceipt] = []
     lease_until: Timestamp
     inventory_wanted: bool = False
+
+
+class InventoryAck(Msg):
+    accepted: bool
+    revision: int

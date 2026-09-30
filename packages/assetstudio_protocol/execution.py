@@ -1,6 +1,7 @@
 """Offers, attempts and results (R5, R8). Capability/Engine live here so inventory can import this module."""
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any, Literal
 
 from assetstudio_core.canonical import canonical_json, sha256_json
@@ -162,3 +163,31 @@ class DispositionReceipt(Msg):
     generation: int = Field(ge=1)
     disposition: Disposition
     at: Timestamp
+
+
+class AcquireRequest(Msg):
+    request_id: str
+    free_slots: list[Label] = []
+    cached_residencies: list[str] = Field(default=[], max_length=64)
+    wait_s: int = Field(default=25, ge=0, le=50)
+
+    @field_validator("request_id")
+    @classmethod
+    def _uuid4(cls, v: str) -> str:
+        if uuid.UUID(v).version != 4:
+            raise ValueError("request_id must be a uuid4")
+        return v
+
+
+class ReportRequest(Msg):
+    session_id: SessionId
+    report: AttemptReport
+
+
+class CompleteRequest(Msg):
+    session_id: SessionId
+    manifest: ResultManifest
+
+
+class ReportAck(Msg):
+    state: AttemptState
