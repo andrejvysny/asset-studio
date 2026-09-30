@@ -4,6 +4,7 @@ import { ErrorLine, Loading, OK, PageHead, WARN, BAD } from "../components/ui";
 import type { RecipeInfo } from "../lib/api";
 import { useApi } from "../lib/hooks";
 import { useConfig } from "../lib/project";
+import { BuildProfiles } from "./pipelines/BuildProfiles";
 
 const stateColor = (s: string) => (s === "ready" ? OK : s === "experimental" || s === "degraded" ? WARN : BAD);
 
@@ -62,6 +63,7 @@ export function Pipelines() {
           <div className="label">Locked technical constraints</div>
           <div className="mono" style={{ fontSize: 12, marginTop: 6 }}>{cfg.data?.config.pipelines[r.id]?.template ?? r.template ?? "—"}</div>
         </div>
+        <BuildProfiles />
         <div className="sub" style={{ fontFamily: "var(--sans)", fontSize: 12 }}>Parameter values are edited in studio.yaml
           (Schema → YAML, <span className="mono">pipelines.{r.id}.parameters</span>) and validated against these types.
           An inline editor is planned; no executable graphs are ever accepted.</div>

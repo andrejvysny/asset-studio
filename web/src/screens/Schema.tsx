@@ -8,7 +8,7 @@ import { clone, useConfig, useProject } from "../lib/project";
 type FieldType = "kind" | "text" | "int" | "budget" | "ref" | "lora";
 const FIELDS: [string, string, FieldType, string?][] = [
   ["kind", "Asset type", "kind"], ["recipe_id", "Pipeline", "ref", "recipes"], ["naming", "Naming rule", "text"],
-  ["budget", "Budget (triangles)", "budget"], ["build_profile", "Texturing / build (no effect yet)", "text"],
+  ["budget", "Budget (triangles)", "budget"], ["build_profile", "Build profile", "ref", "profiles"],
   ["qa_ruleset", "QA rule set", "ref", "qa"], ["reference_set", "Reference set", "ref", "refs"],
   ["style", "Style", "ref", "styles"], ["style_lora", "Style LoRA", "lora"], ["candidate_count", "Candidates", "int"],
 ];
@@ -51,7 +51,7 @@ export function Schema() {
   const cat = draft.categories.find((c) => c.id === selId) ?? draft.categories[0];
   const eff = cat ? cfg.data.effective[cat.id] : undefined;
   const opts = { recipes: RECIPES, qa: Object.keys(draft.qa_rulesets), refs: Object.keys(draft.reference_sets),
-    styles: Object.keys(draft.styles) } as Record<string, string[]>;
+    styles: Object.keys(draft.styles), profiles: Object.keys(draft.build_profiles) } as Record<string, string[]>;
   const setCat = (patch: (c: CategoryCfg) => void) => {
     const next = clone(draft);
     const c = next.categories.find((x) => x.id === cat!.id);

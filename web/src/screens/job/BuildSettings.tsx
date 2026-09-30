@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import type { RebuildOverrides } from "../../lib/api";
+import { EMPTY_GEOMETRY, EMPTY_MATERIAL, flatOverrides, type Geometry, type Material, ProfileFields } from "../profile/ProfileFields";
 
 export interface SettingsBase { triangles: number | null; texture_size: number | null; remesh: boolean | null }
 
@@ -20,6 +21,18 @@ function Opts<T extends string | number | boolean>({ label, opts, value, show, o
   );
 }
 
+const RECIPE_KEYS = ["triangles", "texture_size", "remesh"];
+
+/** What a rebuild with these overrides reuses (mirrors coordinator/builds/modes.py). */
+export function reuseLine(o: RebuildOverrides): string | null {
+  const keys = Object.keys(o);
+  if (keys.length === 0) return null;
+  if ("pipeline_type" in o) return "Resamples (new TRELLIS run)";
+  if (keys.some((k) => RECIPE_KEYS.includes(k) || k === "small_components" || k === "fill_holes"))
+    return "Reuses: cut-out, sample — re-exports on the 3D worker";
+  return "Reuses: cut-out, sample, bake — only the material stage runs";
+}
+
 /** "Change settings, rebuild": only settings that differ from the last attempt are sent (rebuild needs at least one). */
 export function BuildSettings({ base, busy, onRun, onCancel }:
   { base: SettingsBase; busy: boolean; onRun: (o: RebuildOverrides) => void; onCancel: () => void }) {
@@ -27,7 +40,10 @@ export function BuildSettings({ base, busy, onRun, onCancel }:
   const [tex, setTex] = useState<number | null>(base.texture_size);
   const [remesh, setRemesh] = useState<boolean | null>(base.remesh);
   const [pipe, setPipe] = useState<string | null>(null);
-  const overrides: RebuildOverrides = {};
+  const [geo, setGeo] = useState<Geometry>(EMPTY_GEOMETRY);
+  const [mat, setMat] = useState<Material>(EMPTY_MATERIAL);
+  const [open, setOpen] = useState(false);
+  const overrides = flatOverrides(geo, mat) as RebuildOverrides;
   const n = Number(tris);
   if (tris && Number.isFinite(n) && n >= 1000 && n <= 2_000_000 && n !== base.triangles) overrides.triangles = Math.round(n);
   if (tex !== null && tex !== base.texture_size) overrides.texture_size = tex;
@@ -35,6 +51,7 @@ export function BuildSettings({ base, busy, onRun, onCancel }:
   if (pipe) overrides.pipeline_type = pipe;
   const invalidTris = tris !== "" && !(n >= 1000 && n <= 2_000_000);
   const changed = Object.keys(overrides).length;
+  const reuse = reuseLine(overrides);
   return (
     <div className="jw-box" style={{ display: "flex", flexDirection: "column", gap: 8, background: "var(--card)", borderColor: "var(--line-3)" }}>
       <span style={{ fontWeight: 500 }}>Change settings, then rebuild</span>
@@ -46,6 +63,12 @@ export function BuildSettings({ base, busy, onRun, onCancel }:
       <Opts label="Texture size" opts={TEXTURES} value={tex} show={(o) => `${o}²`} onPick={setTex} />
       <Opts label="Remesh (cleanup)" opts={[false, true]} value={remesh} show={(o) => (o ? "on" : "off")} onPick={setRemesh} />
       <Opts label="Mesh resolution" opts={PIPELINES} value={pipe} onPick={(o) => setPipe(pipe === o ? null : o)} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <button className="btn-link" style={{ padding: 0, fontSize: 12, textAlign: "left" }} aria-expanded={open}
+          onClick={() => setOpen(!open)}>{open ? "▾" : "▸"} Build profile overrides</button>
+        {open && <ProfileFields geometry={geo} material={mat} onGeometry={setGeo} onMaterial={setMat} />}
+      </div>
+      {reuse && <span className="sub" role="status" aria-label="rebuild reuse">{reuse}</span>}
       {invalidTris && <span className="error">Triangles must be between 1000 and 2000000.</span>}
       <div className="row" style={{ gap: 8 }}>
         <button className="btn btn-primary" style={{ padding: "5px 12px" }} disabled={busy || !changed || invalidTris}

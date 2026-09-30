@@ -140,7 +140,11 @@ intermediate validated on CPU (`assetstudio_processing/raw_npz.py`, shared with 
 artifact (retention `raw`) → worker3d `export` execution → GLB → structural checks on the delivered bytes (container, reload, finite
 vertices, indices, UVs, base-colour texture) + advisory triangle budget (requested → effective → actual) → CPU preview
 (4 views, `assetstudio_processing.render`; a preview failure never invalidates the model and can be retried alone)
-→ final human accept → publish. Each stage commits a checkpoint on the BuildRun; building the same approval again
+→ final human accept → publish. With a build profile, its geometry policy (`small_components`,
+`fill_holes`) is passed to the export, and a CPU **material stage** rewrites the baked GLB before checks and sizing:
+alpha mode and cutoff (`auto` measures transparent texels), culling, metallic replace and a linear roughness clamp
+applied to the packed texture. A preservation proof accompanies the rewrite (checkpoint `material`; see
+`docs/style-effects.md`). Each stage commits a checkpoint on the BuildRun; building the same approval again
 after a failed attempt inherits its segment/sample checkpoints (no second TRELLIS.2 run). Raw/cut-out/mask stay on the build run
 (`sources.intermediates` in the version record) and are not shipped as version files. **Re-export** (`:reexport`)
 creates a new build run from the stored raw (also of a failed attempt) with changed exporter/texture/triangles/remesh

@@ -7,7 +7,7 @@ fixes, renderer accuracy. No image->3D fast path, no Godot.
 - [x] 1 profiles core: config, validation, snapshot, effects, config:effects?style=
 - [x] 2 material stage: materials.py (JSON + texture rewrite), finalize checkpoint, checks, material-only rebuild
 - [x] 3 worker geometry policy: params, to_glb, health feature, preflight, worker tests
-- [ ] 4 web: profile editor, reference select, rebuild fields, style preview, media restore/download
+- [x] 4 web: profile editor, reference select, rebuild fields, style preview, media restore/download
 - [x] 5 renderer: linear factor, real BLEND
 - [ ] 6 GPU acceptance: rebuild stack, rock/prop/tree A/B, docs/acceptance.md
 - [ ] 7 docs

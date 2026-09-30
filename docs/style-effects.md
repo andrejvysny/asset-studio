@@ -58,9 +58,17 @@ and is reported as `unsupported`.
 ## Build profiles (model3d)
 
 `build_profiles.<id>` is a typed table; `build_profile` (a category default) references one by id, and unknown ids are
-rejected. Snapshots embed the resolved profile. Unset fields keep the exporter default. The consumers (material
-stage, worker parameters) land in follow-up phases of this milestone; until then the report states the planned
-mechanism.
+rejected. Snapshots embed the resolved profile. Unset fields keep the exporter default.
+
+- Geometry fields are sent to the 3D worker export (`coordinator/builds/model3d.py::geometry_policy`). Studio refuses
+  to send them to a worker that does not advertise `geometry_policy.v1` (`worker_feature_missing`). The policy
+  applies to the non-remesh path only.
+- Material fields run in the CPU material stage (`coordinator/builds/material.py`,
+  `assetstudio_processing/materials.py`). The stage runs after the bake and before final sizing, and it proves with
+  `preservation_checks` that only material fields and the rewritten texture view changed. The pre-policy GLB is
+  kept as the intermediate `model_unmaterialized` and is never published.
+- A rebuild (`mode: rebuild`) accepts the same keys as overrides. A material-only rebuild reuses the bake and makes no
+  3D worker call; a geometry override re-exports from the stored raw.
 
 | Field | Consumer | Notes |
 |---|---|---|
@@ -81,7 +89,8 @@ parameters. For those edits, `steps`, `cfg`, `width`, `height` and `speed_preset
 ## Known gaps (not implemented)
 
 These gaps come from the spec "Configurable Game Styles and 3D Production", Phase 2 and later:
-- The 3D export always writes an `OPAQUE` material, and `doubleSided` follows `remesh`. Foliage cutouts therefore need
-  explicit alpha-mode and culling policies.
+- Hole filling during TRELLIS decoding (before the raw is stored) is not controlled; `fill_holes: disabled` only
+  affects the exporter.
+- Build profiles apply to the whole asset; per-part material bindings (wood staves vs iron hoops) do not exist yet.
 - There are no typed geometry cleanup, normal or material-channel policies, no source-image reconstruction fast path,
   and no runtime validation in Godot.

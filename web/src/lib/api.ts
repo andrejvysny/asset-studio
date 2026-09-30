@@ -250,7 +250,7 @@ export type EffectClass = "applied" | "conditioning_only" | "advisory_only" | "n
 export interface Effect { field: string; value: Json; source: string; consumer: string; classification: EffectClass; note: string }
 /** GET /config:effects (saved config, planned for new Jobs). 422 `unresolved` when no kind resolves. */
 export interface EffectsView { planned: true; category_id: string | null; recipe: { id: string; version: number; kind: Kind };
-  mode: "t2i" | "edit"; effects: Effect[] }
+  mode: "t2i" | "edit"; style_id: string | null; effects: Effect[] }
 export interface BuildProfile {
   label: string;
   geometry: { small_components: "remove" | "preserve" | null; fill_holes: "upstream" | "disabled" | null;
@@ -538,7 +538,9 @@ export interface BuildCheckpoint {
 export type BuildMode = "build" | "retry" | "resample" | "rebuild";
 /** The settings a rebuild may change (at least one is required for mode "rebuild"). */
 export interface RebuildOverrides { triangles?: number; texture_size?: number; remesh?: boolean;
-  pipeline_type?: string }
+  pipeline_type?: string; small_components?: "remove" | "preserve"; fill_holes?: "upstream" | "disabled";
+  alpha_mode?: "opaque" | "mask" | "blend" | "auto"; alpha_cutoff?: number; double_sided?: boolean; metallic?: number;
+  roughness_min?: number; roughness_max?: number }
 
 // --- Publish / diversity ----------------------------------------------------------------------------------------
 /** GET .../publish-preview items (Job, Batch-run and v1 forms). `family`/`derived_from` only on variant Jobs. */

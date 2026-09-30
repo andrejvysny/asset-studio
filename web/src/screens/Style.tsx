@@ -39,7 +39,8 @@ export function Style() {
       <StyleFields style={style} edit={edit} />
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 20, alignItems: "start" }}>
         <StyleHistory styleId={styleId} saved={styleId in cfg.data.config.styles} configRevision={cfg.data.revision} onRestore={restore} />
-        <EffectsPanel categories={cfg.data.config.categories} configRevision={cfg.data.revision} dirty={dirty} />
+        <EffectsPanel categories={cfg.data.config.categories} configRevision={cfg.data.revision} dirty={dirty}
+          styleId={styleId} savedStyleIds={Object.keys(cfg.data.config.styles)} />
       </div>
       <ReferenceSets draft={draft} setDraft={setDraft} />
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 20 }}>

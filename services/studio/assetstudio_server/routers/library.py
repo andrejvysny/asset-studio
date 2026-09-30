@@ -1,6 +1,7 @@
 """Assets, versions, artifacts, imports, shot list."""
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from assetstudio_core.domain import AssetManifest
@@ -129,15 +130,25 @@ def artifact_meta(artifact_id: str, ctx: ProjectContext = Depends(project)) -> d
     return ctx.store.artifact(artifact_id).model_dump(mode="json")
 
 
+_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "model/gltf-binary": ".glb"}
+
+
+def _download_name(art: Any, name: str | None) -> str:
+    """`name` comes from the client (e.g. the media name): reduced to [A-Za-z0-9._-], max 80 chars."""
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "").strip("._-")[:80] or f"{art.role}-{art.sha256[:12]}"
+    ext = _EXT.get(art.mime, "")
+    return base if not ext or base.lower().endswith(ext) else base + ext
+
+
 @router.get("/artifacts/{artifact_id}/content")
 def artifact_content(artifact_id: str, request: Request, ctx: ProjectContext = Depends(project),
-                     download: bool = False) -> Response:
+                     download: bool = False, name: str | None = None) -> Response:
     validate_id(artifact_id, "art")
     art = ctx.store.artifact(artifact_id)
     headers = {"Cache-Control": "private, max-age=31536000, immutable", "X-Content-SHA256": art.sha256,
                "X-Content-Type-Options": "nosniff"}
     if download:
-        headers["Content-Disposition"] = f'attachment; filename="{art.role}-{art.sha256[:12]}"'
+        headers["Content-Disposition"] = f'attachment; filename="{_download_name(art, name)}"'
     backend = ctx.store.repo
     backend.verify_blob(art.sha256, art.size)  # cached per file identity; corrupt bytes are never served
     if isinstance(backend, LocalBackend) and (path := backend.blob_path(art.sha256)) is not None:

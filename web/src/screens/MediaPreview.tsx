@@ -58,7 +58,7 @@ export function MediaPreview({ project, item, onClose, onChanged }: Props) {
       {stale && <div className="banner note">This item changed elsewhere. The list was reloaded; close and reopen it to edit the latest.</div>}
       <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <button className="btn btn-primary" disabled={!dirty || act.busy || !name.trim()} onClick={save}>Save</button>
-        <a className="btn" href={`${content}?download=1`} download>Download</a>
+        <a className="btn" href={`${content}?download=1&name=${encodeURIComponent(item.name)}`} download>Download</a>
         {!archived && <button className="btn" onClick={() => nav(`/p/${project}/jobs/new?media=${item.id}`)}>New Job from this</button>}
         <button className="btn" disabled={act.busy} style={{ marginLeft: "auto" }}
           onClick={() => mutate(() => (archived ? restoreMedia : archiveMedia)(project, item.id, item.revision))}>

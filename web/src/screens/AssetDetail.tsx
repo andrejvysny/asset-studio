@@ -8,7 +8,7 @@ import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
 
 const FACT_LABEL: Record<string, string> = {
-  kind: "Asset type", recipe_id: "Pipeline", naming: "Naming rule", budget: "Budget", build_profile: "Build profile (no effect yet)",
+  kind: "Asset type", recipe_id: "Pipeline", naming: "Naming rule", budget: "Budget", build_profile: "Build profile",
   qa_ruleset: "QA rule set", reference_set: "Reference set", style: "Style", style_lora: "Style LoRA",
   export_presets: "Export presets", candidate_count: "Candidates",
 };

@@ -9,24 +9,27 @@ const ORDER: EffectClass[] = ["applied", "conditioning_only", "advisory_only", "
 const COLOR: Record<EffectClass, string> = { applied: OK, conditioning_only: INFO, advisory_only: NONE, not_applicable: NONE, unsupported: WARN };
 const val = (v: Effect["value"]): string => (v === null || v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v));
 
-interface Props { categories: { id: string; label: string }[]; configRevision: number; dirty: boolean }
+interface Props { categories: { id: string; label: string }[]; configRevision: number; dirty: boolean;
+  styleId: string; savedStyleIds: string[] }
 
-export function EffectsPanel({ categories, configRevision, dirty }: Props) {
+export function EffectsPanel({ categories, configRevision, dirty, styleId, savedStyleIds }: Props) {
   const { id } = useProject();
   const [cat, setCat] = useState("");
   const [kind, setKind] = useState<Kind | "">("");
   const [view, setView] = useState<EffectsView | null>(null);
+  const [preview, setPreview] = useState(true);
+  const previewStyle = preview && savedStyleIds.includes(styleId) ? styleId : "";
   const [hint, setHint] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     if (!cat && !kind) { setView(null); setHint("Project defaults name no kind: pick a category or a kind"); return; }  // would 422
-    getConfigEffects(id, { categoryId: cat, kind }).then((v) => { if (live) { setView(v); setHint(null); } }).catch((e: unknown) => {
+    getConfigEffects(id, { categoryId: cat, kind, style: previewStyle }).then((v) => { if (live) { setView(v); setHint(null); } }).catch((e: unknown) => {
       if (!live) return;
       setView(null);
       setHint(e instanceof ApiError && e.code === "unresolved" ? `${e.message} — pick a kind` : (e as Error).message);
     });
     return () => { live = false; };
-  }, [id, cat, kind, configRevision]);
+  }, [id, cat, kind, previewStyle, configRevision]);
   return (
     <div className="panel" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
       <span className="label">How this style is applied (planned, for new Jobs)</span>
@@ -37,6 +40,10 @@ export function EffectsPanel({ categories, configRevision, dirty }: Props) {
           <option value="">kind from scope</option>{KINDS.map((k) => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}</select>
         {view && <span className="sub">recipe {view.recipe.id} v{view.recipe.version} · {view.mode}</span>}
       </div>
+      <label className="row" style={{ gap: 5, fontSize: 12 }}>
+        <input type="checkbox" checked={preview} onChange={(e) => setPreview(e.target.checked)} aria-label="preview selected style" />
+        preview selected style{preview && ` (${styleId}${previewStyle ? "" : ", unsaved: not previewable"})`}</label>
+      {view && !previewStyle && view.style_id && <span className="sub" aria-label="scope style">Scope resolves to style: {view.style_id}</span>}
       {dirty && <span className="sub" style={{ color: WARN }}>Reflects the saved configuration — save to update</span>}
       {hint && <span className="sub" aria-label="effects hint">{hint}</span>}
       {view && ORDER.map((cls) => {

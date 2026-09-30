@@ -33,7 +33,8 @@ async def _upload_one(ctx: ProjectContext, f: UploadFile) -> dict[str, Any]:
         item, duplicate = media_svc.ingest(ctx, name, data)
     except ApiError as e:
         return {"filename": name, "ok": False, "error": {"code": e.code, "message": e.message}}
-    return {"filename": name, "ok": True, "item": item.model_dump(mode="json"), "duplicate": duplicate}
+    return {"filename": name, "ok": True, "item": item.model_dump(mode="json"), "duplicate": duplicate,
+            "archived": item.archived_at is not None}
 
 
 @router.post("/media:upload")
