@@ -1,3 +1,27 @@
+# TODO — MCP server for remote agents (2026-09-30)
+
+Plan: ~/.claude/plans/act-as-senior-software-sunny-bonbon.md. Owner: agents pass all gates (actor recorded), in-process
+listener :8191, bearer tokens (read/full), inline ≤16 MB + signed URLs. Facade over REST via ASGITransport.
+
+- [x] Phase 0 spike: mcp==1.30.0; FastMCP streamable HTTP on 2nd uvicorn server + auth middleware; contextvar through
+      ASGITransport into sync endpoints; test harness over ASGITransport + session_manager.run()
+- [x] Phase 1 foundation: settings, listener (:8191, clean SIGINT), token store + `assetstudio mcp create|list|revoke`,
+      StudioClient + error mapping, actor plumbing (intent plan -> decisions/waves), studio tools, guide resources,
+      file spool + signed URLs, views/binding; test_mcp_foundation (5)
+- [x] Phase 2 config/library/media tools (Sonnet impl, reviewed; import cap -> max_upload_bytes, images downscaled
+      for vision), test_mcp_config_library (7)
+- [x] Phase 3 jobs + gates (auto-binding), wait_for_job, batches/runs, ops (Sonnet impl, reviewed; fixed pinned
+      prompt scope, build `status` field), test_mcp_production (6, incl. actor on decisions + intent)
+- [x] Phase 4 variants, studio_api, produce_asset prompt, docs/mcp.md, compose/Dockerfile port, README/SPEC/arch
+
+Result: lint clean, 388 backend tests pass (19 MCP). Live smoke: real server + MCP client, fake engine, create project
+-> config -> job -> all gates -> publish -> signed download sha ok. Not committed.
+Follow-ups:
+- [ ] 75 tools: consider consolidating (clients with tool limits); variant tools + item_reference/reexport untested
+- [ ] OAuth 2.1 (needed for claude.ai custom connectors); token UI panel in Runtime
+- [ ] UI: show decision actor (operator vs agent:<name>) in history
+- [ ] real-GPU run driven through MCP
+
 # TODO — Media Library (2026-09-29)
 
 Plan: ~/.claude/plans/do-thorough-analysis-of-toasty-iverson.md. Owner: images only (PNG/JPEG/WebP), flat + search + tags,

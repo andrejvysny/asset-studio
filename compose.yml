@@ -24,8 +24,12 @@ services:
     build: {context: ., dockerfile: services/studio/Dockerfile}
     image: localhost/assetstudio-studio:dev
     restart: unless-stopped
-    ports: ["127.0.0.1:${STUDIO_PORT:-8190}:8190"]
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-8190}:8190"              # UI + REST: loopback only (no auth)
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8191}:8191"     # MCP for agents: bearer tokens; expose via TLS proxy
     environment:
+      STUDIO_MCP: ${STUDIO_MCP:-1}
+      STUDIO_MCP_PUBLIC_URL: ${STUDIO_MCP_PUBLIC_URL:-}
       COMFY_URL: http://comfyui:8188
       AUX_URL: http://aux:8001
       WORKER3D_URL: ${WORKER3D_URL-http://worker3d:8003}   # set empty to disable 3D (GPU1 then only hosts aux)

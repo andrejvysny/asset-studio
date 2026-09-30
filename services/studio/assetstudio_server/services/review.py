@@ -13,6 +13,7 @@ from assetstudio_core.review import ApprovalRequest, ReviewError, check_binding,
 from assetstudio_storage.repo import CorruptBlob
 from pydantic import BaseModel, Field
 
+from ..actor import OPERATOR
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
@@ -155,7 +156,7 @@ def _approve_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], 
             ctx.store.create(decision_key(jid, did), ReviewDecision(
                 id=did, gate="candidate_approval", job_id=jid, item_id=iid, decided_at=now_iso(),
                 idempotency_key=plan["idempotency_key"], run_id=u["run_id"], wave_id=plan.get("wave_id"),
-                **u["decision"]))
+                actor=plan.get("actor") or OPERATOR, **u["decision"]))
         outcomes.append(outcome(studio, ctx, jid, iid, lambda x, u=u: _restore_and_approve(
             x, u, item_tasks(studio, ctx.id, x)), u["expected_item_revision"]))
     _record(studio, ctx, plan, cid, "candidate_approval", outcomes, lambda u: {"approval_id": u["decision_id"]})
@@ -170,7 +171,8 @@ def _record(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: str,
         extra = wave_unit(u) if o["ok"] else None
         if extra is not None:
             units.append({"job_id": u["job_id"], "item_id": u["item_id"], **extra})
-    record_wave(studio, ctx, {"run_id": plan["run_id"], "wave_id": plan.get("wave_id"), "units": units}, cid, gate)
+    record_wave(studio, ctx, {"run_id": plan["run_id"], "wave_id": plan.get("wave_id"), "units": units,
+                              "actor": plan.get("actor")}, cid, gate)
 
 
 def approve(studio: Studio, ctx: ProjectContext, job_id: str | None, req: Approve,
@@ -289,7 +291,8 @@ def _accept_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], c
             ctx.store.create(decision_key(jid, did), ReviewDecision(
                 id=did, gate="final_acceptance", job_id=jid, item_id=iid,
                 bound={"build_run_id": u["build_run_id"], "artifacts": u["artifacts"]}, decided_at=now_iso(),
-                idempotency_key=plan["idempotency_key"], run_id=u["run_id"], wave_id=plan.get("wave_id")))
+                idempotency_key=plan["idempotency_key"], run_id=u["run_id"], wave_id=plan.get("wave_id"),
+                actor=plan.get("actor") or OPERATOR))
         outcomes.append(outcome(studio, ctx, jid, iid, lambda x, u=u: _apply_accept(studio, ctx, x, u),
                                 u["expected_item_revision"]))
     _record(studio, ctx, plan, cid, "final_acceptance", outcomes,

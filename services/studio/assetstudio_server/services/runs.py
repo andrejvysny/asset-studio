@@ -16,6 +16,7 @@ from assetstudio_storage.project import batch_group_key
 from assetstudio_storage.repo import NotFound
 from pydantic import BaseModel, Field
 
+from ..actor import OPERATOR
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
@@ -364,7 +365,7 @@ def record_wave(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: 
     wave = WaveSelection(id=wave_id, run_id=run_id, gate=gate, command_id=cid,  # type: ignore[arg-type]
                          units=[{k: u.get(k) for k in ("job_id", "item_id", "prompt_revision_id", "approval_id",
                                                         "build_run_id") if u.get(k)} for u in plan["units"]],
-                         created_at=now_iso())
+                         created_at=now_iso(), actor=plan.get("actor") or OPERATOR)
     if ctx.store.repo.stat_object(wave_key(wave_id)) is None:
         ctx.store.create(wave_key(wave_id), wave)
     with ctx.store.lock:

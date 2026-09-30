@@ -11,6 +11,7 @@ from assetstudio_core.recipes import RECIPES, legacy_variant, validate_parameter
 from assetstudio_storage.repo import IntegrityError, NotFound
 from pydantic import BaseModel, Field
 
+from ..actor import OPERATOR
 from ..coordinator.builds.common import create_run, reusable_qa_mask
 from ..coordinator.stages import STAGES, new_task
 from ..errors import ApiError
@@ -296,12 +297,12 @@ def run_transform(studio: Studio, ctx: ProjectContext, job_id: str | None, req: 
     return commands.execute(studio, ctx, "run_transform", req.idempotency_key, body, plan)
 
 
-def _confirm_transform(studio: Studio, ctx: ProjectContext, u: dict[str, Any], key: str) -> None:
+def _confirm_transform(studio: Studio, ctx: ProjectContext, u: dict[str, Any], key: str, actor: str) -> None:
     jid, did = u["job_id"], u["approval_id"]
     if ctx.store.repo.stat_object(decision_key(jid, did)) is None:
         ctx.store.create(decision_key(jid, did), ReviewDecision(
             id=did, gate="transform_confirmation", job_id=jid, item_id=u["item_id"], bound=u["bound"],
-            decided_at=now_iso(), idempotency_key=key, run_id=u.get("run_id")))
+            decided_at=now_iso(), idempotency_key=key, run_id=u.get("run_id"), actor=actor))
 
     def apply(x: JobItem) -> None:
         if did not in x.decisions:
@@ -316,7 +317,7 @@ def _transform_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any]
     created: list[str] = []
     for u in plan["units"]:
         key = (u["job_id"], u["item_id"])
-        _confirm_transform(studio, ctx, u, plan["idempotency_key"])
+        _confirm_transform(studio, ctx, u, plan["idempotency_key"], plan.get("actor") or OPERATOR)
         run = create_run(studio, ctx, u["job_id"], load_item(ctx.store, *key)[0], u["approval_id"], u["build"], cid)
         try:
             created += studio.journal.tasks.create(build_chain(studio, ctx, run, u, plan.get("wave_id")), cid)

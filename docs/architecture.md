@@ -176,3 +176,18 @@ answers are `unsure`), `/analyze_source`, `/suggest_variants`. QA that cannot ru
 Single trusted operator, loopback bindings. Mutations require the `X-AssetStudio: 1` header and same-origin `Origin`.
 Uploads are inspected before storage (pixel caps, full decode, GLB container with no URIs). No user field is executable;
 QA metrics are an allowlist; workflows are versioned files with node-id bindings validated against `/object_info`.
+
+**MCP for remote agents** (`mcp_api/`, see `docs/mcp.md`). A second listener in the Studio process
+(`STUDIO_MCP_HOST:STUDIO_MCP_PORT`, default `127.0.0.1:8191`) serves only Streamable HTTP `/mcp` and signed `/files/…`.
+The UI/REST port stays loopback and unauthenticated, so only the MCP port may be exposed, behind a TLS proxy.
+- Bearer tokens (`assetstudio mcp create|list|revoke`) are stored as sha256 in `instance/mcp_tokens.json` (0600). Scope
+  is `read` or `full`. The store reloads on change, so revocation takes effect immediately.
+- Tools call the REST API in-process (`httpx.ASGITransport`): validation, CSRF, idempotency, events and errors are shared
+  with the UI.
+- An agent may pass every gate (owner decision). Its identity reaches the REST layer as `x-assetstudio-actor`,
+  accepted only together with a per-process secret. Commands persist the actor in their intent plan, and
+  `ReviewDecision`/`WaveSelection` record `actor=agent:<token>`. New Jobs record `source=agent:<token>`.
+- Bytes: inline base64 (≤ `STUDIO_MCP_MAX_INLINE_BYTES`, 16 MiB), or HMAC-signed URLs (per-process key, 15 min).
+  An upload URL works once (exclusive spool file). Downloads stream the sha-verified artifact route. Studio never
+  fetches agent-supplied URLs.
+- DNS-rebinding protection admits loopback Host headers plus the host of `STUDIO_MCP_PUBLIC_URL`.
