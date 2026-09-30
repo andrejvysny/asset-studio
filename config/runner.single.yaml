@@ -1,0 +1,29 @@
+# Runner config for profile S (single machine, compose.nodes.yml). Mounted at /etc/assetstudio/runner.yaml.
+studio_url: http://studio:8190
+name: gpu-box
+state_dir: /var/lib/assetstudio-runner/state
+# One runner per host: the lock (on the runner-state volume) stops a second runner from claiming the same GPUs.
+host_lock: /var/lib/assetstudio-runner/host.lock
+registration_token_file: /run/secrets/runner_registration_token   # from `make runner-token`
+dispatch: pull
+
+# Compose service names on the internal network; ComfyUI has no host port, only this runner reaches it.
+engines:
+  comfyui: http://comfyui:8188
+  aux: http://aux:8001
+  worker3d: http://worker3d:8003
+
+# "index:N" is resolved to the physical GPU UUID via nvidia-smi at start; Studio tracks devices by UUID.
+# Indices are those visible in the runner container (compose reserves GPU_IMAGE_ID/GPU_AUX_ID as 0 and 1, in order).
+slots:
+  - slot_id: image
+    capability: image
+    devices: ["index:0"]
+    engines: [comfyui]
+  - slot_id: aux3d          # aux and worker3d time-share this GPU
+    capability: aux3d
+    devices: ["index:1"]
+    engines: [aux, worker3d]
+
+models_root: /models        # verified against the catalog Studio sends at session start
+workflows_dir: /app/comfyui/workflows

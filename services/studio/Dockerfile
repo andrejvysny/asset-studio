@@ -20,7 +20,9 @@ COPY config/ /app/config/
 COPY comfyui/workflows/ /app/comfyui/workflows/
 COPY --from=web /web/dist /app/web
 # 1777: the runtime uid differs under rootless Podman keep-id; the dir is private to this container anyway.
-RUN useradd --uid 1000 --create-home studio && mkdir -p /data/instance && chmod 1777 /data/instance
+RUN useradd --uid 1000 --create-home studio && mkdir -p /data/instance && chmod 1777 /data/instance \
+    && mkdir -p /var/lib/assetstudio-runner && chown studio:studio /var/lib/assetstudio-runner
+# ^ node mode: the runner reuses this image; a named volume on that path inherits the ownership.
 USER studio
 ENV PATH=/app/.venv/bin:$PATH PYTHONUNBUFFERED=1 STUDIO_HOST=0.0.0.0 STUDIO_PORT=8190 \
     STUDIO_WEB_DIR=/app/web STUDIO_CONFIG_DIR=/app/config STUDIO_WORKFLOWS_DIR=/app/comfyui/workflows \

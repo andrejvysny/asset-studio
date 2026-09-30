@@ -25,3 +25,4 @@ projects/*
 
 # subagent memory notes (local only)
 **/.claude/agent-memory/
+secrets/

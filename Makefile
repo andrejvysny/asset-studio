@@ -10,9 +10,13 @@ COMPOSE ?= docker compose
 NODE_RUN = docker run --rm -v "$$PWD/web":/web -w /web docker.io/library/node:22.20-slim
 endif
 PY = uv run
+# Node mode (profile S) uses `!override`/`!reset` compose tags (Compose >= 2.24); podman-compose lacks them and would
+# silently keep mounting ./models into Studio, so the nodes targets refuse PODMAN=1.
+NODES = -f compose.yml -f compose.nodes.yml
 
 .PHONY: help doctor build up down logs ps models verify verify-full test lint web-build web-types \
-        e2e acceptance-cpu acceptance-gpu acceptance-offline lock-comfyui
+        e2e acceptance-cpu acceptance-gpu acceptance-offline lock-comfyui \
+        runner-token up-nodes down-nodes switch-nodes
 
 help:         ; @grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
 doctor:       ; $(PY) assetstudio doctor
@@ -47,3 +51,16 @@ lock-comfyui:
 test-worker3d: ; podman run --rm --network none -v "$$PWD":/src:ro,Z -w /src \
 	-e PYTHONPATH=/src/services/worker3d:/src/packages/assetstudio_processing \
 	localhost/assetstudio-worker3d:dev python tests/worker3d/test_raw_raster.py
+
+# Node mode (docs/installation.md). Token file is gitignored under secrets/.
+nodes-guard:
+ifeq ($(PODMAN),1)
+	@echo "node mode needs Docker Compose >= 2.24 (!override/!reset); not supported with PODMAN=1" >&2; exit 1
+endif
+runner-token: nodes-guard
+	mkdir -p secrets && $(COMPOSE) run --rm studio assetstudio runners group-create --name local --projects '*' --operations '*' 2>/dev/null || true; \
+	$(COMPOSE) run --rm studio assetstudio runners token --group local > secrets/runner_registration_token && chmod 600 secrets/runner_registration_token
+up-nodes: nodes-guard ; $(COMPOSE) $(NODES) up -d
+down-nodes: nodes-guard ; $(COMPOSE) $(NODES) down
+# Needs `assetstudio execution switch` (WP2.5b); fails with an argparse error until that lands.
+switch-nodes: nodes-guard ; $(COMPOSE) $(NODES) exec studio assetstudio execution switch --to nodes
