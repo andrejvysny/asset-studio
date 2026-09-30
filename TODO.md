@@ -20,6 +20,20 @@ Phase 2 — extract compute, single machine, public profile
 - [x] WP2.6 readiness · [x] WP2.7 single-machine compose · [x] WP2.8 failure injection · [~] WP2.9 real acceptance (suite written; needs GPU box run)
 - [ ] WP2.10 remove direct mode (needs user confirmation) · [x] WP2.11 public profile (not validated on real Traefik/Authelia) · [x] WP2.12 ephemeral (simulated)
 
+Result (2026-09-30): P0–P2 implemented on feat/modular-arch (lint clean; 671 backend + 4 process + 27/30 e2e — the 3
+e2e failures need model files, same as baseline). Direct mode is still the default.
+Open:
+- [ ] WP2.9 run `make acceptance-gpu-nodes` on the 2x4090 box (profile S via compose.nodes.yml), then node B
+      (GPU_NODES_RUNNER_B=1, both slot layouts); record in docs/acceptance.md
+- [ ] WP2.10 remove direct mode — only after WP2.9 evidence + explicit user confirmation
+- [ ] validate compose.public.yml on real Traefik + Authelia (header stripping, router priorities, XFF handling)
+- [ ] Runtime UI: show runner_readiness + audit view; node-mode GPU usage shows as unknown, not idle
+- [ ] aux calls lose Studio execution_id reconciliation in node mode (attempt id is the identity instead)
+- [ ] research exporter in node mode depends on runner label `exporter-research` (untested on hardware)
+- [ ] reviewer role cannot cancel/retry tasks (owner only) — product decision
+- [ ] tests/unit/test_runner_agent.py and test_runner_services.py exceed 500 lines — split
+- [ ] P3–P7 detailed planning (source lifecycle, companion, providers, delivery, scale)
+
 # TODO — Media Library (2026-09-29)
 
 Plan: ~/.claude/plans/do-thorough-analysis-of-toasty-iverson.md. Owner: images only (PNG/JPEG/WebP), flat + search + tags,
