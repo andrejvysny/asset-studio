@@ -88,6 +88,8 @@ def _note(env: TaskEnv, call_key: str, a: dict[str, Any]) -> None:
     remote = dict(env.task.progress.get("remote") or {})
     entry = {"attempt_id": a["id"], "generation": a["generation"], "state": a["state"],
              "runner_id": a["runner_id"], "slot_id": a["slot_id"]}
+    if a["runner_id"] and a["slot_id"]:
+        env.preferred_slot = (a["runner_id"], a["slot_id"])  # soft affinity for the pass's next call (R8)
     if remote.get(call_key) != entry:
         env.progress(remote={**remote, call_key: entry})
 
@@ -166,7 +168,8 @@ def run_call(studio: Studio, env: TaskEnv, operation: str, params: Msg, inputs: 
     try:
         row = attempts.offer_call(studio, task_id=env.task.id, call_key=call_key, project_id=env.ctx.id,
                                   operation=operation, inputs=refs, params=params.model_dump(mode="json"),
-                                  requirements=_requirements(env, operation))
+                                  requirements=_requirements(env, operation),
+                                  preferred=env.preferred_slot)
     except RunnerError as e:  # stale_revision: the call key was offered with different inputs
         raise ExecutionFailed(e.message, "input_invalid") from e
     _note(env, call_key, row)
