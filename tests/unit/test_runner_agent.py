@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 import sys
 import threading
@@ -16,12 +17,15 @@ from assetstudio_core.ids import new_id
 from assetstudio_node.agent import RunnerAgent
 from assetstudio_node.cli import main as cli_main
 from assetstudio_node.config import ConfigError, RunnerConfig, load_config
-from assetstudio_node.executor import FakeExecutor
+from assetstudio_node.engine_executor import EngineExecutor, Engines
+from assetstudio_node.engines.fake import FakeAux, FakeWorker3d
+from assetstudio_node.executor import ExecutionBlocked, FakeExecutor
 from assetstudio_node.hostlock import HostLock, HostLockBusy
 from assetstudio_node.inventory import build_inventory
 from assetstudio_node.push import PushListener
 from assetstudio_node.spool import Spool
 from assetstudio_node.state import RunnerState
+from assetstudio_protocol.engine import AckError
 from assetstudio_protocol.execution import (
     AcceptResponse,
     DispositionReceipt,
@@ -97,6 +101,7 @@ class StubClient:
         self.receipt_result: DispositionReceipt | None = None
         self.hello: Any = None
         self.deregistered = False
+        self.catalog: dict[str, Any] = {}
 
     def names(self, name: str) -> list[Any]:
         return [a for n, a in self.calls if n == name]
@@ -108,7 +113,7 @@ class StubClient:
     def open_session(self, hello: Any) -> SessionAccepted:
         self.hello = hello
         self.calls.append(("open_session", hello))
-        return SessionAccepted(session_id=SID, protocol_version=1, catalog_sha256="c" * 64, catalog={},
+        return SessionAccepted(session_id=SID, protocol_version=1, catalog_sha256="c" * 64, catalog=self.catalog,
                                studio_keys=[STUDIO_KEY], heartbeat_s=10, lease_s=60, offer_ttl_s=30)
 
     def put_inventory(self, sid: str, inv: Any) -> None:
@@ -172,12 +177,16 @@ class TickClock(Clock):
         return self.t
 
 
-def make_agent(tmp_path: Path, stub: StubClient | None = None, *, executor: FakeExecutor | None = None,
+def make_agent(tmp_path: Path, stub: StubClient | None = None, *, executor: Any = None,
                clock: Clock | None = None, **cfg: Any) -> tuple[RunnerAgent, StubClient, Clock]:
+    """`executor` may be an instance or a factory `(config, state) -> executor` (engine executors need the state)."""
     stub = stub or StubClient()
     clock = clock or Clock()
     config = RunnerConfig.model_validate(cfg_dict(tmp_path, **cfg))
-    agent = RunnerAgent(config, client=stub, executor=executor or FakeExecutor(), state=RunnerState(config.state_dir),
+    state = RunnerState(config.state_dir)
+    if callable(executor):
+        executor = executor(config, state)
+    agent = RunnerAgent(config, client=stub, executor=executor or FakeExecutor(), state=state,
                         spool=Spool(config.state_dir / "spool"), clock=clock, idle_s=0.0)  # type: ignore[arg-type]
     agent.bootstrap(TOKEN)
     agent.open_session()
@@ -217,6 +226,20 @@ def test_inventory_from_config(tmp_path: Path) -> None:
     assert inv.devices[1].fallback and inv.devices[1].index == 1
     assert {o.op for e in inv.slots[1].engines for o in e.operations} >= {"aux.qa", "worker3d.export"}
     assert all(s.state == "ready" for s in inv.slots)
+
+
+def test_inventory_resolves_devices_from_nvidia_smi(tmp_path: Path) -> None:
+    gpus = [{"index": "0", "uuid": "GPU-real0", "name": "RTX", "vram_total_mb": 24000},
+            {"index": "1", "uuid": "GPU-real1", "name": "RTX", "vram_total_mb": 12000}]
+    config = RunnerConfig.model_validate(cfg_dict(tmp_path, slots=[slot("a", ["index:0"]), slot("b", ["GPU-real1"])]))
+    inv = build_inventory(config, 1, "c" * 64, runner_id=RID, gpus=gpus)
+    assert [(d.uuid, d.index, d.name, d.memory_mb, d.fallback) for d in inv.devices] == [
+        ("GPU-real0", 0, "RTX", 24000, False), ("GPU-real1", 1, "RTX", 12000, False)]
+    assert [s.device_uuids for s in inv.slots] == [["GPU-real0"], ["GPU-real1"]]
+    for slots in ([slot("a", ["GPU-nope"])], [slot("a", ["index:7"])], [slot("a", ["index:0"]), slot("b", ["GPU-real0"])]):
+        bad = RunnerConfig.model_validate(cfg_dict(tmp_path, slots=slots))
+        with pytest.raises(ConfigError):
+            build_inventory(bad, 1, "c" * 64, runner_id=RID, gpus=gpus)
 
 
 # -- host lock, state, spool ----------------------------------------------------------------------------------------
@@ -429,6 +452,24 @@ def test_restart_reports_crashed_execution_as_lost(tmp_path: Path) -> None:
     assert agent2.state.get_attempt(offer.attempt_id) is None
 
 
+def test_restart_finishes_a_spool_written_before_the_crash(tmp_path: Path) -> None:
+    """A crash between the manifest write and the `spooled` step: the attempt is delivered, not stuck or lost."""
+    agent, _, _ = make_agent(tmp_path)
+    offer = make_offer()
+    agent.state.record_attempt(offer)
+    out = tmp_path / "out.bin"
+    out.write_bytes(b"x" * 10)
+    f = agent.spool.write_file(offer.attempt_id, "result.bin", out, "application/octet-stream")
+    agent.spool.write_manifest(offer.attempt_id, offer.generation, [f], {})
+    agent.state.set_state(offer.attempt_id, "executing")
+    agent.state.close()
+    agent2, stub2, _ = make_agent(tmp_path)
+    (local,) = stub2.hello.local_attempts
+    assert local.state == "spooled" and [x.name for x in local.spooled] == ["result.bin"]
+    agent2.step()
+    assert len(stub2.names("complete")) == 1
+
+
 def test_pushed_offer_signature_is_enforced(tmp_path: Path) -> None:
     executor = FakeExecutor()
     agent, stub, _ = make_agent(tmp_path, executor=executor, dispatch="push", push_listen="127.0.0.1:0")
@@ -511,4 +552,95 @@ def test_cli_check_config(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
     assert "overlap" in capsys.readouterr().err
     with pytest.raises(ConfigError):
         load_config(tmp_path / "missing.yaml")
-    assert cli_main(["run", "--config", str(good)]) == 2  # real adapters arrive in Phase 2
+    assert cli_main(["run", "--config", str(good)]) == 2  # real engines need models_root
+
+
+# -- engine executor wiring (R7 barrier, R8 spooled hook, R10 receipts) ---------------------------------------------
+
+AUX_SLOT = [slot("gpu1", ["GPU-bbb"], "aux3d", ["aux", "worker3d"])]
+
+
+class BlockingExecutor(FakeExecutor):
+    def __init__(self, code: str) -> None:
+        super().__init__()
+        self.code = code
+
+    def execute(self, *a: Any, **k: Any) -> Any:
+        raise ExecutionBlocked(self.code, "engine said no")  # type: ignore[arg-type]
+
+
+def test_blocked_execution_reports_failed_with_resource_code(tmp_path: Path) -> None:
+    agent, stub, _ = make_agent(tmp_path / "a", executor=BlockingExecutor("node_unavailable"))
+    stub.offers.append(make_offer())
+    agent.step()
+    last = stub.names("report")[-1]
+    assert last.state == "failed" and last.error.code == "node_unavailable"
+    assert len(stub.names("put_inventory")) == 1 and agent.state.list_attempts() == []  # slot stays in rotation
+
+    agent, stub, _ = make_agent(tmp_path / "b", executor=BlockingExecutor("admission_rejected"))
+    stub.offers.append(make_offer())
+    agent.step()
+    assert stub.names("report")[-1].error.code == "admission_rejected"
+    inv = stub.names("put_inventory")[-1]
+    assert inv.revision == 2 and [s.state for s in inv.slots] == ["unknown"]  # out of rotation until the barrier passes
+    before = len(stub.names("acquire"))
+    agent.step()
+    assert len(stub.names("acquire")) == before  # no schedulable slot: no long poll
+
+
+def test_spooled_hook_runs_after_manifest_before_spooled_report(tmp_path: Path) -> None:
+    seen: list[Any] = []
+
+    class Hooked(FakeExecutor):
+        def spooled(self, offer: Any) -> None:
+            seen.append((reported_states(stub), agent.spool.manifest(offer.attempt_id) is not None))
+
+    agent, stub, _ = make_agent(tmp_path, executor=Hooked())
+    stub.offers.append(make_offer())
+    agent.step()
+    assert seen == [(["admitted", "executing"], True)]
+    assert reported_states(stub)[2:] == ["spooled", "uploading"]
+
+
+def test_inventory_carries_barrier_states_receipts_and_rechecks(tmp_path: Path) -> None:
+    stub = StubClient()
+    stub.catalog = {"models": {"m1": {"repo": "o/m1", "revision": "r", "service": "aux", "files": {"f": {}}},
+                               "m2": {"repo": "o/m2", "revision": "r", "service": "comfyui", "files": {}}}}
+    aux = FakeAux()
+    aux.unload_response = AckError("refuses to unload")
+    agent, stub, clock = make_agent(
+        tmp_path, stub, slots=AUX_SLOT, clock=Clock(),
+        executor=lambda c, s: EngineExecutor(c, s, Engines(None, aux, FakeWorker3d()), sleep=lambda _s: None))
+    (inv,) = stub.names("put_inventory")
+    assert inv.revision == 1 and [(s.slot_id, s.state) for s in inv.slots] == [("gpu1", "unknown")]
+    assert [(m.key, m.status) for m in inv.models] == [("m1", "ok")]  # only models of this runner's engines
+    agent.step()
+    assert stub.names("acquire") == [] and stub.names("heartbeat")[-1].inventory_revision == 1
+    clock.t += 10  # inside the 30 s retry window: no barrier re-run
+    agent.step()
+    assert len(stub.names("put_inventory")) == 1
+    aux.unload_response = None
+    clock.t += 40
+    agent.step()
+    inv2 = stub.names("put_inventory")[-1]
+    assert inv2.revision == 2 and [s.state for s in inv2.slots] == ["ready"]
+    agent.step()
+    assert stub.names("acquire")[-1].free_slots == ["gpu1"]
+
+
+def test_cli_models_verify_prints_receipts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path / "models"
+    (root / "m").mkdir(parents=True)
+    (root / "m" / "w.bin").write_bytes(b"right")
+    lock = tmp_path / "lock.yaml"
+    lock.write_text(
+        "schema_version: 1\nmodels:\n  ok:\n    repo: o/ok\n    revision: r1\n    local_dir: m\n    service: aux\n"
+        f"    files:\n      w.bin: {{size: 5, sha256: {hashlib.sha256(b'right').hexdigest()}}}\n"
+        "  gone:\n    repo: o/gone\n    revision: r1\n    local_dir: nope\n    service: aux\n"
+        "    files:\n      w.bin: {size: 5, sha256: " + "0" * 64 + "}\n")
+    cfg = tmp_path / "node.yaml"
+    cfg.write_text(f"studio_url: http://studio.test\nname: r1\nstate_dir: {tmp_path}/state\nmodels_root: {root}\n"
+                   "slots:\n  - {slot_id: gpu1, capability: aux3d, devices: [GPU-b], engines: [aux]}\n")
+    assert cli_main(["models", "verify", "--config", str(cfg), "--catalog", str(lock)]) == 1  # one model missing
+    rows = {r["key"]: r["status"] for r in map(json.loads, capsys.readouterr().out.splitlines())}
+    assert rows == {"ok": "ok", "gone": "missing"}

@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS identity(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS attempts(
     attempt_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, offer TEXT NOT NULL, state TEXT NOT NULL,
     manifest TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS epochs(slot_id TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
 """
 
 
@@ -56,6 +57,14 @@ class RunnerState:
         with self._lock:
             self._db.execute("INSERT INTO identity(key, value) VALUES(?, ?) "
                              "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+    def next_epoch(self, slot_id: str) -> int:
+        """Monotonic GPU-lane epoch per slot, durable across restarts (R7): one atomic statement."""
+        with self._lock:
+            row = self._db.execute(
+                "INSERT INTO epochs(slot_id, epoch) VALUES(?, 1) "
+                "ON CONFLICT(slot_id) DO UPDATE SET epoch=epoch+1 RETURNING epoch", (slot_id,)).fetchone()
+        return int(row[0])
 
     def record_attempt(self, offer: Offer) -> bool:
         """Insert-if-absent. False means the attempt is already local (duplicate delivery)."""

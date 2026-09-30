@@ -41,9 +41,11 @@ from assetstudio_protocol.versions import PROTOCOL_VERSION
 from pydantic import TypeAdapter
 
 from . import __version__
+from .barrier import recover_slots
 from .config import RunnerConfig
-from .executor import ExecutionCancelled, ExecutionFailed, Executor
+from .executor import ExecutionBlocked, ExecutionCancelled, ExecutionFailed, Executor
 from .inventory import build_inventory
+from .receipts import session_receipts
 from .spool import Spool
 from .state import AttemptRow, RunnerState
 
@@ -53,6 +55,7 @@ _ERROR_CODES = {"input_invalid": "invalid_input", "oom": "resource_exhausted", "
 _STALE_CODES = ("stale_generation", "cancelled_by_operator")
 _KEYS = TypeAdapter(list[StudioKey])
 _BACKOFF_MAX_S = 30.0
+_BARRIER_RETRY_S = 30.0
 
 
 def load_or_create_key(config: RunnerConfig) -> bytes:
@@ -90,6 +93,10 @@ class RunnerAgent:
         self._next_hb = 0.0
         self._next_receipt_poll = 0.0
         self._catalog_sha = ""
+        self._catalog: dict[str, Any] = {}
+        self._slot_states: dict[str, str] = {}
+        self._inv_revision = 0
+        self._next_barrier = 0.0
         self._studio_keys: list[StudioKey] = []
         self._ephemeral = False
         self._taken = False
@@ -132,12 +139,22 @@ class RunnerAgent:
         self.state.set_identity("studio_keys", _KEYS.dump_json(studio_keys).decode())
 
     def _mark_crashed_executions(self) -> list[str]:
-        """An attempt left `executing` without a complete spool died with the previous agent process: report it lost
-        (A09). The in-process executor cannot outlive the agent; P2 engine adapters reconcile by id first (R7)."""
-        lost = [a.attempt_id for a in self.state.list_attempts()
-                if a.state == "executing" and self.spool.manifest(a.attempt_id) is None]
-        for attempt_id in lost:
-            self.state.set_state(attempt_id, "lost")
+        """Resolve attempts the previous agent process left `executing`. A complete spool only missed its `spooled`
+        step: finish it (worker ack) and deliver. Without a spool, an executor that reconciles by engine id (prompt /
+        execution id) re-runs the call and picks up the engine's result instead of recomputing; the in-process fake
+        executor died with the agent, so its attempt is reported lost (A09)."""
+        lost = []
+        for a in self.state.list_attempts():
+            if a.state != "executing":
+                continue
+            if self.spool.manifest(a.attempt_id) is not None:
+                self.executor.spooled(a.offer)
+                self.state.set_state(a.attempt_id, "spooled")
+            elif getattr(self.executor, "reconciles", False):
+                self.state.set_state(a.attempt_id, "admitted")
+            else:
+                self.state.set_state(a.attempt_id, "lost")
+                lost.append(a.attempt_id)
         return lost
 
     def open_session(self) -> SessionAccepted:
@@ -154,24 +171,44 @@ class RunnerAgent:
         self._session_id = acc.session_id
         self._heartbeat_s = acc.heartbeat_s
         self._catalog_sha = acc.catalog_sha256
+        self._catalog = acc.catalog
         self._set_keys(acc.studio_keys)
         self.state.set_identity("session", acc.model_dump_json())
         for attempt_id in lost:  # Studio now knows; a lost attempt has no bytes, so no receipt will follow
             self.spool.delete(attempt_id)
             self.state.delete_attempt(attempt_id)
+        # R7: engines can outlive the agent, so no slot is advertised before the barrier has run
+        self._slot_states = dict(recover_slots(self.config, self.executor, self.state))
+        self._next_barrier = self.clock() + _BARRIER_RETRY_S
         self._put_inventory()
         self._next_hb = 0.0
         return acc
 
     def _put_inventory(self) -> None:
-        inv = build_inventory(self.config, 1, self._catalog_sha, runner_id=self._runner_id)
+        self._inv_revision += 1
+        models = session_receipts(self.config, self.state, self._catalog, self._catalog_sha)
+        inv = build_inventory(self.config, self._inv_revision, self._catalog_sha, runner_id=self._runner_id,
+                              models=models, slot_states=self._slot_states)
         self.client.put_inventory(self._session_id, inv)
+
+    def _recheck_slots(self) -> None:
+        """A slot that failed the barrier is retried at most every 30 s; a changed state is re-published. Runs
+        between attempts only: the barrier unloads workers, which must never happen under running work."""
+        bad = {s for s, st in self._slot_states.items() if st != "ready"}
+        if not bad or self.clock() < self._next_barrier:
+            return
+        self._next_barrier = self.clock() + _BARRIER_RETRY_S
+        fresh = recover_slots(self.config, self.executor, self.state, only=bad)
+        if any(self._slot_states[s] != st for s, st in fresh.items()):
+            self._slot_states.update(fresh)
+            self._put_inventory()
 
     # -- loop ----------------------------------------------------------------------------------------------------
 
     def step(self) -> bool:
         """One loop iteration; True if it did work."""
         worked = self.resume_pending()
+        self._recheck_slots()
         self._heartbeat_if_due()
         if self._maybe_finish_ephemeral():
             return True
@@ -223,8 +260,11 @@ class RunnerAgent:
             return None, False
         if self.config.dispatch == "push":
             return None, False
-        req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=[s.slot_id for s in self.config.slots],
-                             cached_residencies=[], wait_s=self.config.acquire_wait_s)
+        free = [s.slot_id for s in self.config.slots if self._slot_states.get(s.slot_id, "ready") == "ready"]
+        if not free:  # every slot failed the barrier: nothing may be scheduled until a recheck passes
+            return None, False
+        req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=free, cached_residencies=[],
+                             wait_s=self.config.acquire_wait_s)
         return self.client.acquire(self._session_id, req), False
 
     # -- heartbeat -----------------------------------------------------------------------------------------------
@@ -234,7 +274,7 @@ class RunnerAgent:
             return
         local = self.state.local_attempts(self.spool)[:256]
         reports = [AttemptReport(attempt_id=a.attempt_id, generation=a.generation, state=a.state) for a in local]
-        hb = Heartbeat(session_id=self._session_id, inventory_revision=1, attempts=reports,
+        hb = Heartbeat(session_id=self._session_id, inventory_revision=self._inv_revision, attempts=reports,
                        lifecycle=lifecycle or self.lifecycle)
         resp = self.client.heartbeat(self._session_id, hb)
         self._next_hb = self.clock() + self._heartbeat_s
@@ -307,12 +347,34 @@ class RunnerAgent:
         except ExecutionFailed as e:
             body = ErrorBody(code=_ERROR_CODES[e.code], message=str(e)[:500])
             return self._finish_terminal(offer, "failed", body)
+        except ExecutionBlocked as e:
+            return self._finish_blocked(offer, e)
         refs = [self.spool.write_file(aid, name, path, mime) for name, path, mime in outputs]
         shutil.rmtree(work, ignore_errors=True)
         manifest = self.spool.write_manifest(aid, offer.generation, refs, meta)
+        self._notify_spooled(offer)
         self.state.set_state(aid, "spooled", manifest=manifest.model_dump_json())
         self._report(aid, offer.generation, "spooled")
         self._deliver(aid, offer.generation)
+
+    def _notify_spooled(self, offer: Offer) -> None:
+        """R8/I07: the engine may release its copy of the result only now that the manifest is durable."""
+        try:
+            self.executor.spooled(offer)
+        except Exception:  # noqa: BLE001 - the spool is safe; a failed release must not fail the attempt
+            log.warning("spooled hook failed for %s", offer.attempt_id, exc_info=True)
+
+    def _finish_blocked(self, offer: Offer, e: ExecutionBlocked) -> None:
+        """Engine unreachable or GPU ownership unknown: this attempt fails, the slot keeps serving others unless
+        ownership is unknown (then it leaves rotation until the barrier passes again)."""
+        if e.code == "admission_rejected" and self._slot_states.get(offer.slot_id) == "ready":
+            self._slot_states[offer.slot_id] = "unknown"
+            self._next_barrier = self.clock() + _BARRIER_RETRY_S
+            try:
+                self._put_inventory()
+            except TransportError as err:
+                log.warning("inventory republish failed: %s", err)
+        self._finish_terminal(offer, "failed", ErrorBody(code=e.code, message=str(e)[:500]))
 
     def _execute(self, offer: Offer, inputs: dict[str, Path], work: Path) -> tuple[list[tuple[str, Path, str]],
                                                                                    dict[str, Any]]:
@@ -333,11 +395,11 @@ class RunnerAgent:
         cache = self.config.state_dir / "cache"
         cache.mkdir(parents=True, exist_ok=True)
         out: dict[str, Path] = {}
-        for i, ref in enumerate(offer.inputs):
+        for ref in offer.inputs:
             path = cache / ref.sha256
             if not (path.exists() and _sha256_file(path) == ref.sha256):
                 self._download(offer.attempt_id, ref.sha256, path)
-            out[ref.role if ref.role not in out else f"{ref.role}#{i}"] = path
+            out[ref.sha256] = path
         return out
 
     def _download(self, attempt_id: str, sha: str, dst: Path) -> None:

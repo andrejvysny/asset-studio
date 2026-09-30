@@ -272,6 +272,14 @@ class ComfyEngine:
             return JobStatus("pending")
         return JobStatus("unknown")
 
+    def queue_prompt_ids(self) -> set[str]:
+        """Every prompt id running or pending: the R7 barrier blocks the slot on ids no local attempt owns."""
+        try:
+            q = self._get("/queue").json()
+            return {str(item[1]) for key in ("queue_running", "queue_pending") for item in q.get(key, [])}
+        except (ValueError, AttributeError, IndexError, TypeError) as e:
+            raise EngineUnavailable("ComfyUI /queue: malformed response") from e
+
     def fetch_image(self, prompt_id: str, workflow_id: str | None = None) -> bytes:
         hist = self._get(f"/history/{prompt_id}").json().get(prompt_id) or {}
         wf_id = workflow_id or self._prompt_workflow.get(prompt_id)

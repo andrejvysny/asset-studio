@@ -18,7 +18,16 @@ class ExecutionCancelled(Exception):
 
 
 class ExecutionFailed(Exception):
-    def __init__(self, code: FailureCode, message: str = "") -> None:
+    def __init__(self, code: FailureCode, message: str = "", *, lost: bool = False) -> None:
+        super().__init__(message or code)
+        self.code = code
+        self.lost = lost  # the worker restarted mid-execution: a retry is a new attempt, never a resubmission
+
+
+class ExecutionBlocked(Exception):
+    """A resource problem, not the item's fault: the engine is unreachable or GPU ownership is unknown."""
+
+    def __init__(self, code: Literal["node_unavailable", "admission_rejected"], message: str = "") -> None:
         super().__init__(message or code)
         self.code = code
 
@@ -26,7 +35,12 @@ class ExecutionFailed(Exception):
 class Executor(Protocol):
     def execute(self, offer: Offer, inputs: dict[str, Path], out_dir: Path,
                 should_cancel: Callable[[], bool]) -> tuple[list[tuple[str, Path, str]], dict[str, Any]]:
-        """Returns ([(name, path, mime)], meta). Must poll should_cancel and raise ExecutionCancelled."""
+        """Returns ([(name, path, mime)], meta). `inputs` maps each input sha256 to its local file. Must poll
+        should_cancel and raise ExecutionCancelled."""
+        ...
+
+    def spooled(self, offer: Offer) -> None:
+        """Called once the result manifest is durable, before the spooled report (R8): engines may free results."""
         ...
 
 
@@ -37,6 +51,9 @@ class FakeExecutor:
         self.delay_s = delay_s
         self.poll_s = poll_s
         self.calls = 0
+
+    def spooled(self, offer: Offer) -> None:
+        pass
 
     def execute(self, offer: Offer, inputs: dict[str, Path], out_dir: Path,
                 should_cancel: Callable[[], bool]) -> tuple[list[tuple[str, Path, str]], dict[str, Any]]:

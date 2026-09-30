@@ -56,6 +56,8 @@ class RunnerConfig(_Strict):
     slots: list[SlotConfig] = Field(min_length=1)
     labels: list[Label] = []
     models_root: Path | None = None
+    workflows_dir: Path | None = None  # ComfyUI workflow bindings; required for a real (non-simulated) image slot
+    poll_s: float = Field(default=0.5, gt=0)  # image engine status poll interval
     acquire_wait_s: int = Field(default=25, ge=0, le=50)
     simulated: bool = False
 

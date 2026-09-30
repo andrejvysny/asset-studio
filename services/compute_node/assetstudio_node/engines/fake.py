@@ -67,7 +67,13 @@ class FakeEngine:
         self.fail_prompts: set[str] = set()
         self.lose_ack = 0  # simulate "request reached the engine but the response was lost"
         self.down = False
+        self.queue_ids: set[str] = set()  # test hook: prompt ids the "engine" reports as queued/running
         self._lock = threading.Lock()
+
+    def queue_prompt_ids(self) -> set[str]:
+        if self.down:
+            raise EngineUnavailable("simulated outage")
+        return set(self.queue_ids)
 
     def check(self) -> dict[str, Any]:
         return {"reachable": not self.down, "ready": not self.down, "problems": [], "simulated": True,
