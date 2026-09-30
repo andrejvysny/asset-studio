@@ -95,7 +95,10 @@ class NodeBackend:
 
     @property
     def simulated(self) -> bool:
-        return False  # simulation is a property of each result, recorded by the adapters from the runner's meta
+        """Readiness view only: every fresh runner declares itself simulated. Results stay labelled per manifest."""
+        from .services.node_readiness import nodes_simulated
+
+        return nodes_simulated(self._studio)
 
     def engine(self, env: TaskEnv | None = None) -> ImageEngine | None:
         from .remote.image import RemoteImageEngine

@@ -313,7 +313,7 @@ def test_backend_identity_and_generation(rig: Rig) -> None:
                       ExecutionFailed)
     assert backend.generation(rig.env, "aux.cutout") == 2
     assert backend.aux() is not None and backend.engine() is not None and backend.worker3d() is not None
-    assert backend.worker3d().health()["exporters"] == {"clean": True}  # type: ignore[union-attr]
+    assert backend.worker3d().health()["exporters"] == {"clean": False, "research": False}  # type: ignore[union-attr]
 
 
 def test_cancel_orphans_cancels_unfinished_attempts(rig: Rig) -> None:

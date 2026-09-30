@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from assetstudio_protocol import calls as pc
+from assetstudio_protocol.execution import OPERATION_ENGINE
 
+from ..services.node_readiness import operation_readiness
 from .calls import image_mime, result_simulated, run_stage_call
 
 if TYPE_CHECKING:
@@ -12,6 +14,8 @@ if TYPE_CHECKING:
     from ..studio import Studio
 
 __all__ = ["RemoteAux"]
+
+_AUX_OPERATIONS = tuple(op for op in OPERATION_ENGINE if OPERATION_ENGINE[op] == "aux")
 
 
 def _triples(images: list[tuple[bytes, str, str]] | None) -> list[tuple[bytes, str, str, str]]:
@@ -74,7 +78,13 @@ class RemoteAux:
 
     # Worker-lease surface: node mode never acquires a Studio-side GPU lease (runner-local admission).
     def health(self) -> dict[str, Any]:
-        return {"reachable": True, "loads": None}
+        reasons: list[str] = []
+        for op in _AUX_OPERATIONS:
+            ready, why = operation_readiness(self.studio, op)
+            if ready:
+                return {"reachable": True, "loads": None, "problems": []}
+            reasons = reasons or why
+        return {"reachable": False, "loads": None, "problems": reasons}
 
     def lease(self, epoch: int) -> dict[str, Any]:
         return {"leased": False, "reason": "runner-local admission"}

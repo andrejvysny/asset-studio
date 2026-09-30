@@ -13,6 +13,7 @@ from assetstudio_protocol import calls as protocol_calls
 from ..adapters.base import ExecutionFailed, ImageEditRequest, JobStatus, T2IRequest
 from ..adapters.comfyui import WorkflowRegistry, graph_sha256
 from ..services import attempts
+from ..services.node_readiness import operation_readiness
 from .calls import image_mime, read_result, result_simulated, run_stage_call
 
 if TYPE_CHECKING:
@@ -47,7 +48,8 @@ class RemoteImageEngine:
         return self.env is not None and result_simulated(self.studio, self.env.task.id)
 
     def check(self) -> dict[str, Any]:
-        return {"reachable": True, "ready": True, "problems": []}  # runner readiness arrives with WP2.6
+        ready, reasons = operation_readiness(self.studio, "image.t2i")
+        return {"reachable": ready, "ready": ready, "problems": reasons}
 
     def supports(self, kind: str) -> bool:
         return bool(self.registry.by_kind(kind))

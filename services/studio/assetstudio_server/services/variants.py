@@ -134,7 +134,7 @@ def _blocker(studio: Studio, ctx: ProjectContext, source: SourceBinding, method:
         except (IntegrityError, NotFound) as e:
             return ("corrupt_source", str(e))
         return None
-    if not studio.simulated:
+    if not studio.execution.simulated:
         status = runtime_svc.model_statuses(studio).get(EDIT_MODEL)
         if status is None or not status.ready:
             return ("missing_models", f"the image-edit model {EDIT_MODEL} is not installed")

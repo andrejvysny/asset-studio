@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 from assetstudio_protocol import calls as pc
 
 from ..services import attempts
+from ..services.node_readiness import node_exporters, operation_readiness
 from .calls import result_simulated, run_call
 
 if TYPE_CHECKING:
@@ -58,9 +59,12 @@ class RemoteWorker3d:
         if a is not None:
             attempts.commit(self.studio, a["id"])
 
-    # Exporters a runner declares arrive with WP2.6; only the clean exporter is advertised in node mode.
     def health(self) -> dict[str, Any]:
-        return {"reachable": True, "ok": True, "exporters": {"clean": True}, "loads": None}
+        gen, why_gen = operation_readiness(self.studio, "worker3d.generate")
+        exp, why_exp = operation_readiness(self.studio, "worker3d.export")
+        ok = gen and exp
+        return {"reachable": ok, "ok": ok, "exporters": node_exporters(self.studio), "loads": None, "loaded": None,
+                "problems": [] if ok else (why_gen if not gen else why_exp)}
 
     def lease(self, epoch: int) -> dict[str, Any]:
         return {"leased": False, "reason": "runner-local admission"}

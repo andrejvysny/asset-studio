@@ -11,6 +11,7 @@ from ..gpu import nvidia_smi
 from ..models import ModelStatus, verify_all
 from ..provenance import load_licences
 from ..studio import Studio
+from . import node_readiness as nr
 
 _CACHE: dict[str, tuple[float, Any]] = {}
 
@@ -25,7 +26,13 @@ def _cached(key: str, ttl: float, fn: Any) -> Any:
     return value
 
 
+def _nodes(studio: Studio) -> bool:
+    return studio.execution.mode == "nodes"
+
+
 def model_statuses(studio: Studio) -> dict[str, ModelStatus]:
+    if _nodes(studio):  # runner receipts change with every inventory: never served from the 30 s cache
+        return nr.node_model_statuses(studio)
     return _cached(f"models:{id(studio)}", 30.0,
                    lambda: verify_all(studio.settings.config_dir, studio.settings.models_root))
 
@@ -34,21 +41,21 @@ def engine_check(studio: Studio) -> dict[str, Any]:
     engine = studio.execution.engine()
     if engine is None:
         return {"reachable": False, "ready": False, "problems": ["no image engine configured (library-only mode)"]}
-    return _cached(f"engine:{id(studio)}", 10.0, engine.check)
+    return engine.check() if _nodes(studio) else _cached(f"engine:{id(studio)}", 10.0, engine.check)
 
 
 def aux_health(studio: Studio) -> dict[str, Any]:
     aux = studio.execution.aux()
     if aux is None:
         return {"reachable": False, "problems": ["no aux service configured"]}
-    return _cached(f"aux:{id(studio)}", 5.0, aux.health)
+    return aux.health() if _nodes(studio) else _cached(f"aux:{id(studio)}", 5.0, aux.health)
 
 
 def worker3d_health(studio: Studio) -> dict[str, Any]:
     w3d = studio.execution.worker3d()
     if w3d is None:
         return {"reachable": False, "problems": ["no 3D worker configured (WORKER3D_URL)"]}
-    return _cached(f"w3d:{id(studio)}", 5.0, w3d.health)
+    return w3d.health() if _nodes(studio) else _cached(f"w3d:{id(studio)}", 5.0, w3d.health)
 
 
 def _build_state(r: Any, build_missing: list[str], w3d: dict[str, Any]) -> dict[str, Any]:
@@ -69,7 +76,8 @@ def build_readiness(studio: Studio, recipe_id: str) -> dict[str, Any]:
     r = RECIPES[recipe_id]
     models = model_statuses(studio)
     # Simulated workers load no weights, so model files cannot gate them (outputs are labelled SIMULATED).
-    missing = [] if studio.simulated else [k for k in r.build_models if not (models.get(k) and models[k].ready)]
+    missing = [] if studio.execution.simulated else [
+        k for k in r.build_models if not (models.get(k) and models[k].ready)]
     return _build_state(r, missing, worker3d_health(studio) if r.build == "model3d" else {})
 
 
@@ -78,6 +86,7 @@ def recipe_readiness(studio: Studio) -> list[dict[str, Any]]:
     eng = engine_check(studio)
     aux = aux_health(studio)
     w3d = worker3d_health(studio)
+    simulated = studio.execution.simulated
     out = []
     for r in RECIPES.values():
         gen_missing = [k for k in r.generation_models if not (models.get(k) and models[k].ready)]
@@ -89,8 +98,8 @@ def recipe_readiness(studio: Studio) -> list[dict[str, Any]]:
         elif not eng.get("ready"):
             gen = {"state": "engine_unavailable", "reason": "; ".join(eng.get("problems", [])) or "engine not ready"}
         else:
-            gen = {"state": "experimental" if studio.simulated else "ready",
-                   "reason": "SIMULATED engine" if studio.simulated else ""}
+            gen = {"state": "experimental" if simulated else "ready",
+                   "reason": "SIMULATED engine" if simulated else ""}
         build = _build_state(r, build_missing, w3d)
         qa_missing = [k for k in r.qa_models if not (models.get(k) and models[k].ready)]
         qa = {"state": "ready" if aux.get("reachable") and not qa_missing else "degraded",
@@ -124,39 +133,71 @@ def worker_gpus(studio: Studio, eng: dict[str, Any], aux: dict[str, Any]) -> lis
     return out
 
 
+def _node_services(studio: Studio, eng: dict[str, Any], aux: dict[str, Any], w3d: dict[str, Any],
+                   sim: bool) -> list[dict[str, Any]]:
+    urls = nr.node_slot_urls(studio)
+    none = "no runner slot advertises this engine"
+    return [
+        {"name": "comfyui", "role": "image generation · runner slots", "url": urls.get("comfyui", none),
+         "reachable": eng.get("reachable", False), "ready": eng.get("ready", False),
+         "problems": eng.get("problems", []), "version": eng.get("version"), "simulated": sim},
+        {"name": "aux", "role": "text · VLM · segmentation · runner slots", "url": urls.get("aux", none),
+         "reachable": aux.get("reachable", False), "ready": aux.get("reachable", False), "loaded": None,
+         "problems": aux.get("problems", []), "simulated": sim},
+        {"name": "worker3d", "role": "TRELLIS.2 image→3D · GLB export · runner slots",
+         "url": urls.get("worker3d", none), "reachable": w3d.get("reachable", False),
+         "ready": bool(w3d.get("reachable") and w3d.get("ok")), "loaded": None, "exporters": w3d.get("exporters"),
+         "problems": w3d.get("problems", []), "simulated": sim},
+    ]
+
+
+def _direct_services(studio: Studio, eng: dict[str, Any], aux: dict[str, Any], w3d: dict[str, Any],
+                     sim: bool) -> list[dict[str, Any]]:
+    return [
+        {"name": "comfyui", "role": "image generation · GPU0",
+         "url": "SIMULATED (no ComfyUI contacted)" if sim else studio.settings.comfy_url,
+         "reachable": eng.get("reachable", False), "ready": eng.get("ready", False),
+         "problems": eng.get("problems", []), "version": eng.get("version"), "simulated": sim},
+        {"name": "aux", "role": "text · VLM · segmentation · GPU1",
+         "url": "SIMULATED (no aux service contacted)" if sim else studio.settings.aux_url,
+         "reachable": aux.get("reachable", False), "ready": aux.get("reachable", False),
+         "loaded": aux.get("loaded"), "problems": aux.get("problems", []), "simulated": sim},
+        {"name": "worker3d", "role": "TRELLIS.2 image→3D · GLB export · GPU1",
+         "url": "SIMULATED (no 3D worker contacted)" if sim else (studio.settings.worker3d_url or "disabled"),
+         "reachable": w3d.get("reachable", False), "ready": bool(w3d.get("reachable") and w3d.get("ok")),
+         "loaded": w3d.get("loaded"), "exporters": w3d.get("exporters"),
+         "problems": w3d.get("problems", []) or (
+             [f"missing models: {', '.join(w3d['missing_models'])}"] if w3d.get("missing_models") else []),
+         "simulated": sim},
+    ]
+
+
+def _gpus(studio: Studio, eng: dict[str, Any], aux: dict[str, Any]) -> list[dict[str, Any]]:
+    if _nodes(studio):
+        return nr.node_gpus(studio)  # lane and ownership come from the runner's slots and device claims
+    gpus = nvidia_smi() or ([] if studio.simulated else worker_gpus(studio, eng, aux))
+    lane_by_index = {v: k for k, v in studio.settings.gpu_ids.items()}
+    return [{**g, "lane": lane_by_index.get(g["index"]),
+             "ownership": studio.lanes[lane_by_index[g["index"]]].public()
+             if lane_by_index.get(g["index"]) in studio.lanes else None} for g in gpus]
+
+
 def runtime(studio: Studio, coordinator: Any) -> dict[str, Any]:
     models = model_statuses(studio)
     licences = load_licences(studio.settings.config_dir)
     eng, aux, w3d = engine_check(studio), aux_health(studio), worker3d_health(studio)
-    gpus = nvidia_smi() or ([] if studio.simulated else worker_gpus(studio, eng, aux))
-    lane_by_index = {v: k for k, v in studio.settings.gpu_ids.items()}
-    return {
-        "simulated": studio.simulated,
-        "engine_mode": studio.settings.engine,
-        "gpus": [{**g, "lane": lane_by_index.get(g["index"]),
-                  "ownership": studio.lanes[lane_by_index[g["index"]]].public()
-                  if lane_by_index.get(g["index"]) in studio.lanes else None} for g in gpus],
-        "services": [
-            {"name": "comfyui", "role": "image generation · GPU0",
-             "url": "SIMULATED (no ComfyUI contacted)" if studio.simulated else studio.settings.comfy_url,
-             "reachable": eng.get("reachable", False), "ready": eng.get("ready", False),
-             "problems": eng.get("problems", []), "version": eng.get("version"), "simulated": studio.simulated},
-            {"name": "aux", "role": "text · VLM · segmentation · GPU1",
-             "url": "SIMULATED (no aux service contacted)" if studio.simulated else studio.settings.aux_url,
-             "reachable": aux.get("reachable", False), "ready": aux.get("reachable", False),
-             "loaded": aux.get("loaded"), "problems": aux.get("problems", []), "simulated": studio.simulated},
-            {"name": "worker3d", "role": "TRELLIS.2 image→3D · GLB export · GPU1",
-             "url": "SIMULATED (no 3D worker contacted)" if studio.simulated else (studio.settings.worker3d_url
-                                                                                   or "disabled"),
-             "reachable": w3d.get("reachable", False), "ready": bool(w3d.get("reachable") and w3d.get("ok")),
-             "loaded": w3d.get("loaded"), "exporters": w3d.get("exporters"),
-             "problems": w3d.get("problems", []) or (
-                 [f"missing models: {', '.join(w3d['missing_models'])}"] if w3d.get("missing_models") else []),
-             "simulated": studio.simulated},
-        ],
+    nodes, sim = _nodes(studio), studio.execution.simulated
+    out = {
+        "simulated": sim,
+        "engine_mode": "nodes" if nodes else studio.settings.engine,
+        "gpus": _gpus(studio, eng, aux),
+        "services": (_node_services if nodes else _direct_services)(studio, eng, aux, w3d, sim),
         "lanes": {k: v.public() for k, v in studio.lanes.items()},
         "coordinator": coordinator.status() if coordinator is not None else None,
         "models": [{**m.__dict__, "ready": m.ready, "licence_record": licences.get(k)} for k, m in models.items()],
         "licences": [{"id": k, **v} for k, v in licences.items()],
         "recipes": recipe_readiness(studio),
     }
+    if nodes:
+        out["runner_readiness"] = nr.runner_readiness(studio)
+    return out

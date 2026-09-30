@@ -56,8 +56,10 @@ def _model_problem(identity: str, receipts: dict[str, dict[str, Any]], catalog_s
     return None
 
 
-def _slot_problem(slot: dict[str, Any], devices: dict[str, dict[str, Any]], busy: set[str],
-                  operation: str) -> str | None:
+def slot_problem(slot: dict[str, Any], devices: dict[str, dict[str, Any]], busy: set[str], operation: str,
+                 *, transient: bool = True) -> str | None:
+    """Why `slot` cannot serve `operation`. `transient=False` ignores occupancy (a reserved device, a slot that
+    already has an attempt): readiness asks whether the slot could ever serve, placement whether it can now."""
     if slot["capability"] != OPERATION_CAPABILITY[operation]:
         return "wrong capability"
     wanted = {"op": operation, "version": OPERATION_VERSIONS[operation]}
@@ -65,9 +67,10 @@ def _slot_problem(slot: dict[str, Any], devices: dict[str, dict[str, Any]], busy
         return f"no engine offers {operation} v{wanted['version']}"
     if slot["state"] not in _SLOT_STATES:
         return f"slot state {slot['state']}"
-    if any(devices.get(u, {}).get("claim") != "free" for u in slot["device_uuids"]):
+    free = ("free",) if transient else ("free", "reserved")
+    if any(devices.get(u, {}).get("claim") not in free for u in slot["device_uuids"]):
         return "device not free (reserved or uncertain)"
-    if slot["slot_id"] in busy:
+    if transient and slot["slot_id"] in busy:
         return "slot already has an attempt"
     return None
 
@@ -115,7 +118,7 @@ def eligible_slots(studio: Studio, *, operation: str, requirements: Requirements
         busy = {a["slot_id"] for a in studio.journal.attempts.list(states=_OCCUPYING, runner_id=runner["id"])
                 if not (a["state"] == "offered" and expired(a["offer_expires_at"], now))}
         for slot in studio.journal.runners.slots(runner["id"]):
-            if (p := _slot_problem(slot, devices, busy, operation)):
+            if (p := slot_problem(slot, devices, busy, operation)):
                 reasons.append(f"runner {name} slot {slot['slot_id']}: {p}")
                 continue
             score = (10 if requirements.resource_profile and slot["loaded_residency"] == requirements.resource_profile

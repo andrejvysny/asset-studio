@@ -65,14 +65,16 @@ def _slot(cfg: SlotConfig, uuids: list[str], state: str) -> Slot:
 
 def build_inventory(config: RunnerConfig, revision: int, catalog_sha: str, *, runner_id: str,
                     models: list[ModelReceipt] | None = None, slot_states: dict[str, str] | None = None,
-                    gpus: list[dict[str, Any]] | None = None) -> Inventory:
-    """`gpus=None` queries nvidia-smi unless the runner is simulated; an empty list keeps the configured values."""
+                    gpus: list[dict[str, Any]] | None = None, extra_labels: list[str] | None = None) -> Inventory:
+    """`gpus=None` queries nvidia-smi unless the runner is simulated; an empty list keeps the configured values.
+    Declared facts (`simulated`, engine-reported labels) join the configured labels, sorted and unique."""
     if gpus is None:
         gpus = [] if config.simulated else nvidia_smi()
     by_slot = resolve_devices(config, runner_id, gpus)
     states = slot_states or {}
     devices = [d for sc in config.slots for d in by_slot[sc.slot_id]]
     slots = [_slot(sc, [d.uuid for d in by_slot[sc.slot_id]], states.get(sc.slot_id, "ready")) for sc in config.slots]
+    declared = {"simulated"} if config.simulated else set()
     return Inventory(schema="assetstudio.runner.inventory.v1", revision=revision,
                      observed_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), devices=devices, slots=slots,
-                     models=models or [], labels=config.labels)
+                     models=models or [], labels=sorted({*config.labels, *declared, *(extra_labels or [])}))

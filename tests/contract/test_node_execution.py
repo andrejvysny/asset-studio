@@ -2,7 +2,6 @@
 (real agent + client over the real app, SIMULATED engines). Contract evidence, never GPU proof."""
 from __future__ import annotations
 
-import dataclasses
 import logging
 import threading
 import time
@@ -10,17 +9,19 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+import assetstudio_node.agent as node_agent
 import pytest
 from assetstudio_client import RunnerClient
 from assetstudio_node.agent import RunnerAgent, load_or_create_key
 from assetstudio_node.config import RunnerConfig
 from assetstudio_node.engine_executor import EngineExecutor, Engines, build_engines
 from assetstudio_node.engines.fake import FakeEngine
-from assetstudio_node.models import verify_all
 from assetstudio_node.spool import Spool
 from assetstudio_node.state import RunnerState
+from assetstudio_protocol.execution import Requirements
+from assetstudio_server.coordinator.stages.base import model_identity
 from assetstudio_server.main import create_app
-from assetstudio_server.services import runtime
+from assetstudio_server.services.placement import eligible_slots
 from assetstudio_server.studio import build_studio
 from fastapi.testclient import TestClient
 
@@ -42,8 +43,8 @@ class Runner:
             "studio_url": BASE, "name": name, "state_dir": str(tmp / f"state-{name}"),
             "host_lock": str(tmp / f"lock-{name}"), "dispatch": "pull", "acquire_wait_s": 0, "simulated": True,
             "poll_s": 0.01, "slots": [
-                {"slot_id": "gpu-img", "capability": "image", "devices": ["GPU-img"], "engines": ["comfyui"]},
-                {"slot_id": "gpu-aux", "capability": "aux3d", "devices": ["GPU-aux"], "engines": ["aux", "worker3d"]}]})
+                {"slot_id": "gpu-img", "capability": "image", "devices": [f"GPU-img-{name}"], "engines": ["comfyui"]},
+                {"slot_id": "gpu-aux", "capability": "aux3d", "devices": [f"GPU-aux-{name}"], "engines": ["aux", "worker3d"]}]})
         engines = build_engines(self.cfg)
         engines.comfy = FakeEngine(steps_to_finish=image_steps)
         self.engines: Engines = engines
@@ -77,12 +78,7 @@ class Runner:
 
 
 @pytest.fixture
-def node_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Api]:
-    # Model readiness is still judged from Studio's own models_root (runner-declared readiness is WP2.6):
-    # report every catalog model as installed so the simulated lifecycle is not gated on multi-GB weights.
-    ready = {k: dataclasses.replace(v, status="ok")
-             for k, v in verify_all(ROOT / "config", tmp_path / "no-models").items()}
-    monkeypatch.setattr(runtime, "model_statuses", lambda studio: ready)
+def node_api(tmp_path: Path) -> Iterator[Api]:
     settings = make_settings(tmp_path)
     settings.execution = "nodes"
     settings.runner_offer_ttl_s = 5
@@ -235,3 +231,68 @@ def test_cancelling_a_task_cancels_its_running_attempt(node_api: Api, runner_fac
     assert a["control"] == "cancel"
     wait_for(lambda: api.studio.journal.attempts.get(a["id"])["state"] == "cancelled")  # type: ignore[index]
     assert ("cancel", next(c[1] for c in runner.engines.comfy.calls if c[0] == "submit")) in runner.engines.comfy.calls
+
+
+def _recipe(api: Api, recipe_id: str) -> dict[str, Any]:
+    return next(r for r in api.get("/api/v1/runtime")["recipes"] if r["id"] == recipe_id)
+
+
+def _receipts_as(monkeypatch: pytest.MonkeyPatch, status_by_key: dict[str, dict[str, str]]) -> None:
+    """Runner `name` reports the given receipt statuses (key -> status; "absent" drops the receipt)."""
+    real = node_agent.session_receipts
+
+    def patched(config: RunnerConfig, *a: Any) -> Any:
+        wanted = status_by_key.get(config.name, {})
+        return [r.model_copy(update={"status": wanted.get(r.key, r.status)}) for r in real(config, *a)
+                if wanted.get(r.key) != "absent"]
+    monkeypatch.setattr(node_agent, "session_receipts", patched)
+
+
+def test_runtime_without_runners_reports_why_and_the_library_still_works(node_api: Api) -> None:
+    api = node_api  # A01: no model weights and no runner on the Studio host
+    assert api.get("/api/v1/projects") is not None
+    rt = api.get("/api/v1/runtime")
+    assert rt["engine_mode"] == "nodes" and rt["simulated"] is False and rt["gpus"] == []
+    gen = _recipe(api, "concept.default")["generation"]
+    assert gen["state"] != "ready" and gen["state"] != "experimental"
+    ready = {r["operation"]: r for r in rt["runner_readiness"]}
+    assert len(ready) == 10 and not any(r["ready"] for r in ready.values())
+    assert all("runner" in " ".join(r["reasons"]) for r in ready.values())
+    assert all(m["status"] == "missing" and "runner" in m["detail"] for m in rt["models"])
+    assert [s["ready"] for s in rt["services"]] == [False, False, False]
+
+
+def test_runner_declared_readiness_drives_runtime_and_recipes(node_api: Api, runner_factory: Any) -> None:
+    runner_factory()
+    rt = node_api.get("/api/v1/runtime")
+    assert rt["simulated"] is True and all(r["ready"] for r in rt["runner_readiness"])
+    assert {g["uuid"] for g in rt["gpus"]} == {"GPU-img-r1", "GPU-aux-r1"}
+    assert {g["lane"] for g in rt["gpus"]} == {"image", "aux3d"}
+    assert all(m["ready"] and m["full_verified"] for m in rt["models"])
+    assert _recipe(node_api, "concept.default")["generation"]["state"] == "experimental"
+
+
+def test_a_corrupt_receipt_blocks_only_the_recipes_that_need_it(
+        node_api: Api, runner_factory: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _receipts_as(monkeypatch, {"r1": {"trellis2": "corrupt"}})  # A05
+    runner_factory()
+    model3d = _recipe(node_api, "model3d.default")["build"]
+    assert model3d["state"] == "missing_models" and "trellis2" in model3d["reason"]
+    assert _recipe(node_api, "icon.default")["build"]["state"] == "ready"
+    assert _recipe(node_api, "model3d.default")["generation"]["state"] == "experimental"
+    trellis = next(m for m in node_api.get("/api/v1/runtime")["models"] if m["key"] == "trellis2")
+    assert trellis["status"] == "corrupt" and "runner r1" in trellis["detail"]
+
+
+def test_a_model_verified_on_one_runner_only_keeps_the_recipe_ready_and_places_there(
+        node_api: Api, runner_factory: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _receipts_as(monkeypatch, {"a": {"trellis2": "absent"}})  # A04: only runner b holds the weights
+    a, b = runner_factory(name="a"), runner_factory(name="b")
+    assert _recipe(node_api, "model3d.default")["build"]["state"] == "ready"
+    req = Requirements(capability="aux3d", engine="worker3d", models=[model_identity(ROOT / "config", "trellis2")])
+    choices, reasons = eligible_slots(node_api.studio, operation="worker3d.generate", requirements=req,
+                                      project_id="prj_x")
+    by_id = {r["id"]: r["name"] for r in node_api.studio.auth.runners()}
+    assert {by_id[c.runner_id] for c in choices} == {"b"}
+    assert any("runner a: model trellis2 not verified (absent)" in r for r in reasons)
+    assert a.errors == [] and b.errors == []

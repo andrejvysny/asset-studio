@@ -184,11 +184,22 @@ class RunnerAgent:
         self._next_hb = 0.0
         return acc
 
+    def _engine_labels(self) -> list[str]:
+        """Facts the engines report about themselves; best-effort, a label is simply absent on any error."""
+        worker3d = getattr(getattr(self.executor, "engines", None), "worker3d", None)
+        if worker3d is None:
+            return []
+        try:
+            exporters = worker3d.health().get("exporters") or {}
+        except Exception:  # noqa: BLE001 - an unreachable engine must not block inventory publication
+            return []
+        return ["exporter-research"] if exporters.get("research") else []
+
     def _put_inventory(self) -> None:
         self._inv_revision += 1
         models = session_receipts(self.config, self.state, self._catalog, self._catalog_sha)
         inv = build_inventory(self.config, self._inv_revision, self._catalog_sha, runner_id=self._runner_id,
-                              models=models, slot_states=self._slot_states)
+                              models=models, slot_states=self._slot_states, extra_labels=self._engine_labels())
         self.client.put_inventory(self._session_id, inv)
 
     def _recheck_slots(self) -> None:
