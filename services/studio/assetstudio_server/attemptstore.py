@@ -18,7 +18,7 @@ from .runnerstore import journal_txn
 
 _JSON_COLS = ("offer", "manifest", "error", "progress")
 _TRANSITION_COLS = frozenset({"runner_id", "session_id", "slot_id", "lease_until", "offer_expires_at", "manifest",
-                              "error", "progress", "disposition", "disposition_at"})
+                              "error", "progress", "disposition", "disposition_at", "offer"})
 _LIVE_UPLOAD = ("open", "finalizing")
 
 
@@ -174,8 +174,10 @@ class AttemptStore:
         with self.txn() as db:
             row = db.execute("SELECT * FROM uploads WHERE attempt_id=? AND generation=? AND sha256=?",
                              (attempt_id, generation, sha256)).fetchone()
-            if row is not None:
+            if row is not None and row["state"] != "expired":
                 return _upload(row), False
+            if row is not None:  # an expired session (abandoned or failed verification) must not block a retry
+                db.execute("DELETE FROM uploads WHERE id=?", (row["id"],))
             uid = new_id("xfr")
             db.execute(
                 "INSERT INTO uploads(id, attempt_id, generation, project_id, runner_id, sha256, size, role, mime,"
@@ -183,6 +185,12 @@ class AttemptStore:
                 (uid, attempt_id, generation, project_id, runner_id, sha256, size, role, mime, chunk_size, size,
                  now_iso(), expires_at))
             return _upload(db.execute("SELECT * FROM uploads WHERE id=?", (uid,)).fetchone()), True
+
+    def find_upload(self, attempt_id: str, generation: int, sha256: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM uploads WHERE attempt_id=? AND generation=? AND sha256=?",
+                                   (attempt_id, generation, sha256)).fetchone()
+        return _upload(row) if row else None
 
     def get_upload(self, upload_id: str) -> dict[str, Any] | None:
         with self._lock:

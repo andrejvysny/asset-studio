@@ -14,6 +14,10 @@ def _path(name: str, default: Path) -> Path:
     return Path(os.environ.get(name, str(default))).expanduser().resolve()
 
 
+def _int(name: str, default: int) -> int:
+    return int(os.environ.get(name, default))
+
+
 @dataclass
 class Settings:
     instance_dir: Path = field(
@@ -38,6 +42,19 @@ class Settings:
         "STUDIO_INSTANCE_ID", f"{socket.gethostname()}-{secrets.token_hex(3)}"))
     start_coordinator: bool = field(default_factory=lambda: os.environ.get("STUDIO_COORDINATOR", "1") == "1")
     max_upload_bytes: int = 512 * 1024 * 1024
+    # Compute runners (docs/modular/compute-runner.md R3-R6, R14).
+    runner_heartbeat_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_HEARTBEAT_S", 15))
+    runner_lease_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_LEASE_S", 60))
+    runner_offer_ttl_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_OFFER_TTL_S", 30))
+    runner_token_ttl_s: int = field(default_factory=lambda: _int("STUDIO_RUNNER_TOKEN_TTL_S", 900))
+    runner_audience: str = field(default_factory=lambda: os.environ.get(
+        "STUDIO_RUNNER_AUDIENCE", os.environ.get("STUDIO_PUBLIC_URL", "http://127.0.0.1:8190")))
+    upload_chunk_size: int = field(default_factory=lambda: _int("STUDIO_UPLOAD_CHUNK_SIZE", 8 * 1024 * 1024))
+    upload_ttl_s: int = field(default_factory=lambda: _int("STUDIO_UPLOAD_TTL_S", 86400))
+    upload_quota_bytes: int = field(default_factory=lambda: _int("STUDIO_UPLOAD_QUOTA_BYTES", 64 * 1024**3))
+    upload_runner_quota_bytes: int = field(
+        default_factory=lambda: _int("STUDIO_UPLOAD_RUNNER_QUOTA_BYTES", 32 * 1024**3))
+    disk_floor_bytes: int = field(default_factory=lambda: _int("STUDIO_DISK_FLOOR_BYTES", 2 * 1024**3))
 
     def ensure(self) -> None:
         for sub in ("", "index", "staging", "journal"):
