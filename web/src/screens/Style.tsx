@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { MediaPicker } from "../components/MediaPicker";
 import { ErrorLine, Loading, PageHead, Toggle } from "../components/ui";
 import { artifactUrl, KIND_LABEL, KINDS, type Kind, P, type RecipeInfo, type StudioConfig, upload } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
@@ -15,6 +16,7 @@ export function Style() {
   const [draft, setDraft] = useState<StudioConfig | null>(null);
   const [tmpl, setTmpl] = useState("model3d.default");
   const act = useAction();
+  const [pickFor, setPickFor] = useState<string | null>(null);
   useEffect(() => { if (cfg.data && !draft) setDraft(clone(cfg.data.config)); }, [cfg.data, draft]);
   if (!cfg.data || !draft) return <Loading what="style" />;
   const styleId = Object.keys(draft.styles)[0] ?? "default";
@@ -74,9 +76,11 @@ export function Style() {
                 {rs.images.map((im, j) => <button key={im.artifact_id} title="remove" onClick={() => { const n = clone(draft); n.reference_sets[rid]!.images.splice(j, 1); setDraft(n); }}>
                   <img src={artifactUrl(id, im.artifact_id)} alt={im.label} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 5 }} /></button>)}
                 {rs.images.length < 4 && <label className="panel dim" style={{ aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", borderStyle: "dashed" }}>+
-                  <input type="file" accept=".png,.jpg,.jpeg" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void act.run(async () => {
+                  <input type="file" accept=".png,.jpg,.jpeg,.webp" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void act.run(async () => {
                     const r = await upload<{ artifact_id: string }>(`${P(id)}/references:upload`, f);
                     const n = clone(draft); n.reference_sets[rid]!.images.push({ artifact_id: r.artifact_id, label: f.name, role: "", source_rights: "unknown" }); setDraft(n); }); }} /></label>}
+                {rs.images.length < 4 && <button className="panel dim" aria-label={`add media to ${rid}`} style={{ aspectRatio: "1", fontSize: 11, cursor: "pointer" }}
+                  onClick={() => setPickFor(rid)}>media</button>}
               </div>
             </div>
           ))}
@@ -109,6 +113,9 @@ export function Style() {
         <button className="btn" disabled={!dirty} onClick={() => setDraft(clone(cfg.data!.config))}>Discard</button>
       </div>
       <ErrorLine error={act.error} />
+      {pickFor && <MediaPicker project={id} onClose={() => setPickFor(null)} onPick={(m) => {
+        const n = clone(draft); n.reference_sets[pickFor]?.images.push({ artifact_id: m.artifact_id, label: m.name, role: "",
+          source_rights: m.source_rights }); setDraft(n); setPickFor(null); }} />}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { ProjectContext } from "../lib/project";
 
 const NAV: ([string, string] | [string, string, (s: Summary) => string | number])[] = [
   ["h", "Library"], ["assets", "Assets", (s) => s.counts.assets], ["shots", "Shot list", (s) => s.counts.shots],
+  ["media", "Media", (s) => s.counts.media],
   ["h", "Production"],
   ["jobs", "Jobs", (s) => (s.waiting.jobs ? `${s.waiting.jobs} waiting` : s.counts.jobs)],
   ["batches", "Batches", (s) => (s.counts.active_batches ? `${s.counts.active_batches} running` : s.counts.batches)],

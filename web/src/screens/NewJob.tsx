@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ReferenceEditor, type RefDraft } from "../components/references";
@@ -6,6 +6,7 @@ import { ErrorLine, Loading } from "../components/ui";
 import { type EnhancePreset, J, type Json, key, type Kind, KIND_LABEL, KINDS, type RecipeInfo, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { addReference, getJob, runJob } from "../lib/jobsApi";
+import { getMedia } from "../lib/mediaApi";
 import { useConfig, useProject } from "../lib/project";
 
 const SUB: Record<Kind, string> = {
@@ -41,6 +42,18 @@ export function NewJob() {
   const act = useAction();
   const idem = useState(key)[0];
   const pending = useRef<Pending | null>(null);
+  const mediaId = sp.get("media");
+  const seeded = useRef<string | null>(null);
+  // Ref guard: StrictMode runs effects twice; seed the media reference once per id.
+  useEffect(() => {
+    if (!mediaId || seeded.current === mediaId) return;
+    seeded.current = mediaId;
+    void act.run(async () => {
+      const m = await getMedia(id, mediaId);
+      setRefs((cur) => cur.some((r) => r.media_id === m.id) ? cur : [...cur, { key: crypto.randomUUID(), origin: "media",
+        label: m.name, artifact_id: m.artifact_id, media_id: m.id, note: m.note, crop: null }]);
+    });
+  }, [mediaId, id, act.run]);
   const cats = cfg.data?.categories ?? [];
   const config = cfg.data?.config;
   const catKindOf = (cid: string): Kind | null => (cfg.data?.effective[cid]?.kind?.value as Kind | null | undefined) ?? null;
@@ -73,12 +86,13 @@ export function NewJob() {
   const submit = (run: boolean) => void act.run(async () => {
     let st = pending.current;
     if (!st) {
-      const uploads = refs.filter((r) => r.origin === "upload");
+      const direct = refs.filter((r) => r.origin !== "library");
       const out = await send<{ job: { id: string } }>("POST", J(id), {
         title: title.trim(), category_id: cat, kind: (cat && catKindOf(cat)) ? null : kind, enhance_preset: preset,
         idempotency_key: idem, source: target ? "new version" : "manual",
         items: [{ name: title.trim(), brief: brief.trim() || title.trim(), target_asset_id: target, enhance_preset: preset,
-          references: uploads.map((r) => ({ artifact_id: r.artifact_id, note: r.note, crop: r.crop, label: r.label })) }] });
+          references: direct.map((r) => ({ ...(r.origin === "media" ? { media_id: r.media_id } : { artifact_id: r.artifact_id }),
+            note: r.note, crop: r.crop, label: r.label })) }] });
       st = { jobId: out.job.id, lib: refs.filter((r) => r.origin === "library") };
       pending.current = st;
     }

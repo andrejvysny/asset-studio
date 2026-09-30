@@ -16,6 +16,7 @@ from ..errors import ApiError
 from ..registry import ProjectContext
 from ..services import imports as import_svc
 from ..services import library as lib
+from ..services import media as media_svc
 from ..services import shotlist as shot_svc
 from ..studio import Studio
 from .deps import project, studio
@@ -200,15 +201,14 @@ def shots_commit(req: shot_svc.CommitImport, ctx: ProjectContext = Depends(proje
 @router.post("/references:upload")
 async def upload_reference(file: UploadFile = File(...), ctx: ProjectContext = Depends(project),
                            s: Studio = Depends(studio)) -> dict[str, Any]:
-    """Registers an immutable reference image. Adding it to a reference set is a separate config edit."""
-    from assetstudio_processing.images import ImageRejected, inspect_image
-
+    """Registers the image in the media library (deduplicated by content) and returns its reference artifact.
+    Adding it to a Job item is a separate step."""
     ctx.require_writable()
     data = await file.read(64 * 1024 * 1024 + 1)
-    try:
-        info = inspect_image(data)
-    except ImageRejected as e:
-        raise ApiError(422, "invalid_image", str(e)) from e
-    art = ctx.store.register_artifact(data, "reference", info.mime, meta={**info.as_meta(),
-                                                                          "source_name": file.filename})
-    return {"artifact_id": art.id, "sha256": art.sha256, **info.as_meta()}
+    item, duplicate = media_svc.ingest(ctx, file.filename or "upload", data)
+    meta = ctx.store.artifact(item.artifact_id).meta
+    if not duplicate:
+        s.events.publish("media", project_id=ctx.id)
+    return {"artifact_id": item.artifact_id, "sha256": item.sha256, "format": meta["format"],
+            "width": meta["width"], "height": meta["height"], "mode": meta["mode"],
+            "has_alpha": meta["has_alpha"], "media_id": item.id, "duplicate": duplicate}

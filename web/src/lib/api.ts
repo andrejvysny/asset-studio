@@ -15,7 +15,7 @@ export interface ProjectRow { id: string; name: string; root: string; open: bool
 export interface Summary {
   id: string; name: string; read_only: boolean; simulated: boolean; owner: Record<string, string>;
   storage: { backend: string; state: string; root: string };
-  counts: { assets: number; planned: number; shots: number; jobs: number; batches: number; active_batches: number;
+  counts: { assets: number; media: number; planned: number; shots: number; jobs: number; batches: number; active_batches: number;
     categories: number; recipes: number };
   waiting: { jobs: number; items: number; by_gate: Record<string, number>;
     detail: { job_id: string; alias: string; next_action: string }[] };
@@ -468,8 +468,8 @@ export interface Derivation {
 export interface Crop { x: number; y: number; w: number; h: number }
 export interface JobReference {
   /** jrf_... */
-  id: string; artifact_id: string; sha256: string; origin: "upload" | "library"; note: string; crop: Crop | null;
-  label: string | null;
+  id: string; artifact_id: string; sha256: string; origin: "upload" | "library" | "media"; note: string; crop: Crop | null;
+  label: string | null; media_id?: string | null;
   library: { asset_id: string; version_id: string; role: "image" | "preview" | null } | null;
 }
 export interface PromptBindings {

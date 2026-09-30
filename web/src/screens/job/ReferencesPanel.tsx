@@ -1,5 +1,6 @@
 import { type PointerEvent, useRef, useState } from "react";
 
+import { MediaPicker } from "../../components/MediaPicker";
 import { Dialog, ErrorLine, Loading, WARN } from "../../components/ui";
 import { artifactUrl, type AssetList, type AssetRow, type Crop, type ItemView, type JobReference, P } from "../../lib/api";
 import { useAction, useApi } from "../../lib/hooks";
@@ -50,14 +51,14 @@ function RefCard({ r, disabled, onNote, onCrop, onRemove }: CardProps) {
   const { id } = useProject();
   const [note, setNote] = useState(r.note);
   const [marking, setMarking] = useState(false);
-  const label = r.label ?? (r.library ? "library asset" : "upload");
+  const label = r.label ?? (r.library ? "library asset" : r.origin === "media" ? "media" : "upload");
   return (
     <div className="jw-ref">
       <div className="media checker">
         <img src={artifactUrl(id, r.artifact_id)} alt={label} />
         {r.crop && !marking && <CropBox crop={r.crop} />}
         {marking && <CropOverlay onDone={(c) => { setMarking(false); onCrop(c); }} />}
-        <span className="badge">{r.origin === "library" ? "library" : "upload"}</span>
+        <span className="badge">{r.origin === "library" || r.origin === "media" ? r.origin : "upload"}</span>
         <button className="x" aria-label={`remove reference ${label}`} disabled={disabled} onClick={onRemove}>×</button>
       </div>
       <div className="body">
@@ -116,6 +117,7 @@ export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props)
   const act = useAction();
   const file = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
+  const [pickingMedia, setPickingMedia] = useState(false);
   const refs = item.references;
   const disabled = locked || act.busy;
   const rev = async () => (await freshItem(id, jobId, item.id)).revision;
@@ -135,7 +137,7 @@ export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props)
         ))}
         {refs.length < MAX_REFS && (
           <div className="jw-add">
-            <input ref={file} type="file" accept="image/*" hidden aria-label="upload reference image" onChange={(e) => {
+            <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="upload reference image" onChange={(e) => {
               const f = e.target.files?.[0];
               e.target.value = "";
               if (f) run(async () => {
@@ -145,12 +147,18 @@ export function ReferencesPanel({ item, jobId, locked, changed, reload }: Props)
             }} />
             <button className="btn" disabled={disabled} onClick={() => file.current?.click()}>+ Upload</button>
             <button className="btn" disabled={disabled} onClick={() => setPicking(true)}>+ From library</button>
+            <button className="btn" disabled={disabled} onClick={() => setPickingMedia(true)}>+ From media</button>
           </div>
         )}
       </div>
       <span className="muted" style={{ fontSize: 11.5 }}>Guidance only. Notes become reference cues in the prompt, and QA checks
         candidates against these images.</span>
       <ErrorLine error={act.error} />
+      {pickingMedia && <MediaPicker project={id} onClose={() => setPickingMedia(false)} onPick={(m) => {
+        setPickingMedia(false);
+        run(async () => api.addReference(id, jobId, item.id, { media_id: m.id, note: m.note, label: m.name,
+          expected_item_revision: await rev() }));
+      }} />}
       {picking && <LibraryPicker onClose={() => setPicking(false)} onPick={(a) => {
         setPicking(false);
         run(async () => api.addReference(id, jobId, item.id, {

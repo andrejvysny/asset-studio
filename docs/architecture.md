@@ -37,6 +37,7 @@ The core imports no FastAPI, CUDA or ComfyUI.
 | Batches (groups of Jobs) | `execution_batches/<bch_…>/batch.json` (membership, revision, run ids) |
 | runs, plans, waves | `runs/<brn_…>.json` (frozen selection), `runs/plans/<sel_…>.json` (frozen, hashed), `waves/<wav_…>.json` |
 | readable names | `names/<name_id>.json` (atomic create-if-absent: authoritative uniqueness; the index is only a cache) |
+| media library | `media/<med_…>.json` (id derived from content sha256: same bytes = same item; name, note, tags, source rights/URL, `archived_at`, revision) → `reference` + `preview` artifacts. Every `references:upload` lands here. Guidance only; archive hides, never deletes (Job refs keep working). A future blob GC must treat these artifacts as roots |
 | publication / import receipts | `publications/<op>.json`, `imports/<imp>.json` (written before any cleanup) |
 | live dispatch | instance journal (SQLite, same host only): the ONLY authority for task state |
 | search | instance index (SQLite, rebuilt from manifests: `storage:rebuild-index`) |

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
+from . import media as media_svc
 from .records import load_item, load_job, mutate_item
 from .taskview import busy, item_tasks
 
@@ -50,15 +51,23 @@ class LibraryRef(BaseModel):
 
 class NewReference(BaseModel):
     """CreateJob form: an uploaded artifact (POST references:upload)."""
-    artifact_id: str
+    artifact_id: str | None = None
+    media_id: str | None = None
     note: str = Field(default="", max_length=NOTE_MAX)
     crop: Crop | None = None
     label: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode="after")
+    def _one_source(self) -> NewReference:
+        if (self.artifact_id is None) == (self.media_id is None):
+            raise ValueError("give exactly one of artifact_id / media_id")
+        return self
 
 
 class AddReference(BaseModel):
     artifact_id: str | None = None
     library: LibraryRef | None = None
+    media_id: str | None = None
     note: str = Field(default="", max_length=NOTE_MAX)
     crop: Crop | None = None
     label: str | None = Field(default=None, max_length=80)
@@ -66,8 +75,8 @@ class AddReference(BaseModel):
 
     @model_validator(mode="after")
     def _one_source(self) -> AddReference:
-        if (self.artifact_id is None) == (self.library is None):
-            raise ValueError("give exactly one of artifact_id / library")
+        if sum(v is not None for v in (self.artifact_id, self.library, self.media_id)) != 1:
+            raise ValueError("give exactly one of artifact_id / library / media_id")
         return self
 
 
@@ -112,13 +121,20 @@ def _library_artifact(ctx: ProjectContext, lib: LibraryRef) -> Artifact:
 
 
 def new_reference(ctx: ProjectContext, item_id: str, seq: int, *, artifact_id: str | None, library: LibraryRef | None,
-                  note: str, crop: Crop | None, label: str | None) -> dict[str, Any]:
+                  note: str, crop: Crop | None, label: str | None, media_id: str | None = None) -> dict[str, Any]:
     check_crop(crop)
-    art = _library_artifact(ctx, library) if library else _image_artifact(ctx, artifact_id or "")
-    return {"id": derived_id("jrf", item_id, str(seq)), "artifact_id": art.id, "sha256": art.sha256,
-            "origin": "library" if library else "upload", "note": note.strip(),
-            "crop": crop.model_dump() if crop else None, "label": label,
-            "library": library.model_dump() if library else None}
+    if library:
+        art, origin = _library_artifact(ctx, library), "library"
+    elif media_id:
+        art, origin = _image_artifact(ctx, media_svc.resolve_media_artifact(ctx, media_id)), "media"
+    else:
+        art, origin = _image_artifact(ctx, artifact_id or ""), "upload"
+    ref = {"id": derived_id("jrf", item_id, str(seq)), "artifact_id": art.id, "sha256": art.sha256,
+           "origin": origin, "note": note.strip(), "crop": crop.model_dump() if crop else None, "label": label,
+           "library": library.model_dump() if library else None}
+    if origin == "media":  # key only for media so existing record shapes stay byte-identical
+        ref["media_id"] = media_id
+    return ref
 
 
 def resolve_new(ctx: ProjectContext, item_id: str, refs: list[NewReference]) -> list[dict[str, Any]]:
@@ -126,7 +142,7 @@ def resolve_new(ctx: ProjectContext, item_id: str, refs: list[NewReference]) -> 
     if len(refs) > MAX_REFERENCES:
         raise ApiError(422, "too_many_references", f"at most {MAX_REFERENCES} references per item")
     return [new_reference(ctx, item_id, n + 1, artifact_id=r.artifact_id, library=None, note=r.note, crop=r.crop,
-                          label=r.label) for n, r in enumerate(refs)]
+                          label=r.label, media_id=r.media_id) for n, r in enumerate(refs)]
 
 
 def _change(studio: Studio, ctx: ProjectContext, job_id: str, item_id: str, expected: int, fn: Any) -> dict[str, Any]:
@@ -148,7 +164,8 @@ def add_reference(studio: Studio, ctx: ProjectContext, job_id: str, item_id: str
         if len(item.references) >= MAX_REFERENCES:
             raise ApiError(422, "too_many_references", f"at most {MAX_REFERENCES} references per item")
         ref = new_reference(ctx, item.id, item.references_revision + 1, artifact_id=req.artifact_id,
-                            library=req.library, note=req.note, crop=req.crop, label=req.label)
+                            library=req.library, note=req.note, crop=req.crop, label=req.label,
+                            media_id=req.media_id)
         item.references = [*item.references, ref]
         item.references_revision += 1
     return _change(studio, ctx, job_id, item_id, req.expected_item_revision, fn)

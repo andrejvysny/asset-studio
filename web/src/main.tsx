@@ -26,6 +26,7 @@ import { Runtime } from "./screens/Runtime";
 import { Schema } from "./screens/Schema";
 import { Shell } from "./screens/Shell";
 import { ShotList } from "./screens/ShotList";
+import { Media } from "./screens/Media";
 import { Storage } from "./screens/Storage";
 import { Style } from "./screens/Style";
 
@@ -55,6 +56,7 @@ const router = createBrowserRouter([
       { path: "assets/:assetId", element: <AssetDetail /> },
       { path: "assets/:assetId/variants", element: <CreateVariants /> },
       { path: "shots", element: <ShotList /> },
+      { path: "media", element: <Media /> },
       { path: "jobs", element: <Jobs /> },
       { path: "jobs/new", element: <NewJob /> },
       { path: "jobs/:jobId", element: <JobWorkspace /> },

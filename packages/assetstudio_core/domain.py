@@ -122,6 +122,30 @@ class AssetFamily(Record):
     created_by_op: str
 
 
+class MediaItem(Record):
+    """A project media-library image: guidance-only brainstorm reference, never a production asset. Identity is the
+    content sha256 (id derived from it), so re-uploading the same bytes is the same item."""
+
+    id: str
+    artifact_id: str
+    sha256: str
+    thumb_artifact_id: str
+    name: str = Field(min_length=1, max_length=120)
+    note: str = Field(default="", max_length=2000)
+    tags: list[str] = Field(default=[], max_length=20)
+    source_rights: str = Field(default="unknown", max_length=200)
+    source_url: str = Field(default="", max_length=500)
+    format: str
+    width: int
+    height: int
+    size: int
+    has_alpha: bool
+    created_at: str
+    updated_at: str
+    archived_at: str | None = None
+    revision: int = 1
+
+
 class ShotItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str

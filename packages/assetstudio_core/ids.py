@@ -11,6 +11,8 @@ PREFIXES = {
     "job", "bch", "brn", "wav", "stk", "pas", "att", "sty", "san", "xpl", "xrn", "cmd", "sel", "upl", "aud",
     # Variants/families milestone.
     "fam", "vdr", "vpl", "srs", "vsa", "div", "row", "jrf",
+    # Media library.
+    "med",
 }
 JOB_PREFIXES = ("job", "bat")
 _ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32, lowercase

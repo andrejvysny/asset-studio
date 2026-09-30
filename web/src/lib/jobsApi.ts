@@ -25,8 +25,8 @@ export const runJob = (project: string, jobId: string, idempotencyKey: string = 
 export const uploadReference = (project: string, file: File) =>
   upload<{ artifact_id: string; sha256: string }>(`${P(project)}/references:upload`, file);
 export type AddReferenceBody = { note?: string; crop?: Crop; label?: string; expected_item_revision: number } & (
-  { artifact_id: string; library?: never } | { library: { asset_id: string; version_id: string; role?: "image" | "preview" };
-    artifact_id?: never });
+  { artifact_id: string; library?: never; media_id?: never } | { media_id: string; artifact_id?: never; library?: never } |
+  { library: { asset_id: string; version_id: string; role?: "image" | "preview" }; artifact_id?: never; media_id?: never });
 /** 422 `too_many_references` / `invalid_crop`; 409 `busy` while generating; 409 `stale_item`. */
 export const addReference = (project: string, jobId: string, itemId: string, body: AddReferenceBody) =>
   send<ReferencesState>("POST", `${item(project, jobId, itemId)}:add-reference`, body);

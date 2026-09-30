@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from . import errors
 from .coordinator.runner import Coordinator
 from .journal import IdempotencyConflict
-from .routers import batches, batches_v2, jobs, library, projects, variant_plans, variants
+from .routers import batches, batches_v2, jobs, library, media, projects, variant_plans, variants
 from .settings import Settings
 from .studio import Studio, build_studio
 
@@ -57,6 +57,7 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None) -
 
     app.include_router(projects.router)
     app.include_router(library.router)
+    app.include_router(media.router)
     app.include_router(batches.router)
     app.include_router(projects.v2)
     app.include_router(jobs.router)

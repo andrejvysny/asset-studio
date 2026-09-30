@@ -1,3 +1,18 @@
+# TODO — Media Library (2026-09-29)
+
+Plan: ~/.claude/plans/do-thorough-analysis-of-toasty-iverson.md. Owner: images only (PNG/JPEG/WebP), flat + search + tags,
+guidance-only refs, soft archive, reference uploads auto-added, picker in New Job/Job refs/Style + "New Job from media".
+
+- [x] Phase 1 backend: `med` id, MediaItem, storage/media.py, services/media.py, routers/media.py, references media_id,
+      references:upload auto-add, counts.media, contract tests
+- [x] Phase 2 web: mediaApi, Media + MediaPreview screens, MediaPicker, NewJob/ReferencesPanel/Style wiring, nav/route
+- [x] Phase 3 e2e test_ui_media.py + docs (architecture source-of-truth, SPEC record)
+
+Result: lint clean, 369 backend + 29 e2e pass, web build ok. Not committed.
+Follow-ups:
+- [ ] re-upload of an archived item reports "duplicate" but stays hidden (offer restore)
+- [ ] download filename lacks extension (`reference-<sha12>`); use media name + format
+
 # TODO — Hardening pass (review of 8de5fe8, 2026-09-29)
 
 Review: "AssetStudio — Master review, correctness findings and hardening plan" (R01–R11). All 11 findings

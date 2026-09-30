@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..errors import ApiError
 from ..registry import ProjectContext
+from ..services import media as media_svc
 from ..services import runtime as runtime_svc
 from ..services.jobs import list_jobs
 from ..services.library import category_tree
@@ -78,7 +79,7 @@ def summary(ctx: ProjectContext = Depends(project), s: Studio = Depends(studio))
                                                              ("planned", "in_batch")),
                    "shots": len(shots), "jobs": len(jobs), "batches": len(batches),
                    "active_batches": len(active_batches), "categories": len(cfg.categories),
-                   "recipes": len(RECIPES)},
+                   "recipes": len(RECIPES), "media": media_svc.count_active(ctx)},
         # A Job waiting at a gate is counted once, whether or not its Batch also waits (no double counting).
         "waiting": {"jobs": len(waiting), "batches": len(waiting),
                     "items": sum(j["counts"]["items"] for j in waiting),
