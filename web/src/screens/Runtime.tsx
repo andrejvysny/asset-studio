@@ -1,3 +1,4 @@
+import { RunnersPanel } from "../components/RunnersPanel";
 import { Bar, BAD, bytes, ErrorLine, INFO, Loading, NONE, OK, PageHead, relTime, WARN } from "../components/ui";
 import { type Runtime as RT, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
@@ -35,6 +36,7 @@ export function Runtime() {
           );
         })}
       </div>
+      <RunnersPanel />
       <div>
         <div className="label" style={{ marginBottom: 8 }}>Recent model passes (stage work grouped by model residency across Jobs)</div>
         {!d.coordinator?.passes.length ? <div className="empty">No passes yet.</div> : (

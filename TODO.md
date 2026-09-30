@@ -12,7 +12,7 @@ Phase 0 — baseline, hardening, specs, scaffold
 Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
 - [x] WP1.1 protocol DTOs · [x] WP1.2 stores (auth.sqlite, journal v4) · [x] WP1.3 runner API + auth
 - [x] WP1.4 registry + placement · [x] WP1.5 attempt service · [x] WP1.6 client + runner skeleton + e2e over HTTP
-- [ ] WP1.7 web: generated types + Runners panel
+- [x] WP1.7 web: generated types + Runners panel
 
 Phase 2 — extract compute, single machine, public profile
 - [x] WP2.0 pin model hashes (already pinned; guard test) · [ ] WP2.1 move execution code · [x] WP2.1b lease hardening · [ ] WP2.2 runner runtime

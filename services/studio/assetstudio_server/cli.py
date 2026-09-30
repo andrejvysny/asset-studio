@@ -231,6 +231,33 @@ def cmd_runners(s: Settings, a: argparse.Namespace) -> int:
     return 0
 
 
+def build_openapi() -> dict:
+    """OpenAPI schema of a throwaway app: temp instance dir, no coordinator, never touches real state."""
+    import tempfile
+    from dataclasses import replace
+
+    from .main import create_app
+
+    with tempfile.TemporaryDirectory(prefix="assetstudio-openapi-") as tmp:
+        root = Path(tmp)
+        s = replace(Settings(), instance_dir=root / "instance", project_roots=[root / "projects"],
+                    engine="none", start_coordinator=False)
+        s.ensure()
+        app = create_app(s)
+        schema = app.openapi()
+        app.state.studio.close()
+    return schema
+
+
+def cmd_openapi(_: Settings, a: argparse.Namespace) -> int:
+    text = json.dumps(build_openapi(), indent=2, sort_keys=True) + "\n"
+    if a.out:
+        Path(a.out).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="assetstudio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -297,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
     rr = rn.add_parser("revoke")
     rr.add_argument("runner")
     rr.set_defaults(fn=cmd_runners)
+    oa = sub.add_parser("openapi", help="write Studio's OpenAPI schema (default: stdout)")
+    oa.add_argument("--out", help="file to write")
+    oa.set_defaults(fn=cmd_openapi)
     args = p.parse_args(argv)
     if args.cmd == "serve":
         from .main import run

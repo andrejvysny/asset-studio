@@ -11,7 +11,7 @@ NODE_RUN = docker run --rm -v "$$PWD/web":/web -w /web docker.io/library/node:22
 endif
 PY = uv run
 
-.PHONY: help doctor build up down logs ps models verify verify-full test lint web-build \
+.PHONY: help doctor build up down logs ps models verify verify-full test lint web-build web-types \
         e2e acceptance-cpu acceptance-gpu acceptance-offline lock-comfyui
 
 help:         ; @grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | tr '\n' ' '; echo
@@ -29,6 +29,10 @@ lint:         ; $(PY) ruff check packages services/studio services/compute_node 
 test:         ; $(PY) pytest -q
 # Frontend: built in a Node container (no Node needed on the host).
 web-build:    ; $(NODE_RUN) sh -c "npm ci --no-audit --no-fund && npx tsc -b --noEmit && npx vite build"
+# Regenerate the committed OpenAPI schema + TS types (tests/unit/test_openapi_fresh.py fails when stale).
+web-types:
+	$(PY) assetstudio openapi --out web/src/lib/generated/openapi.json
+	$(NODE_RUN) npm run gen:api
 e2e: web-build
 	uv run --group e2e python -m playwright install chromium && uv run --group e2e pytest tests/e2e -v -m e2e
 acceptance-cpu: lint test web-build e2e
