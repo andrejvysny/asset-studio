@@ -15,6 +15,65 @@ class GlbRejected(ValueError):
     pass
 
 
+# glTF 2.0 shapes of every field our readers touch (glb, transforms, render_materials). A wrong shape is a
+# controlled rejection here, instead of an AttributeError/TypeError deep inside a reader.
+_ARRAYS = ("accessors", "animations", "buffers", "bufferViews", "cameras", "images", "materials", "meshes", "nodes",
+           "samplers", "scenes", "skins", "textures")
+_INT, _NUM, _STR, _OBJ, _INTS, _NUMS, _LIST = "int", "number", "string", "object", "int[]", "number[]", "array"
+_FIELDS: dict[str, dict[str, str]] = {
+    "accessors": {"bufferView": _INT, "byteOffset": _INT, "count": _INT, "componentType": _INT, "type": _STR},
+    "bufferViews": {"buffer": _INT, "byteOffset": _INT, "byteLength": _INT, "byteStride": _INT},
+    "images": {"bufferView": _INT},
+    "materials": {"pbrMetallicRoughness": _OBJ, "alphaMode": _STR, "alphaCutoff": _NUM},
+    "meshes": {"primitives": _LIST},
+    "nodes": {"children": _INTS, "mesh": _INT, "skin": _INT, "matrix": _NUMS, "translation": _NUMS,
+              "rotation": _NUMS, "scale": _NUMS, "weights": _NUMS},
+    "samplers": {"wrapS": _INT, "wrapT": _INT},
+    "scenes": {"nodes": _INTS},
+}
+_PRIMITIVE = {"attributes": _OBJ, "indices": _INT, "material": _INT, "mode": _INT, "targets": _LIST}
+
+
+def _is(value: Any, shape: str) -> bool:
+    number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    return {_INT: isinstance(value, int) and not isinstance(value, bool), _NUM: number, _STR: isinstance(value, str),
+            _OBJ: isinstance(value, dict), _LIST: isinstance(value, list),
+            _INTS: isinstance(value, list) and all(_is(v, _INT) for v in value),
+            _NUMS: isinstance(value, list) and all(_is(v, _NUM) for v in value)}[shape]
+
+
+def _check_fields(obj: dict[str, Any], fields: dict[str, str], where: str) -> None:
+    for key, shape in fields.items():
+        if key in obj and not _is(obj[key], shape):
+            raise GlbRejected(f"{where}.{key} must be {'an' if shape[0] in 'aio' else 'a'} {shape}")
+
+
+def check_document_shape(doc: dict[str, Any]) -> None:
+    """Raise GlbRejected (with the offending JSON path) when a glTF field has the wrong JSON type."""
+    if "asset" in doc and not isinstance(doc["asset"], dict):
+        raise GlbRejected("asset must be an object")
+    if "scene" in doc and not _is(doc["scene"], _INT):
+        raise GlbRejected("scene must be an int")
+    for key in ("extensionsRequired", "extensionsUsed"):
+        if key in doc and not (isinstance(doc[key], list) and all(isinstance(v, str) for v in doc[key])):
+            raise GlbRejected(f"{key} must be an array of strings")
+    for section in _ARRAYS:
+        entries = doc.get(section)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            raise GlbRejected(f"{section} must be an array")
+        for i, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                raise GlbRejected(f"{section}[{i}] must be an object")
+            _check_fields(entry, _FIELDS.get(section, {}), f"{section}[{i}]")
+    for mi, mesh in enumerate(doc.get("meshes") or []):
+        for pi, prim in enumerate(mesh.get("primitives") or []):
+            if not isinstance(prim, dict):
+                raise GlbRejected(f"meshes[{mi}].primitives[{pi}] must be an object")
+            _check_fields(prim, _PRIMITIVE, f"meshes[{mi}].primitives[{pi}]")
+
+
 def inspect_container(data: bytes) -> dict[str, Any]:
     """Validate the GLB binary layout and reject any external or non-data URI reference."""
     if len(data) > MAX_GLB_BYTES:
@@ -35,17 +94,17 @@ def inspect_container(data: bytes) -> dict[str, Any]:
         raise GlbRejected(f"invalid JSON chunk: {e}") from e
     if not isinstance(doc, dict):
         raise GlbRejected("JSON chunk is not an object")
+    check_document_shape(doc)
     for section in ("buffers", "images"):
-        for i, entry in enumerate(doc.get(section, []) or []):
-            uri = entry.get("uri") if isinstance(entry, dict) else None
-            if uri is not None:
+        for i, entry in enumerate(doc.get(section) or []):
+            if entry.get("uri") is not None:
                 raise GlbRejected(f"{section}[{i}] has a URI reference; only self-contained GLB is accepted")
     return {
         "generator": (doc.get("asset") or {}).get("generator"),
-        "meshes": len(doc.get("meshes", []) or []),
-        "materials": len(doc.get("materials", []) or []),
-        "images": len(doc.get("images", []) or []),
-        "extensions_required": doc.get("extensionsRequired", []),
+        "meshes": len(doc.get("meshes") or []),
+        "materials": len(doc.get("materials") or []),
+        "images": len(doc.get("images") or []),
+        "extensions_required": doc.get("extensionsRequired") or [],
     }
 
 

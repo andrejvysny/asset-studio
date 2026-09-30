@@ -13,6 +13,8 @@ from typing import Any
 import numpy as np
 import trimesh
 
+from .glb import GlbRejected, check_document_shape
+
 UNTEXTURED = np.float32(190 / 255)  # flat grey base when a material has no colour at all
 SUPPORTED_EXTENSIONS = frozenset({"KHR_materials_emissive_strength", "KHR_materials_ior", "KHR_materials_specular",
                                   "KHR_lights_punctual", "KHR_materials_variants"})
@@ -101,7 +103,13 @@ def gltf_json(data: bytes) -> dict[str, Any]:
         doc = json.loads(data[20:20 + jlen])
     except (struct.error, ValueError):
         return {}
-    return doc if isinstance(doc, dict) else {}
+    if not isinstance(doc, dict):
+        return {}
+    try:
+        check_document_shape(doc)
+    except GlbRejected:
+        return {}  # same as unreadable JSON: no extension/sampler facts
+    return doc
 
 
 def check_required(doc: dict[str, Any]) -> None:
