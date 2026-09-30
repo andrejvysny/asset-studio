@@ -236,8 +236,11 @@ models, active attempts, unsynced spool bytes, upload progress, recent errors, a
 
 ## R14 Resource budgets on a public endpoint
 
-- Unauthenticated endpoints (`register`, `challenge`): per-IP rate limits in Traefik and an in-app token bucket;
-  outstanding nonces are capped; failure audit rows are aggregated with bounded retention.
+- Unauthenticated endpoints (`register`, `token/challenge`, `token`): per-IP rate limits in Traefik and an in-app
+  token bucket per (endpoint, IP) (`STUDIO_RATELIMIT_PER_MIN`=10, `STUDIO_RATELIMIT_BURST`=5; 429 `resource_exhausted`
+  with `Retry-After`; LRU of 10k buckets); outstanding nonces are capped; `register_refused`/`token_refused` audit rows
+  are aggregated to one row per (event, IP) per minute with a `count`. The client IP is the socket peer, or the first
+  `X-Forwarded-For` hop only when the proxy secret header is valid.
 - Storage: global, project and runner byte quotas; reservation before upload; a **disk reserve** below which uploads
   are refused so journal and control writes always succeed. Rejected and quarantined bytes count against quota.
 - CPU and memory: semaphores bound concurrent finalize/hash work and in-flight remote-result bytes (remote adapters
@@ -264,6 +267,27 @@ orphaned; otherwise startup is refused. The journal refuses to open a schema ver
 
 A route-table dependency (method + path group) enforces roles and fails closed for unmapped mutating routes. In
 profile S (loopback, no proxy) the local operator is `owner`.
+
+Identity: `STUDIO_AUTH_MODE=local|proxy` (default `local`). In `proxy` mode Studio refuses to start without
+`STUDIO_PROXY_SECRET` (or `_FILE`); every `/api/` request except `/api/runner/*` and `/api/health` must carry
+`X-AssetStudio-Proxy-Secret` (constant-time compare, else 401), `Remote-User` (else 401) and a `Remote-Groups` entry
+mapped by `STUDIO_ROLE_GROUPS` (default `owner:assetstudio-owners,reviewer:assetstudio-reviewers,
+viewer:assetstudio-viewers`; highest mapped role wins, none = 403). The audit actor is the `Remote-User` value
+(`operator` in local mode). The table lives in `operator_auth.ROLE_RULES`; `tests/unit/test_operator_auth.py` fails
+when a mutating route matches no rule.
+
+### Appendix: route to role
+
+GET/HEAD/OPTIONS are `viewer`, except `GET /api/v1/audit` (`owner`). Mutating routes (`{p}` = `/api/v1|v2/projects/{id}`):
+
+| Role | Routes |
+|---|---|
+| `reviewer` | `POST {p}/(batches\|jobs\|runs)/{id}:{edit-prompts, confirm-and-generate, confirm-prompts, mark-regenerate, regenerate, approve-candidates, clear-approval, preview-best, build-approved, accept-builds, publish}`; `POST {p}/runs/{id}:{pause, resume, cancel, close}`; `POST {p}/variant-plans/{id}:compare-selection` |
+| `owner` | project create/register, `config`, `config:validate`, `storage:test`, `storage:rebuild-index`; `POST /api/v1/runtime/lanes/{lane}:reset`; operation and task `:cancel`/`:retry`; families, assets and `:set-current`; imports, shot list, references and media upload/edit/archive/restore; job and batch create, update, `:plan`, `:start`, `:run`, `:cancel`, `:enhance`, `:reexport`, `:run-transform`, `:retry-preview`, item reference and preset edits; variant drafts (all actions); `POST /api/v1/runner-groups`, `.../registration-tokens`, `/runners/{id}:revoke`, `PUT /runners/{id}/push-url`, `/attempts/{id}:declare-lost` |
+| unmapped | any other mutating route: `owner` (fail closed) |
+
+Execution switch is a CLI command (`assetstudio execution switch`), not an HTTP route. Task and operation cancel/retry
+are `owner` for now (conservative); promote them to `reviewer` if reviewers need to unstick their own waves.
 
 ## R17 HTTP surface (`/api/runner/v1`)
 

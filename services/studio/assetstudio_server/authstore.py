@@ -10,8 +10,10 @@ import os
 import secrets
 import sqlite3
 import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
@@ -21,6 +23,21 @@ from assetstudio_core.ids import new_id
 
 SCHEMA_VERSION = 1
 MAX_REGISTRATION_TTL_S = 3600
+# Unauthenticated failures an attacker can trigger at will: one audit row per (event, client ip) per window (R14).
+AGGREGATED_EVENTS = frozenset({"register_refused", "token_refused"})
+AGGREGATE_WINDOW_S = 60
+AGGREGATE_MAX_KEYS = 10_000
+_CLIENT_IP: ContextVar[str | None] = ContextVar("auth_client_ip", default=None)
+
+
+@contextmanager
+def client_ip(ip: str) -> Iterator[None]:
+    """Tag audit rows written by the wrapped (same-thread) call with the requesting IP."""
+    token = _CLIENT_IP.set(ip)
+    try:
+        yield
+    finally:
+        _CLIENT_IP.reset(token)
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS runner_groups (
@@ -94,6 +111,7 @@ class AuthStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._now = now
         self._lock = threading.RLock()
+        self._agg: OrderedDict[tuple[str, str], tuple[datetime, int]] = OrderedDict()  # (event, ip) -> (start, seq)
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
@@ -271,9 +289,35 @@ class AuthStore:
     # --- audit ---------------------------------------------------------------------------------------------------
     def audit(self, event: str, actor: str, runner_id: str | None = None,
               detail: dict[str, Any] | None = None) -> None:
+        ip = _CLIENT_IP.get()
+        if event in AGGREGATED_EVENTS and ip is not None:
+            self._audit_aggregated(event, actor, runner_id, {**(detail or {}), "ip": ip}, ip)
+            return
         with self._txn() as db:
-            db.execute("INSERT INTO audit(at, actor, event, runner_id, detail) VALUES (?,?,?,?,?)",
-                       (self._stamp(), actor, event, runner_id, json.dumps(detail or {})))
+            self._insert_audit(db, event, actor, runner_id, detail or {})
+
+    def _insert_audit(self, db: sqlite3.Connection, event: str, actor: str, runner_id: str | None,
+                      detail: dict[str, Any]) -> int:
+        cur = db.execute("INSERT INTO audit(at, actor, event, runner_id, detail) VALUES (?,?,?,?,?)",
+                         (self._stamp(), actor, event, runner_id, json.dumps(detail)))
+        return int(cur.lastrowid or 0)
+
+    def _audit_aggregated(self, event: str, actor: str, runner_id: str | None, detail: dict[str, Any],
+                          ip: str) -> None:
+        key, now = (event, ip), self._now()
+        with self._txn() as db:
+            start, seq = self._agg.get(key, (now, 0))
+            row = db.execute("SELECT detail FROM audit WHERE seq=?", (seq,)).fetchone() if seq else None
+            if row is not None and (now - start).total_seconds() < AGGREGATE_WINDOW_S:
+                merged = json.loads(row["detail"])
+                merged["count"] = merged.get("count", 1) + 1
+                db.execute("UPDATE audit SET detail=? WHERE seq=?", (json.dumps(merged), seq))
+                return
+            seq = self._insert_audit(db, event, actor, runner_id, {**detail, "count": 1})
+            self._agg.pop(key, None)
+            self._agg[key] = (now, seq)
+            while len(self._agg) > AGGREGATE_MAX_KEYS:
+                self._agg.popitem(last=False)
 
     def audit_log(self, limit: int = 200, runner_id: str | None = None) -> list[dict[str, Any]]:
         sql, args = "SELECT * FROM audit", []

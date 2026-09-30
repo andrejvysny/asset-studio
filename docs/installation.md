@@ -48,6 +48,46 @@ Troubleshooting:
 - `forbidden_scope` on inventory: the GPU UUID is already claimed by another runner (one runner per host; check for a
   stale runner from another machine or name).
 
+## Public Studio (VPS) with home runners
+
+Profile P (`docs/modular/compute-runner.md` R11, R14, R16): Studio on a VPS behind Traefik + Authelia; GPU runners
+stay at home and connect outbound. Traefik and Authelia are external to these files.
+
+Steps:
+1. Secrets on the VPS: `mkdir -p secrets && openssl rand -hex 32 > secrets/studio_proxy_secret && chmod 600 secrets/*`.
+   Export the same value for the Traefik labels: `export STUDIO_PROXY_SECRET=$(cat secrets/studio_proxy_secret)`.
+2. Set `STUDIO_HOST=studio.example.com` (and optionally `TRAEFIK_CERTRESOLVER`, `TRAEFIK_ENTRYPOINT`,
+   `AUTHELIA_MIDDLEWARE`, `PROXY_NETWORK`); the Traefik container must share the `proxy` network.
+3. Start: `docker compose -f compose.yml -f compose.nodes.yml -f compose.public.yml up -d`.
+4. Authelia access control (groups match `STUDIO_ROLE_GROUPS`; owner/reviewer/viewer map to `assetstudio-owners`,
+   `assetstudio-reviewers`, `assetstudio-viewers`):
+   ```yaml
+   access_control:
+     rules:
+       - {domain: studio.example.com, resources: ['^/api/runner/.*$'], policy: bypass}
+       - {domain: studio.example.com, policy: two_factor, subject: ['group:assetstudio-owners', 'group:assetstudio-reviewers', 'group:assetstudio-viewers']}
+   ```
+   Forward-auth must pass `Remote-User` and `Remote-Groups` (`authResponseHeaders`). Do not let Traefik trust
+   `X-Forwarded-For` from the internet (the default) or per-IP limits can be spoofed.
+5. Register a home runner: as an owner open Runtime -> Compute runners, create a runner group and a registration token,
+   put the token in `secrets/runner_registration_token` on the runner host, edit `studio_url`, `name` and GPU
+   indices in `config/runner.remote.yaml`, then `docker compose -f compose.node-remote.yml up -d`.
+   The runner connects outbound only (`dispatch: pull`).
+
+Exposed: the browser UI and operator API (Authelia two-factor, role per group), and `/api/runner/*` (no Authelia;
+runner signatures, single-use registration tokens, per-IP limits in Traefik and Studio, transfer in-flight limit).
+Studio publishes no host port.
+
+Security notes:
+- Never expose Studio without the proxy secret: without it `STUDIO_AUTH_MODE=proxy` refuses to start, and requests
+  that reach Studio without the secret get 401. Never run `STUDIO_AUTH_MODE=local` on a reachable address.
+- The secret sits in Traefik labels (visible to anyone who can inspect Docker); keep the VPS Docker socket private.
+  Rotate it by changing both places and recreating Studio and Traefik routers.
+- Registration tokens are single-use and short-lived (<= 1 h); access tokens are short-lived; rotate by revoking.
+- Lost or stolen runner host: Runtime -> runner -> Revoke (or `assetstudio runners revoke <id>`); declare its
+  uncertain attempts lost. The audit view (owners): `GET /api/v1/audit?limit=200&runner_id=`.
+- Runner state and keys never leave the runner host; do not copy `runner-state` between machines.
+
 ## Operations
 
 | Command | Purpose |

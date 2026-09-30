@@ -1,0 +1,76 @@
+# Profile P: Studio published on a VPS behind Traefik + Authelia (docs/installation.md "Public Studio (VPS)").
+#   docker compose -f compose.yml -f compose.nodes.yml -f compose.public.yml up -d
+# Traefik and Authelia run elsewhere (external); Studio only joins the `proxy` network Traefik watches.
+# Needs Docker Compose >= 2.24 (`!reset`). Required env: STUDIO_HOST, STUDIO_PROXY_SECRET (same value as the
+# secret file: `export STUDIO_PROXY_SECRET=$(cat secrets/studio_proxy_secret)`).
+# Optional: TRAEFIK_ENTRYPOINT, TRAEFIK_CERTRESOLVER, AUTHELIA_MIDDLEWARE, PROXY_NETWORK.
+
+services:
+  studio:
+    ports: !reset []   # no host port: only Traefik reaches Studio, over the proxy network
+    environment:
+      STUDIO_AUTH_MODE: proxy
+      STUDIO_PROXY_SECRET_FILE: /run/secrets/studio_proxy_secret
+      STUDIO_PUBLIC_URL: https://${STUDIO_HOST:?set STUDIO_HOST}   # audience remote runners sign
+    secrets:
+      - source: studio_proxy_secret
+        target: /run/secrets/studio_proxy_secret
+    networks: [internal, public, proxy]
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${PROXY_NETWORK:-proxy}
+      traefik.http.services.assetstudio.loadbalancer.server.port: "8190"
+
+      # Shared: drop anything the client sent, then stamp the proxy secret. Studio trusts Remote-User/Remote-Groups
+      # (and the last X-Forwarded-For hop) only when the secret matches. Authelia re-adds Remote-* after this.
+      traefik.http.middlewares.assetstudio-headers.headers.customrequestheaders.Remote-User: ""
+      traefik.http.middlewares.assetstudio-headers.headers.customrequestheaders.Remote-Groups: ""
+      traefik.http.middlewares.assetstudio-headers.headers.customrequestheaders.X-AssetStudio-Proxy-Secret: ${STUDIO_PROXY_SECRET:?set STUDIO_PROXY_SECRET}
+
+      # Browser + operator API: Authelia forward-auth.
+      traefik.http.routers.assetstudio.rule: Host(`${STUDIO_HOST}`)
+      traefik.http.routers.assetstudio.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio.middlewares: assetstudio-headers,${AUTHELIA_MIDDLEWARE:-authelia@docker}
+      traefik.http.routers.assetstudio.service: assetstudio
+
+      # Runner protocol: bearer/signature auth in Studio, so NO Authelia. Higher priority than the catch-all.
+      traefik.http.routers.assetstudio-runner.rule: Host(`${STUDIO_HOST}`) && PathPrefix(`/api/runner/`)
+      traefik.http.routers.assetstudio-runner.priority: "100"
+      traefik.http.routers.assetstudio-runner.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio-runner.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio-runner.middlewares: assetstudio-headers,assetstudio-runner-rl,assetstudio-runner-inflight
+      traefik.http.routers.assetstudio-runner.service: assetstudio
+      traefik.http.middlewares.assetstudio-runner-rl.ratelimit.average: "50"
+      traefik.http.middlewares.assetstudio-runner-rl.ratelimit.period: 1s
+      traefik.http.middlewares.assetstudio-runner-rl.ratelimit.burst: "100"
+      traefik.http.middlewares.assetstudio-runner-inflight.inflightreq.amount: "50"
+
+      # Unauthenticated endpoints (register, token/challenge, token): strict per-IP limit; Studio adds its own bucket.
+      traefik.http.routers.assetstudio-runner-open.rule: Host(`${STUDIO_HOST}`) && (PathPrefix(`/api/runner/v1/register`) || PathPrefix(`/api/runner/v1/token`))
+      traefik.http.routers.assetstudio-runner-open.priority: "120"
+      traefik.http.routers.assetstudio-runner-open.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio-runner-open.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio-runner-open.middlewares: assetstudio-headers,assetstudio-runner-open-rl,assetstudio-runner-inflight
+      traefik.http.routers.assetstudio-runner-open.service: assetstudio
+      traefik.http.middlewares.assetstudio-runner-open-rl.ratelimit.average: "10"
+      traefik.http.middlewares.assetstudio-runner-open-rl.ratelimit.period: 1m
+      traefik.http.middlewares.assetstudio-runner-open-rl.ratelimit.burst: "5"
+
+      # Bulk transfers: own in-flight limit so chunk uploads/input downloads never starve control calls.
+      traefik.http.routers.assetstudio-runner-transfer.rule: Host(`${STUDIO_HOST}`) && (PathPrefix(`/api/runner/v1/uploads`) || PathRegexp(`^/api/runner/v1/attempts/[^/]+/inputs/`))
+      traefik.http.routers.assetstudio-runner-transfer.priority: "110"
+      traefik.http.routers.assetstudio-runner-transfer.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio-runner-transfer.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio-runner-transfer.middlewares: assetstudio-headers,assetstudio-transfer-inflight
+      traefik.http.routers.assetstudio-runner-transfer.service: assetstudio
+      traefik.http.middlewares.assetstudio-transfer-inflight.inflightreq.amount: "4"
+
+secrets:
+  studio_proxy_secret:
+    file: ./secrets/studio_proxy_secret
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}

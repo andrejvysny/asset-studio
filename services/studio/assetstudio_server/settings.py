@@ -18,6 +18,30 @@ def _int(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
+def _secret(name: str) -> str:
+    """`NAME` wins; otherwise `NAME_FILE` (a mounted secret) is read and stripped."""
+    value = os.environ.get(name, "")
+    path = os.environ.get(f"{name}_FILE", "")
+    if not value and path:
+        value = Path(path).read_text().strip()
+    return value
+
+
+DEFAULT_ROLE_GROUPS = "owner:assetstudio-owners,reviewer:assetstudio-reviewers,viewer:assetstudio-viewers"
+ROLES = ("viewer", "reviewer", "owner")
+
+
+def parse_role_groups(raw: str) -> dict[str, str]:
+    """`role:group,role:group` -> {role: group}. A malformed pair or unknown role refuses startup."""
+    out: dict[str, str] = {}
+    for pair in filter(None, (p.strip() for p in raw.split(","))):
+        role, _, group = pair.partition(":")
+        if role not in ROLES or not group:
+            raise ValueError(f"STUDIO_ROLE_GROUPS: bad pair {pair!r} (roles: {', '.join(ROLES)})")
+        out[role] = group
+    return out
+
+
 @dataclass
 class Settings:
     instance_dir: Path = field(
@@ -62,6 +86,23 @@ class Settings:
     # Concurrent chunk uploads + input downloads; beyond it they get 503 so control routes never starve (R14).
     transfer_concurrency: int = field(default_factory=lambda: _int("STUDIO_TRANSFER_CONCURRENCY", 4))
     disk_floor_bytes: int = field(default_factory=lambda: _int("STUDIO_DISK_FLOOR_BYTES", 2 * 1024**3))
+    # Operator identity (docs/modular/compute-runner.md R11, R16): "local" = loopback profile S, the local operator is
+    # owner; "proxy" = profile P behind Traefik + Authelia, identity headers trusted only with the shared secret.
+    auth_mode: str = field(default_factory=lambda: os.environ.get("STUDIO_AUTH_MODE", "local"))
+    proxy_secret: str = field(default_factory=lambda: _secret("STUDIO_PROXY_SECRET"))
+    proxy_user_header: str = "Remote-User"
+    proxy_groups_header: str = "Remote-Groups"
+    role_groups: dict[str, str] = field(default_factory=lambda: parse_role_groups(
+        os.environ.get("STUDIO_ROLE_GROUPS", DEFAULT_ROLE_GROUPS)))
+    # Unauthenticated runner endpoints (register, token/challenge, token): token bucket per client IP (R14).
+    ratelimit_per_min: int = field(default_factory=lambda: _int("STUDIO_RATELIMIT_PER_MIN", 10))
+    ratelimit_burst: int = field(default_factory=lambda: _int("STUDIO_RATELIMIT_BURST", 5))
+
+    def validate(self) -> None:
+        if self.auth_mode not in ("local", "proxy"):
+            raise ValueError(f"STUDIO_AUTH_MODE must be 'local' or 'proxy', got {self.auth_mode!r}")
+        if self.auth_mode == "proxy" and not self.proxy_secret:
+            raise ValueError("STUDIO_AUTH_MODE=proxy requires a non-empty STUDIO_PROXY_SECRET (or _FILE)")
 
     def ensure(self) -> None:
         for sub in ("", "index", "staging", "journal"):

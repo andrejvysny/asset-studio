@@ -46,6 +46,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
+from ..authstore import client_ip as audit_client_ip
+from ..ratelimit import TokenBuckets, client_ip
 from ..runner_errors import RunnerError
 from ..services import attempts, runners, transfers
 from ..services._runner_util import load_attempt
@@ -98,19 +100,38 @@ Stu = Depends(studio)
 
 
 # --- unauthenticated ----------------------------------------------------------------------------------------------
+def rate_limited(endpoint: str) -> Any:
+    """R14: per-IP token bucket per unauthenticated endpoint. The dependency returns the client IP, which the
+    endpoint hands to the audit log so refusals aggregate per (event, ip)."""
+    def check(request: Request, s: Studio = Stu) -> str:
+        buckets = s.extras.get("ratelimit")
+        if buckets is None:
+            buckets = s.extras.setdefault(
+                "ratelimit", TokenBuckets(s.settings.ratelimit_per_min, s.settings.ratelimit_burst))
+        ip = client_ip(request, s.settings)
+        wait = buckets.take((endpoint, ip))
+        if wait:
+            raise RunnerError(429, "resource_exhausted", "too many requests; retry later", {"retry_after_s": wait})
+        return ip
+    return Depends(check)
+
+
 @router.post("/register", response_model=RegisterResponse)
-def register(req: RegisterRequest, s: Studio = Stu) -> RegisterResponse:
-    return runners.register(s, req)
+def register(req: RegisterRequest, ip: str = rate_limited("register"), s: Studio = Stu) -> RegisterResponse:
+    with audit_client_ip(ip):
+        return runners.register(s, req)
 
 
 @router.post("/token/challenge", response_model=Challenge)
-def challenge(req: ChallengeRequest, s: Studio = Stu) -> Challenge:
-    return runners.challenge(s, req)
+def challenge(req: ChallengeRequest, ip: str = rate_limited("challenge"), s: Studio = Stu) -> Challenge:
+    with audit_client_ip(ip):
+        return runners.challenge(s, req)
 
 
 @router.post("/token", response_model=AccessToken)
-def token(req: TokenRequest, s: Studio = Stu) -> AccessToken:
-    return runners.issue_token(s, req)
+def token(req: TokenRequest, ip: str = rate_limited("token"), s: Studio = Stu) -> AccessToken:
+    with audit_client_ip(ip):
+        return runners.issue_token(s, req)
 
 
 # --- sessions -----------------------------------------------------------------------------------------------------

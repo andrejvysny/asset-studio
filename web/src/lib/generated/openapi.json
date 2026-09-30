@@ -541,6 +541,23 @@
         "title": "AttemptSummary",
         "type": "object"
       },
+      "AuditList": {
+        "additionalProperties": false,
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/AuditRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "AuditList",
+        "type": "object"
+      },
       "AuditRow": {
         "additionalProperties": false,
         "properties": {
@@ -5785,6 +5802,65 @@
           }
         },
         "summary": "Declare Lost"
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "description": "Owner only (route table). Newest first; unauthenticated refusals are aggregated per (event, ip, minute).",
+        "operationId": "audit_view_api_v1_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "runner_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Runner Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit View"
       }
     },
     "/api/v1/capabilities": {

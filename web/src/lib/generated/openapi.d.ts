@@ -344,6 +344,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Audit View
+         * @description Owner only (route table). Newest first; unauthenticated refusals are aggregated per (event, ip, minute).
+         */
+        get: operations["audit_view_api_v1_audit_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/capabilities": {
         parameters: {
             query?: never;
@@ -2486,6 +2506,11 @@ export interface components {
             task_id: string;
             /** Updated At */
             updated_at: string;
+        };
+        /** AuditList */
+        AuditList: {
+            /** Rows */
+            rows: components["schemas"]["AuditRow"][];
         };
         /** AuditRow */
         AuditRow: {
@@ -4646,6 +4671,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AttemptSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audit_view_api_v1_audit_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                runner_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditList"];
                 };
             };
             /** @description Validation Error */

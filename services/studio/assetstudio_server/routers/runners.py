@@ -1,5 +1,6 @@
 """Operator API for compute runners and their groups (R3, R6). Behind the same CSRF gate as the browser API;
-there is no bearer auth here (profile P fronts it with forward-auth). Audit actor is "operator" until roles land."""
+roles come from `operator_auth` (R16). The audit actor is the proxy-authenticated user; in local mode it stays
+"operator"."""
 from __future__ import annotations
 
 from collections import Counter
@@ -7,10 +8,11 @@ from datetime import timedelta
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..errors import ApiError
+from ..operator_auth import LOCAL_NAME
 from ..services import attempts
 from ..services._runner_util import fmt, now_dt
 from ..services.placement import session_fresh
@@ -20,6 +22,11 @@ from .deps import studio
 router = APIRouter(prefix="/api/v1")
 ACTOR = "operator"
 DETAIL_LIMIT = 50
+
+
+def actor(request: Request) -> str:
+    op = getattr(request.state, "operator", None)
+    return ACTOR if op is None or op.name == LOCAL_NAME else op.name
 
 
 class _Out(BaseModel):
@@ -99,6 +106,10 @@ class AuditRow(_Out):
 class RunnerDetail(RunnerSummary):
     attempts: list[AttemptSummary]
     audit: list[AuditRow]
+
+
+class AuditList(_Out):
+    rows: list[AuditRow]
 
 
 class RunnerList(_Out):
@@ -203,28 +214,29 @@ def list_groups(s: Studio = Depends(studio)) -> GroupList:
 
 
 @router.post("/runner-groups", response_model=GroupOut)
-def create_group(body: GroupCreate, s: Studio = Depends(studio)) -> GroupOut:
+def create_group(body: GroupCreate, request: Request, s: Studio = Depends(studio)) -> GroupOut:
     try:
-        group = s.auth.create_group(body.name, body.projects, body.operations, body.labels, body.ephemeral, ACTOR)
+        group = s.auth.create_group(body.name, body.projects, body.operations, body.labels, body.ephemeral,
+                                    actor(request))
     except ValueError as e:
         raise ApiError(409, "conflict", str(e)) from e
     return GroupOut(**group)
 
 
 @router.post("/runner-groups/{group_id}/registration-tokens", response_model=TokenOut)
-def create_token(group_id: str, body: TokenCreate, s: Studio = Depends(studio)) -> TokenOut:
+def create_token(group_id: str, body: TokenCreate, request: Request, s: Studio = Depends(studio)) -> TokenOut:
     expires = fmt(now_dt() + timedelta(seconds=body.ttl_s))  # the store stamps its own (equal to within ms)
     try:
-        token = s.auth.create_registration_token(group_id, body.ttl_s, ACTOR)
+        token = s.auth.create_registration_token(group_id, body.ttl_s, actor(request))
     except KeyError as e:
         raise ApiError(404, "not_found", f"unknown runner group {group_id}") from e
     return TokenOut(token=token, expires_at=expires, group_id=group_id)
 
 
 @router.post("/runners/{runner_id}:revoke", response_model=RunnerSummary)
-def revoke(runner_id: str, s: Studio = Depends(studio)) -> RunnerSummary:
+def revoke(runner_id: str, request: Request, s: Studio = Depends(studio)) -> RunnerSummary:
     _known_runner(s, runner_id)
-    s.auth.revoke_runner(runner_id, ACTOR)
+    s.auth.revoke_runner(runner_id, actor(request))
     return _summary(s, _known_runner(s, runner_id), _runner_attempts(s, runner_id))
 
 
@@ -238,19 +250,26 @@ def _valid_push_url(url: str) -> bool:
 
 
 @router.put("/runners/{runner_id}/push-url", response_model=RunnerSummary)
-def set_push_url(runner_id: str, body: PushUrl, s: Studio = Depends(studio)) -> RunnerSummary:
+def set_push_url(runner_id: str, body: PushUrl, request: Request, s: Studio = Depends(studio)) -> RunnerSummary:
     _known_runner(s, runner_id)
     if body.url is not None and not _valid_push_url(body.url):
         raise ApiError(422, "invalid_input", "push url must be http(s) without userinfo or fragment")
     s.auth.set_push_url(runner_id, body.url)
-    s.auth.audit("push_url_set", ACTOR, runner_id, {"url": body.url})
+    s.auth.audit("push_url_set", actor(request), runner_id, {"url": body.url})
     return _summary(s, _known_runner(s, runner_id), _runner_attempts(s, runner_id))
 
 
 @router.post("/attempts/{attempt_id}:declare-lost", response_model=AttemptSummary)
-def declare_lost(attempt_id: str, s: Studio = Depends(studio)) -> AttemptSummary:
+def declare_lost(attempt_id: str, request: Request, s: Studio = Depends(studio)) -> AttemptSummary:
     if s.journal.attempts.get(attempt_id) is None:
         raise ApiError(404, "not_found", f"unknown attempt {attempt_id}")
-    if not attempts.declare_lost(s, attempt_id, actor=ACTOR):
+    if not attempts.declare_lost(s, attempt_id, actor=actor(request)):
         raise ApiError(409, "conflict", "only an uncertain attempt can be declared lost")
     return _attempt(s.journal.attempts.get(attempt_id))  # type: ignore[arg-type]
+
+
+@router.get("/audit", response_model=AuditList)
+def audit_view(limit: int = Query(default=200, ge=1, le=1000), runner_id: str | None = None,
+               s: Studio = Depends(studio)) -> AuditList:
+    """Owner only (route table). Newest first; unauthenticated refusals are aggregated per (event, ip, minute)."""
+    return AuditList(rows=[AuditRow(**r) for r in s.auth.audit_log(limit=limit, runner_id=runner_id)])
