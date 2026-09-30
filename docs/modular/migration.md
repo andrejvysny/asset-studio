@@ -98,4 +98,4 @@ under `/api/runner/v1` with their own authentication (R3) and are the only CSRF 
 | WP | Change | Modes | Reason |
 |---|---|---|---|
 | WP0.2 | wrong-shaped glTF JSON is rejected with a field path in every GLB reader | all | A31: previously AttributeError/TypeError |
-| WP2.1b (planned) | `GpuLane.acquire` drains the target worker on an epoch change; `Lease.grant` refuses a new epoch while work is active | all | a surviving request of the target worker could overlap a new grant |
+| WP2.1b | `GpuLane.acquire` drains the target worker too unless it acknowledged a release since (first grant after a restart unloads it once); `Lease.grant` refuses a new epoch while work of an older epoch is active | all | a surviving request of the target worker could overlap a new grant |

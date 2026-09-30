@@ -1,8 +1,9 @@
 """Explicit GPU ownership for a time-shared device. Unknown ownership blocks dispatch; it never implies release.
 
 Fencing: every grant uses a new monotonic epoch (persisted by the caller, so a restarted Studio never reuses one).
-The granted worker only admits requests carrying that epoch; every other worker must have drained (no queued or
-running GPU work) and released its weights for that epoch before the grant happens.
+The granted worker only admits requests carrying that epoch; every worker, the target included unless it already
+acknowledged a release, must have drained (no queued or running GPU work) and released its weights for that epoch
+before the grant happens.
 """
 from __future__ import annotations
 
@@ -67,8 +68,10 @@ class GpuLane:
             if self.owner == worker and self.state == "owned":
                 return self.epoch
             epoch = self.next_epoch()
+            # The target drains too unless it acknowledged a release since: after a restart its old requests may
+            # still run, and a fresh grant must never overlap them.
             for other, w in self.workers.items():
-                if other == worker or other in self.released:
+                if other in self.released:
                     continue
                 try:
                     _check_release(w.unload(self.token, epoch), self.token, epoch)
