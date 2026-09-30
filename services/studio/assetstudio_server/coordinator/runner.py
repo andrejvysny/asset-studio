@@ -289,7 +289,8 @@ class Coordinator:
         measured = {"model_loads": None if before is None or after is None else
                     {k: after.get(k, 0) - before.get(k, 0) for k in after},
                     "previous_residency": prev, "switched": prev not in (None, residency)}
-        session = self.studio.lanes["gpu1"].sessions.get(worker or "") if lane == "gpu1" else None
+        gpu1 = self.studio.lanes.get("gpu1")
+        session = gpu1.sessions.get(worker or "") if lane == "gpu1" and gpu1 is not None else None
         tasks.close_pass(pid, task_ids=done, jobs=jobs, reason=reason, loads_after=after, measured=measured,
                          session=session, epoch=epoch)
         self._current[lane] = {"residency": residency, "pass_id": None, "task": None}
@@ -343,6 +344,7 @@ class Coordinator:
                     hook(env, final, err)
                 except Exception:
                     log.exception("error hook for %s failed", t.id)
+            self._task_finished(t.id, final)
             self._publish(t)
             return final, resource
         from .reconcile import downstream_for
@@ -354,8 +356,15 @@ class Coordinator:
             log.exception("planning downstream of %s failed", t.id)
             follow = None
         final = tasks.complete(t.id, result, follow)
+        self._task_finished(t.id, final)
         self._publish(t)
         return final, False
+
+    def _task_finished(self, task_id: str, state: str) -> None:
+        try:
+            self.studio.execution.task_finished(task_id, state)
+        except Exception:  # custody bookkeeping must never change a task's outcome
+            log.exception("settling execution results of task %s failed", task_id)
 
     def _publish(self, t: StageTask) -> None:
         self.studio.events.publish("task", project_id=t.project_id, job_id=t.job_id, item_id=t.item_id,

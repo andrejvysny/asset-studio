@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("assetstudio.coordinator")
 
-__all__ = ["DirectBackend", "ExecutionBackend"]
+__all__ = ["DirectBackend", "ExecutionBackend", "NodeBackend"]
 
 
 class ExecutionBackend(Protocol):
@@ -36,6 +36,8 @@ class ExecutionBackend(Protocol):
     def generation(self, env: TaskEnv, call_key: str) -> int: ...
 
     def cancel_orphans(self, tasks: list[dict[str, Any]]) -> None: ...
+
+    def task_finished(self, task_id: str, state: str) -> None: ...
 
 
 class DirectBackend:
@@ -78,3 +80,63 @@ class DirectBackend:
                     except Exception as e:  # noqa: BLE001 - unknown outcome: logged, the prompt id stays recorded
                         log.warning("cancel of orphaned prompt %s (task %s) not confirmed: %s",
                                     slot["prompt_id"], t["id"], e)
+
+    def task_finished(self, task_id: str, state: str) -> None:
+        """Direct mode has no attempt custody to settle."""
+
+
+class NodeBackend:
+    """Engine access over runner attempts: adapters are bound per task (`env`), admission is runner-local."""
+
+    mode = "nodes"
+
+    def __init__(self, studio: Studio) -> None:
+        self._studio = studio
+
+    @property
+    def simulated(self) -> bool:
+        return False  # simulation is a property of each result, recorded by the adapters from the runner's meta
+
+    def engine(self, env: TaskEnv | None = None) -> ImageEngine | None:
+        from .remote.image import RemoteImageEngine
+
+        return RemoteImageEngine(self._studio, env)
+
+    def aux(self, env: TaskEnv | None = None) -> AuxService | None:
+        from .remote.aux import RemoteAux
+
+        return RemoteAux(self._studio, env)
+
+    def worker3d(self, env: TaskEnv | None = None) -> Worker3dService | None:
+        from .remote.worker3d import RemoteWorker3d
+
+        return RemoteWorker3d(self._studio, env)
+
+    def acquire(self, lane: str, worker: str) -> int:
+        return 0  # the runner admits GPU work itself; Studio holds no GPU lease
+
+    def generation(self, env: TaskEnv, call_key: str) -> int:
+        latest = self._studio.journal.attempts.latest(env.task.id, call_key)
+        return latest["generation"] if latest is not None else 1
+
+    def cancel_orphans(self, orphans: list[dict[str, Any]]) -> None:
+        """Tasks cancelled while Studio was down: their unfinished attempts are cancelled, results disposed."""
+        from .services import attempts
+        from .services._runner_util import NON_TERMINAL
+
+        for t in orphans:
+            for a in self._studio.journal.attempts.list(task_id=t["id"], states=NON_TERMINAL):
+                if a["state"] == "ingested":
+                    attempts.dispose(self._studio, a["id"], "cancelled")
+                else:
+                    attempts.cancel(self._studio, a["id"])
+
+    def task_finished(self, task_id: str, state: str) -> None:
+        """R8: results of a succeeded task are committed; a failed or cancelled task's results are disposed."""
+        from .services import attempts
+
+        for a in self._studio.journal.attempts.list(task_id=task_id, states=("ingested",)):
+            if state == "succeeded":
+                attempts.commit(self._studio, a["id"])
+            elif state in ("failed", "cancelled"):
+                attempts.dispose(self._studio, a["id"], "rejected" if state == "failed" else "cancelled")

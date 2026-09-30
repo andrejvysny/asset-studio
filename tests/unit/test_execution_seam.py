@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from assetstudio_core.ids import derived_id
 from assetstudio_server.coordinator.runner import TaskEnv
-from assetstudio_server.execution import DirectBackend
+from assetstudio_server.execution import DirectBackend, NodeBackend
 from assetstudio_server.studio import build_studio
 
 from tests.conftest import ROOT, make_settings
@@ -97,8 +97,9 @@ def test_output_id_generations() -> None:
     assert g2.output_id("art", "tsk_1", "0") == legacy  # no call key: never re-placed
 
 
-def test_nodes_mode_not_yet_available(tmp_path: Path) -> None:
+def test_nodes_mode_builds_a_node_backend_without_local_engines(tmp_path: Path) -> None:
     s = make_settings(tmp_path)
     s.execution = "nodes"
-    with pytest.raises(ValueError, match=r"node execution arrives with the remote adapters \(WP2\.4\)"):
-        build_studio(s)
+    studio = build_studio(s)
+    assert isinstance(studio.execution, NodeBackend) and studio.execution.mode == "nodes"
+    assert (studio.engine, studio.aux, studio.worker3d) == (None, None, None) and studio.lanes["gpu1"].sessions == {}

@@ -12,7 +12,7 @@ from .adapters.fake import FakeAux, FakeEngine, FakeWorker3d
 from .adapters.worker3d import Worker3dClient
 from .authstore import AuthStore
 from .events import EventBus
-from .execution import DirectBackend, ExecutionBackend
+from .execution import DirectBackend, ExecutionBackend, NodeBackend
 from .gpu import GpuLane, LaneWorker
 from .journal import Journal
 from .models import HashCache
@@ -49,10 +49,11 @@ class Studio:
 
 def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: AuxService | None = None,
                  worker3d: Worker3dService | None = None) -> Studio:
-    if settings.execution == "nodes":
-        raise ValueError("node execution arrives with the remote adapters (WP2.4); set STUDIO_EXECUTION=direct")
+    nodes = settings.execution == "nodes"
     settings.ensure()
-    if engine is None and aux is None:
+    if nodes:  # engines live on runners: no in-process singletons, no Studio-side GPU sessions
+        engine = aux = worker3d = None
+    elif engine is None and aux is None:
         if settings.engine == "comfyui":
             engine = ComfyEngine(settings.comfy_url, WorkflowRegistry(settings.workflows_dir))
             aux = AuxClient(settings.aux_url)
@@ -67,5 +68,5 @@ def build_studio(settings: Settings, engine: ImageEngine | None = None, aux: Aux
                   auth=AuthStore(settings.instance_dir / "auth.sqlite"), events=EventBus(),
                   engine=engine, aux=aux, worker3d=worker3d, lanes=lanes,
                   hash_cache=HashCache(settings.instance_dir / "model-hashes.json"))
-    studio.execution = DirectBackend(studio)
+    studio.execution = NodeBackend(studio) if nodes else DirectBackend(studio)
     return studio

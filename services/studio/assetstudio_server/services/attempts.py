@@ -52,6 +52,8 @@ _push_client = httpx.Client(follow_redirects=False, timeout=5.0)
 _SPEC_KEYS = ("task_id", "call_key", "operation", "input_digest", "operation_version", "inputs", "params",
               "requirements", "policy")
 _REPLAY = ("leased", "admitted", "executing", "spooled", "uploading")
+# Resource problems, and an execution whose outcome is unknowable: the next entry opens a new generation.
+_RETRYABLE_CODES = ("node_unavailable", "admission_rejected", "uncertain_execution")
 
 
 # --- offers -------------------------------------------------------------------------------------------------------
@@ -78,17 +80,26 @@ def _create(studio: Studio, *, project_id: str, generation: int, spec: dict[str,
     return studio.journal.attempts.get(row["id"]) or row
 
 
+def _superseded(attempt: dict[str, Any]) -> bool:
+    if attempt["state"] in ("lost", "cancelled"):  # a cancelled call re-entered by a retried task starts afresh
+        return True
+    if attempt["state"] != "failed":
+        return False
+    return (attempt["error"] or {}).get("code") in _RETRYABLE_CODES or attempt["disposition"] == "rejected"
+
+
 def offer_call(studio: Studio, *, task_id: str, call_key: str, project_id: str, operation: str,
                inputs: list[InputRef], params: dict[str, Any], requirements: Requirements,
                preferred: tuple[str, str] | None = None) -> dict[str, Any]:
     """Idempotent per (task, call_key): a live, uncertain or finished attempt is returned, never re-placed.
-    Only a `lost` attempt makes the next call open generation+1."""
+    Only a `lost` or `cancelled` attempt, or one that failed on a retryable resource problem or was rejected by
+    Studio's own validation of its output, makes the next call open generation+1."""
     policy = Policy()
     digest = compute_input_digest(operation, OPERATION_VERSIONS[operation], inputs, params, requirements, policy)
     latest = studio.journal.attempts.latest(task_id, call_key)
     if latest is not None and latest["input_digest"] != digest:
         raise RunnerError(409, "stale_revision", f"{task_id}/{call_key} was offered with different inputs")
-    if latest is not None and latest["state"] != "lost":
+    if latest is not None and not _superseded(latest):
         return latest
     spec = _spec(operation, digest, task_id, call_key, inputs, params, requirements, policy)
     return _create(studio, project_id=project_id, generation=1 if latest is None else latest["generation"] + 1,
