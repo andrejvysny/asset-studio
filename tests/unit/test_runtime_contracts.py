@@ -40,10 +40,14 @@ def test_model_closure(tmp_path: Path) -> None:
     assert esc.status == "corrupt" and "outside" in esc.problems[0]
 
 
-def test_repo_lock_marks_dinov3_pending() -> None:
-    from assetstudio_server.models import verify_all
+def test_repo_lock_pins_dinov3() -> None:
+    """Gated access was granted and every file hash pinned (2026-09-29): absent weights read as missing, never
+    as pending access, and only a verified download is ready."""
+    from assetstudio_server.models import load_lock, verify_all
+    files = load_lock(ROOT / "config")["models"]["dinov3_vitl16"]["files"]
+    assert files and all(f.get("sha256") for f in files.values())
     st = verify_all(ROOT / "config", ROOT / "models")["dinov3_vitl16"]
-    assert st.status in ("pending_access", "ok") and (st.status == "ok") == st.ready
+    assert st.status in ("missing", "incomplete", "ok") and (st.status == "ok") == st.ready
 
 
 def aux_with(handler) -> AuxClient:

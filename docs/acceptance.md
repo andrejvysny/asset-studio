@@ -1,3 +1,29 @@
+# Modular-system baseline (2026-09-30, head 47c20db)
+
+Host: macOS (Apple silicon), no Docker, no GPU, empty `models/`. Web build run with the local Node 22 toolchain
+(same commands as `make web-build`, which needs a container runtime).
+
+| Suite | Command | Result |
+|---|---|---|
+| Lint | `make lint` | pass |
+| Backend (unit + contract + regression) | `make test` | 369 pass after stabilising 3 pre-existing test defects (below); 366 pass / 3 fail at 47c20db as-is |
+| Frontend type-check + build | `npm ci && npx tsc -b --noEmit && npx vite build` | pass |
+| Browser e2e | `uv run --group e2e pytest tests/e2e -m e2e` | 26 pass, 3 fail (environment: see below) |
+
+Stabilised test defects (test-only, no product change):
+- `test_repo_lock_marks_dinov3_pending` expected gated-pending hashes; the lock has pinned every DINOv3 file since
+  the 2026-09-29 audit, so absent weights read `missing`. Now `test_repo_lock_pins_dinov3`.
+- `test_grouped_3d_builds_do_not_thrash_gpu1_and_other_items_continue`: the `:build-approved` wave creates per-item
+  tasks in separate transactions; a fast lane could start the first sample before the second existed. The test now
+  pauses the run around the wave (the grouping rule itself is unchanged).
+- `test_gpu_acquire_failures_are_visible_then_bounded`: tasks touched within the backoff slack (10 ms) of the block
+  start are, by design, treated as queued after it; on a fast machine the test's tasks were. They are now backdated.
+
+Environment-dependent e2e (unchanged): `test_full_concept_lifecycle`, `test_3d_build_and_reexport` and
+`test_sprite_build_shows_cutout_and_pivot` need model files under `models/`, because generation readiness is gated on
+local weights even with the SIMULATED engine. They pass on the GPU host; on this host "Save and run" stays disabled.
+Node mode (Phase 2) moves model verification to runners, which removes this coupling.
+
 # Acceptance evidence — Phases 0–2 (2026-09-28)
 
 Host: 2 × RTX 4090 24 GB, Linux, Podman 4.9.3 + podman-compose 1.0.6 (`docker` on this host is a podman wrapper).

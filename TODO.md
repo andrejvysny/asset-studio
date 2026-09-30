@@ -1,3 +1,25 @@
+# TODO — Modular system (2026-09-30)
+
+Plan: ~/.claude/plans/act-as-senior-software-snoopy-waffle.md (Modular_system_spec.html + compute runner spec R0–R16,
+two Codex reviews folded in). Detail P0–P2; P3–P7 roadmap. Commit per verified WP on feat/modular-arch, no push.
+
+Phase 0 — baseline, hardening, specs, scaffold
+- [x] WP0.1 baseline lint/test/web-build/e2e counts in docs/acceptance.md (3 test defects stabilised; 3 e2e need models/)
+- [ ] WP0.2 GLB JSON-shape hardening (A31)
+- [ ] WP0.3 docs/modular/compute-runner.md (R0–R16 + operation identity table) + docs/modular/migration.md
+- [ ] WP0.4 layout scaffold (protocol, client, compute_node, companion, blender) + import-boundary test
+
+Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
+- [ ] WP1.1 protocol DTOs · [ ] WP1.2 stores (auth.sqlite, journal v4) · [ ] WP1.3 runner API + auth
+- [ ] WP1.4 registry + placement · [ ] WP1.5 attempt service · [ ] WP1.6 client + runner skeleton + tests
+- [ ] WP1.7 web: generated types + Runners panel
+
+Phase 2 — extract compute, single machine, public profile
+- [ ] WP2.0 pin model hashes · [ ] WP2.1 move execution code · [ ] WP2.1b lease hardening · [ ] WP2.2 runner runtime
+- [ ] WP2.3 ExecutionBackend seam · [ ] WP2.4 remote adapters · [ ] WP2.5 continuations/placement · [ ] WP2.5b fences
+- [ ] WP2.6 readiness · [ ] WP2.7 single-machine compose · [ ] WP2.8 failure injection · [ ] WP2.9 real acceptance
+- [ ] WP2.10 remove direct mode (needs user confirmation) · [ ] WP2.11 public profile · [ ] WP2.12 ephemeral
+
 # TODO — Media Library (2026-09-29)
 
 Plan: ~/.claude/plans/do-thorough-analysis-of-toasty-iverson.md. Owner: images only (PNG/JPEG/WebP), flat + search + tags,

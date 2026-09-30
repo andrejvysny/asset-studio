@@ -138,6 +138,9 @@ def test_gpu_acquire_failures_are_visible_then_bounded(make_api) -> None:
                         NewTask(project_id=pid, job_id=JOB, item_id="itm_0000000000000002", stage="aux_st",
                                 family="generate", input_key="b", inputs={}, lane="gpu1", residency="r1")],
                        "cmd_1")
+    # Queued well before the first block: the backoff treats tasks touched within its slack of the block start as
+    # queued after it (explicit retries bypass it), which a fast machine otherwise hits.
+    api.studio.journal._db.execute("UPDATE stage_tasks SET updated_at='2026-01-01T00:00:00.000Z'")
     coord = Coordinator(api.studio, {"aux_st": Stage("aux_st", "qa", "gpu1", "aux", lambda env: {})})
     for n in range(1, MAX_ADMISSION_FAILURES + 1):
         picked = coord.choose("gpu1")
