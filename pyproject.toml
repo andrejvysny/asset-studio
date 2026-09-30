@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 assetstudio = "assetstudio_server.cli:main"
+assetstudio-node = "assetstudio_node.cli:main"
 
 [dependency-groups]
 dev = ["pytest==8.4.2", "ruff==0.14.0"]
