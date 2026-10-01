@@ -71,8 +71,9 @@ def _qhash(q: str | None, category: str | None, tags: list[str], kind: str) -> s
     return hashlib.sha256(canonical_bytes([q, category, sorted(tags), kind])).hexdigest()[:16]
 
 
-def _decode_cursor(cursor: str | None, qhash: str, rev: int) -> int | None:
-    """Offset to continue from, or None when the cursor no longer matches the query or the index."""
+def _decode_cursor(cursor: str | None, qhash: str, rev: int | None) -> int | None:
+    """Offset to continue from, or None when the cursor no longer matches the query or the index
+    (`rev` None: check the query only)."""
     if not cursor:
         return 0
     try:
@@ -80,7 +81,7 @@ def _decode_cursor(cursor: str | None, qhash: str, rev: int) -> int | None:
         offset = int(c["o"])
     except (ValueError, KeyError, TypeError):
         return None
-    return offset if c.get("h") == qhash and c.get("r") == rev and offset >= 0 else None
+    return offset if c.get("h") == qhash and (rev is None or c.get("r") == rev) and offset >= 0 else None
 
 
 def _encode_cursor(offset: int, qhash: str, rev: int) -> str:
@@ -97,12 +98,15 @@ def list_assets(library_id: str, request: Request, who: Principal = Depends(prin
         raise IntegrationError(422, "unsupported_representation", f"only {KIND} assets are served")
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()]
     qhash = _qhash(q, category, tag_list, kind)
-    rev = ctx.index.revision()
-    offset = _decode_cursor(cursor, qhash, rev)
+    offset = _decode_cursor(cursor, qhash, None)
     if offset is None:
         return {"items": [], "next_cursor": None, "reset_required": True}
     cats = descendants(ctx.config()[0], category) if category else None
-    rows, total = ctx.index.query(categories=cats, kind=KIND, q=q, tags=tag_list, limit=limit, offset=offset)
+    # Rows and revision come from one index snapshot: a page is never labelled with a revision it was not read at.
+    rows, total, rev = ctx.index.query_at_revision(categories=cats, kind=KIND, q=q, tags=tag_list, limit=limit,
+                                                   offset=offset)
+    if cursor and _decode_cursor(cursor, qhash, rev) is None:
+        return {"items": [], "next_cursor": None, "reset_required": True}
     nxt = offset + len(rows)
     return {"items": [_item(ctx, r) for r in rows],
             "next_cursor": _encode_cursor(nxt, qhash, rev) if nxt < total else None}
@@ -211,38 +215,61 @@ class ResolveBody(BaseModel):
 
 
 def _entry(ref: AssetRef, state: str, code: str | None = None, message: str = "",
-           result: svc.EnsureResult | None = None, reps: list[str] | None = None) -> dict[str, Any]:
+           result: svc.EnsureResult | None = None, reps: list[str] | None = None,
+           representations: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     found = result.descriptor if result and state == "ready" else None
-    return {"asset_ref": ref.model_dump(), "asset_key": ref.key(), "state": state,
-            "error": {"code": code, "message": message} if code else None,
+    status = {"state": state, "error": {"code": code, "message": message} if code else None}
+    return {"asset_ref": ref.model_dump(), "asset_key": ref.key(), **status,
             "descriptor_sha256": found[0].descriptor_sha256 if found else None,
             "descriptor_json": found[1].decode("utf-8") if found else None,
             "deliveries": [svc.summary(d) for d in (result.deliveries if result and state == "ready" else [])
                            if d.representation in (reps or [])],
-            "dependencies": []}
+            "dependencies": [],
+            "representations": representations if representations is not None else {r: status for r in reps or []}}
+
+
+def _statuses(res: svc.EnsureResult, reps: list[str]) -> dict[str, tuple[str, str | None, str]]:
+    """Per requested representation: (state, error code, message)."""
+    ready = {d.representation for d in res.deliveries} if res.descriptor is not None else set()
+    out: dict[str, tuple[str, str | None, str]] = {}
+    for rep in reps:
+        if rep in ready:
+            out[rep] = ("ready", None, "")
+        elif rep in res.issues:
+            out[rep] = res.issues[rep]
+        elif res.state == "temporarily_unavailable":
+            out[rep] = (res.state, "temporarily_unavailable", res.reason or "")
+        else:
+            out[rep] = ("unsupported", "unsupported_representation", res.reason or "representation not available")
+    return out
+
+
+def _from_result(ref: AssetRef, res: svc.EnsureResult, reps: list[str]) -> dict[str, Any]:
+    statuses = _statuses(res, reps)
+    detail = {r: {"state": s, "error": {"code": c, "message": m} if c else None} for r, (s, c, m) in statuses.items()}
+    if any(s == "ready" for s, _, _ in statuses.values()):
+        return _entry(ref, "ready", result=res, reps=reps, representations=detail)
+    state, code, message = next(iter(statuses.values()))
+    return _entry(ref, state, code, message, representations=detail)
 
 
 def _resolve_one(request: Request, ctx: ProjectContext, ref: AssetRef, reps: list[str]) -> dict[str, Any]:
     app = request.app
     if ref.server_id != app.state.identity.server_id:
-        return _entry(ref, "server_identity_mismatch", "server_identity_mismatch", "reference names another server")
+        return _entry(ref, "server_identity_mismatch", "server_identity_mismatch", "reference names another server",
+                      reps=reps)
     if ref.library_id != ctx.id:
-        return _entry(ref, "forbidden", "forbidden", "reference names another library")
+        return _entry(ref, "forbidden", "forbidden", "reference names another library", reps=reps)
     try:
-        res = svc.ensure_version(app.state.studio, ctx, ref.server_id, ref.asset_id, ref.version_id, _limits(request))
+        res = svc.ensure_version(app.state.studio, ctx, ref.server_id, ref.asset_id, ref.version_id, _limits(request),
+                                 representations=reps)
     except svc.LookupFailed as e:
-        return _entry(ref, "not_found", e.code, "asset or version not found")
+        return _entry(ref, "not_found", e.code, "asset or version not found", reps=reps)
     except IntegrityError as e:
-        return _entry(ref, "temporarily_unavailable", "integrity_mismatch", str(e)[:200])
+        return _entry(ref, "temporarily_unavailable", "integrity_mismatch", str(e)[:200], reps=reps)
     except StorageError as e:
-        return _entry(ref, "temporarily_unavailable", "temporarily_unavailable", str(e)[:200])
-    if res.state == "temporarily_unavailable":
-        return _entry(ref, res.state, "temporarily_unavailable", res.reason or "")
-    if res.state == "unsupported":
-        return _entry(ref, "unsupported", "unsupported_representation", res.reason or "")
-    if not any(d.representation in reps for d in res.deliveries):
-        return _entry(ref, "unsupported", "unsupported_representation", "no requested representation available")
-    return _entry(ref, "ready", result=res, reps=reps)
+        return _entry(ref, "temporarily_unavailable", "temporarily_unavailable", str(e)[:200], reps=reps)
+    return _from_result(ref, res, reps)
 
 
 @router.post("/resolve")

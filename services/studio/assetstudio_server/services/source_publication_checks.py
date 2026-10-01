@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -16,14 +16,14 @@ from assetstudio_processing.glb import validate_glb_bytes
 from assetstudio_processing.glb_budget import glb_budget, glb_json
 from assetstudio_processing.images import ImageRejected, inspect_image
 from assetstudio_processing.source_package import SourcePackageReport, validate_source_package
+from assetstudio_processing.source_structure import SceneStructure
 from assetstudio_processing.transforms import TransformRejected, inspect_static_glb
 from pydantic import ValidationError
 
-from ..integration_api.errors import IntegrationError
-from ..integration_api.principal import Principal
 from ..registry import ProjectContext
 from ..studio import Studio
 from . import deliveries as svc
+from .principals import Principal, ServiceError
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
 MAX_PROBLEMS = 20
@@ -32,8 +32,8 @@ PLACEMENT_FIELDS = ("placement_anchor", "footprint_radius_m", "scale_range", "he
                     "default_grounding")
 
 
-def invalid(message: str, detail: str, **extra: Any) -> IntegrationError:
-    return IntegrationError(422, "invalid_request", message, details={"detail": detail, **extra})
+def invalid(message: str, detail: str, **extra: Any) -> ServiceError:
+    return ServiceError("invalid_request", message, details={"detail": detail, **extra}, status=422)
 
 
 @dataclass
@@ -51,11 +51,11 @@ def check_glb(data: bytes, limits: dict[str, Any]) -> GlbFacts:
     if not result["ok"]:
         failed = [{"id": c.get("id"), "detail": str(c.get("detail", ""))[:200]}
                   for c in result["checks"] if not c.get("ok")][:MAX_PROBLEMS]
-        raise IntegrationError(422, "unsafe_package", "portable GLB failed validation", details={"checks": failed})
+        raise ServiceError("unsafe_package", "portable GLB failed validation", details={"checks": failed})
     try:
         info = inspect_static_glb(data)
     except TransformRejected as e:
-        raise IntegrationError(422, "unsafe_package", "portable GLB is not a static model",
+        raise ServiceError("unsafe_package", "portable GLB is not a static model",
                                details={"detail": str(e)[:300]}) from None
     doc = glb_json(data)[0]
     budget = glb_budget(data, limits)
@@ -115,6 +115,7 @@ class SourceFacts:
     report: SourcePackageReport
     manifest: SourcePackageManifestV1
     warnings: list[str]
+    evidence: dict[str, Any] = field(default_factory=dict)  # set by structure_evidence
 
 
 def dependency_resolver(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str,
@@ -158,7 +159,7 @@ def check_source(zip_path: Path, work_dir: Path, capabilities: dict[str, Any],
         problems = [{"code": p.code, "detail": p.detail, "path": p.path, "message": p.message[:300]}
                     for p in report.errors[:MAX_PROBLEMS]]
         first = report.errors[0]
-        raise IntegrationError(422, first.code, first.message[:300], details={"problems": problems})
+        raise ServiceError(first.code, first.message[:300], details={"problems": problems}, status=422)
     warnings = sorted({w.detail for w in report.warnings if SLUG.match(w.detail)})
     return SourceFacts(report, report.manifest, warnings)
 
@@ -184,10 +185,52 @@ def check_agreement(draft: DescriptorDraftV1, facts: SourceFacts, report: Conver
         surfaces[slot.slot_id] = want["source_surfaces"]
     if draft.collision is not None and "static_collision" not in facts.report.detected_capabilities:
         raise invalid("draft declares collision but the package has none", "collision_mismatch")
+    facts.evidence = structure_evidence(draft, facts)
     if canonical_bytes(report.model_dump(mode="json")) != canonical_bytes(
             manifest.conversion_report.model_dump(mode="json")):
         raise invalid("conversion report differs from the source manifest", "report_mismatch")
     return surfaces
+
+
+def structure_evidence(draft: DescriptorDraftV1, facts: SourceFacts) -> dict[str, Any]:
+    """Prove declared source surfaces and collision against the static scene tree; returns per-claim evidence."""
+    tree = facts.report.structure
+    counts = {"verified": 0, "node_only": 0, "unverified": 0}
+    for slot in facts.manifest.placement.material_slots:
+        for surface in slot.source_surfaces:
+            counts[_surface_evidence(tree, slot.slot_id, surface.node_path, surface.surface)] += 1
+    return {"source_surfaces": counts, "collision": _collision_evidence(draft, tree),
+            "conversion_report": "publisher_declared"}
+
+
+def _surface_evidence(tree: SceneStructure | None, slot_id: str, node_path: str, surface: int) -> str:
+    if tree is None or tree.under_opaque(node_path):
+        return "unverified"
+    info = tree.nodes.get(node_path)
+    if info is None:
+        raise invalid("source surface names a node that does not exist", "source_surface_missing",
+                      slot_id=slot_id, node_path=node_path)
+    if info.type != "MeshInstance3D" and not (info.type or "").startswith("CSG"):
+        raise invalid("source surface names a node that is not a mesh", "source_surface_not_mesh",
+                      slot_id=slot_id, node_path=node_path)
+    if info.surfaces is None:
+        return "node_only"
+    if surface >= info.surfaces:
+        raise invalid("source surface index exceeds the mesh surface count", "source_surface_index",
+                      slot_id=slot_id, node_path=node_path, surface=surface)
+    return "verified"
+
+
+def _collision_evidence(draft: DescriptorDraftV1, tree: SceneStructure | None) -> str:
+    claim = draft.collision
+    if claim is None:
+        return "absent"
+    if tree is None or tree.opaque or None in tree.shapes:
+        return "unverified"
+    if claim.shape_count != len(tree.shapes) or set(claim.shape_types) != set(tree.shapes):
+        raise invalid("collision claim differs from the package", "collision_mismatch",
+                      found_count=len(tree.shapes), found_types=sorted({str(t) for t in tree.shapes}))
+    return "verified"
 
 
 def report_warnings(report: ConversionReport | None) -> list[str]:

@@ -1,7 +1,9 @@
 """Library-scoped client tokens for the integration listener. Only sha256 hashes are stored (0600, atomic replace).
 
 The CLI writes the file from another process; the store reloads whenever (mtime, size, inode) changes, so revocation
-is visible on the next request. verify() never writes (a stale rewrite could resurrect a revoked token).
+is visible on the next request. verify() never writes (a stale rewrite could resurrect a revoked token). Every write is
+one cross-process transaction (secure_files.exclusive): reload, modify, replace — concurrent writers never undo each
+other. A token's security identity is its immutable `credential_id`; names are reusable labels.
 """
 from __future__ import annotations
 
@@ -15,9 +17,9 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from assetstudio_core.ids import InvalidId, validate_id
+from assetstudio_core.ids import InvalidId, derived_id, new_id, validate_id
 
-from ..secure_files import write_private
+from ..secure_files import exclusive, write_private
 
 TOKEN_PREFIX = "asi_"
 NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
@@ -32,6 +34,11 @@ class ClientToken:
     library_ids: list[str]
     created_at: str
     revoked_at: str | None = None
+    credential_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.credential_id:  # pre-id files: stable per secret, never shared by a reissued name
+            self.credential_id = derived_id("icr", "legacy", self.sha256)
 
 
 def _now() -> str:
@@ -63,7 +70,9 @@ class IntegrationTokenStore:
         self._tokens: list[ClientToken] = []
         self._sig: tuple[int, int, int] | None = None
 
-    def _load(self) -> None:
+    def _load(self, force: bool = False) -> None:
+        if force:
+            self._sig = None
         try:
             st = self.path.stat()
         except FileNotFoundError:
@@ -72,8 +81,8 @@ class IntegrationTokenStore:
         sig = (st.st_mtime_ns, st.st_size, st.st_ino)
         if sig == self._sig:
             return
-        raw = json.loads(self.path.read_text())
-        self._tokens = [ClientToken(**t) for t in raw.get("tokens", [])]
+        raw = json.loads(self.path.read_text())  # malformed storage raises: fail closed, never rewrite it
+        self._tokens = [ClientToken(**t) for t in raw["tokens"]]
         self._sig = sig
 
     def _save(self) -> None:
@@ -85,17 +94,17 @@ class IntegrationTokenStore:
         """Returns the plaintext token; it is never stored or shown again."""
         scopes, libs = normalize(name, scopes, library_ids)
         token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-        with self._lock:
-            self._load()
+        with self._lock, exclusive(self.path):
+            self._load(force=True)
             if any(t.name == name and t.revoked_at is None for t in self._tokens):
                 raise ValueError(f"token {name!r} already exists; revoke it first")
-            self._tokens.append(ClientToken(name, _digest(token), scopes, libs, _now()))
+            self._tokens.append(ClientToken(name, _digest(token), scopes, libs, _now(), credential_id=new_id("icr")))
             self._save()
         return token
 
     def revoke(self, name: str) -> bool:
-        with self._lock:
-            self._load()
+        with self._lock, exclusive(self.path):
+            self._load(force=True)
             live = next((t for t in self._tokens if t.name == name and t.revoked_at is None), None)
             if live is None:
                 return False

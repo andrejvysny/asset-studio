@@ -15,6 +15,7 @@ from .events import EventBus
 from .execution import DirectBackend, ExecutionBackend, NodeBackend
 from .gpu import GpuLane, LaneWorker
 from .journal import EXECUTION_MODE_KEY, ExecutionModeMismatch, Journal
+from .lifecycle import MutationGate
 from .models import HashCache
 from .registry import Registry
 from .settings import Settings
@@ -36,6 +37,7 @@ class Studio:
     hash_cache: HashCache
     extras: dict[str, Any] = field(default_factory=dict)
     execution_generation: int | None = None  # set by Coordinator.start(); None = this process never activated
+    mutations: MutationGate = field(default_factory=MutationGate)
     execution: ExecutionBackend = field(init=False)  # set by build_studio once the Studio exists
 
     @property

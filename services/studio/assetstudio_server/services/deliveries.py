@@ -5,12 +5,15 @@ Legacy model3d versions get a deterministic projection of their GLB; versions th
 """
 from __future__ import annotations
 
+import functools
 import io
 import zipfile
+from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
 from assetstudio_core.delivery import (
+    KNOWN_CAPABILITIES,
     AssetRef,
     DeliveryDependency,
     DeliveryFile,
@@ -40,6 +43,8 @@ from .delivery_projection import LEGACY_PROFILE, PREPARER, build_descriptor, bui
 MAX_GLB = 512 * 1024 * 1024
 MAX_SOURCE_MANIFEST = 8 * 1024 * 1024
 PUBLISHED_PROFILE = ("published_descriptor", "1")
+SOURCE_PROFILE = ("published_descriptor", "2")  # v1 listed only part of the verified capabilities
+MAX_CHAIN = 16
 PUBLISHED_PREPARER = {"name": "assetstudio.published_descriptor", "version": "1"}
 PORTABLE, SOURCE = "portable_glb_v1", "godot_static_source_v1"
 
@@ -56,8 +61,9 @@ class LookupFailed(Exception):
 class EnsureResult:
     state: str  # ready | unsupported | temporarily_unavailable
     descriptor: tuple[DescriptorRecord, bytes] | None = None
-    deliveries: list[DeliveryRecord] = field(default_factory=list)
+    deliveries: list[DeliveryRecord] = field(default_factory=list)  # ready current-profile records
     reason: str | None = None
+    issues: dict[str, tuple[str, str, str]] = field(default_factory=dict)  # representation -> (state, code, reason)
 
 
 def load_version(store: ProjectStore, asset_id: str, version_id: str) -> tuple[AssetManifest, AssetVersion]:
@@ -75,24 +81,64 @@ def load_version(store: ProjectStore, asset_id: str, version_id: str) -> tuple[A
         raise LookupFailed("version_unavailable") from None
 
 
+class DependencyUnavailable(Exception):
+    """Transient: the closure cannot be resolved right now; nothing is frozen."""
+
+
+class DependencyRejected(DependencyUnavailable):
+    """Permanent for these inputs (cycle, depth): reported as unsupported_source_dependency."""
+
+
+class DependencyConflict(DependencyRejected):
+    pass
+
+
+@dataclass
+class _Pending:
+    representation: str
+    profile: tuple[str, str]
+    preparer: dict[str, str]
+    files: list[DeliveryFile]
+    capabilities: list[str]
+    budget: dict[str, Any]
+    dependencies: list[DeliveryDependency] | None = None
+
+
+@dataclass
+class _Plan:
+    """Everything computed without a lock; committed in one short critical section."""
+    raw: bytes
+    origin: Any
+    profile: tuple[str, str]
+    pending: list[_Pending] = field(default_factory=list)
+    issues: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+
+
 def _expected(version: AssetVersion) -> list[str]:
     if "descriptor" not in version.artifacts:
         return [PORTABLE]
     return [r for r, role in ((PORTABLE, "model"), (SOURCE, "godot_source")) if role in version.artifacts]
 
 
-def _existing(store: ProjectStore, asset_id: str, version: AssetVersion) -> EnsureResult | None:
+def _current_profile(version: AssetVersion, representation: str) -> tuple[str, str]:
+    if representation == SOURCE:
+        return SOURCE_PROFILE
+    return PUBLISHED_PROFILE if "descriptor" in version.artifacts else LEGACY_PROFILE
+
+
+def _current(version: AssetVersion, found: list[DeliveryRecord]) -> list[DeliveryRecord]:
+    return [d for d in found if (d.profile_id, d.profile_version) == _current_profile(version, d.representation)]
+
+
+def _existing(store: ProjectStore, asset_id: str, version: AssetVersion, want: Collection[str]
+              ) -> EnsureResult | None:
     desc = store_delivery.descriptor(store, asset_id, version.version_id)
     if desc is None:
         return None
-    found = store_delivery.deliveries(store, asset_id, version.version_id)
-    if not {d.representation for d in found} >= set(_expected(version)):
+    have = _current(version, store_delivery.deliveries(store, asset_id, version.version_id))
+    if not set(want) <= {d.representation for d in have}:
         return None
-    return EnsureResult("ready", desc, found)
-
-
-class DependencyUnavailable(Exception):
-    pass
+    return EnsureResult("ready", desc, have)
 
 
 def _source_manifest(store: ProjectStore, version: AssetVersion) -> Any:
@@ -106,42 +152,87 @@ def _source_manifest(store: ProjectStore, version: AssetVersion) -> Any:
         return parse_source_manifest(zf.read(info))
 
 
-def _source_dependencies(studio: Studio, ctx: ProjectContext, version: AssetVersion) -> list[DeliveryDependency]:
+def source_capabilities(version: AssetVersion, declared: Callable[[], Iterable[str]]) -> list[str]:
+    """Verified capabilities of a source package. The server's validator verdict is authoritative; the publisher's
+    declared set (a superset of it) covers versions published before the verdict was stored."""
+    detected = (version.validation.get("source") or {}).get("detected_capabilities")
+    found = {"godot_text_scene_v1"} | set(detected if detected is not None else declared())
+    return [c for c in KNOWN_CAPABILITIES if c in found]
+
+
+def _source_dependencies(studio: Studio, ctx: ProjectContext, version: AssetVersion, chain: tuple[str, ...],
+                         manifest: Callable[[], Any]) -> list[DeliveryDependency]:
     """Exact transitive closure for a source delivery: the keys the validated scene graph uses, plus whatever
     each dependency's own (immutable) delivery manifest already lists."""
     used = sorted(((version.validation.get("source") or {}).get("asset_dependencies")) or [])
     if not used:
         return []
-    manifest = _source_manifest(ctx.store, version)
+    declared = manifest().asset_dependencies
     out: dict[str, DeliveryDependency] = {}
     for key in used:
-        if key not in manifest.asset_dependencies:
+        if key not in declared:
             raise DependencyUnavailable(f"{key[:12]} not declared in the source manifest")
-        _add_dependency(studio, manifest.asset_dependencies[key], out)
+        _add_dependency(studio, declared[key], out, chain)
     return [out[k] for k in sorted(out)]
 
 
-def _add_dependency(studio: Studio, dep: SourceAssetDependency, out: dict[str, DeliveryDependency]) -> None:
+def _merge(out: dict[str, DeliveryDependency], dep: DeliveryDependency) -> None:
+    have = out.get(dep.asset_key)
+    if have is None:
+        out[dep.asset_key] = dep
+    elif (have.representation, have.delivery_id, have.manifest_sha256) != (
+            dep.representation, dep.delivery_id, dep.manifest_sha256):
+        raise DependencyConflict(f"conflicting requirements for {dep.asset_key[:12]}")
+
+
+def _pinned(dctx: ProjectContext, ref: AssetRef, dep: SourceAssetDependency
+            ) -> tuple[tuple[DescriptorRecord, bytes], DeliveryRecord] | None:
+    """A pinned delivery id stays exact even when it belongs to an older profile."""
+    if dep.delivery_id is None:
+        return None
+    desc = store_delivery.descriptor(dctx.store, ref.asset_id, ref.version_id)
+    found = store_delivery.deliveries(dctx.store, ref.asset_id, ref.version_id) if desc else []
+    rec = next((d for d in found if d.delivery_id == dep.delivery_id and d.representation == dep.representation),
+               None)
+    return (desc, rec) if desc is not None and rec is not None else None
+
+
+def _dependency_record(studio: Studio, dctx: ProjectContext, ref: AssetRef, dep: SourceAssetDependency,
+                       chain: tuple[str, ...]) -> tuple[DescriptorRecord, DeliveryRecord]:
+    stored = _pinned(dctx, ref, dep)
+    if stored is not None:
+        return stored[0][0], stored[1]
+    result = ensure_version(studio, dctx, ref.server_id, ref.asset_id, ref.version_id,
+                            representations=[dep.representation], _chain=chain)
+    where = f"{ref.asset_id}/{ref.version_id}"
+    if result.state != "ready" or result.descriptor is None:
+        raise DependencyUnavailable(f"{where} is {result.state}")
+    wanted = [d for d in result.deliveries if d.representation == dep.representation
+              and (dep.delivery_id is None or d.delivery_id == dep.delivery_id)]
+    if len(wanted) == 1:
+        return result.descriptor[0], wanted[0]
+    issue = result.issues.get(dep.representation)
+    if issue is not None:
+        exc = DependencyUnavailable if issue[0] == "temporarily_unavailable" else DependencyRejected
+        raise exc(f"{where} {dep.representation}: {issue[2]}")
+    raise DependencyUnavailable(f"{where} has no {dep.representation} delivery")
+
+
+def _add_dependency(studio: Studio, dep: SourceAssetDependency, out: dict[str, DeliveryDependency],
+                    chain: tuple[str, ...]) -> None:
     ref = dep.asset_ref
     try:
         dctx = studio.registry.get(ref.library_id)
     except ApiError:
         raise DependencyUnavailable(f"library {ref.library_id} unavailable") from None
-    result = ensure_version(studio, dctx, ref.server_id, ref.asset_id, ref.version_id)
-    if result.state != "ready" or result.descriptor is None:
-        raise DependencyUnavailable(f"{ref.asset_id}/{ref.version_id} is {result.state}")
-    if result.descriptor[0].descriptor_sha256 != dep.descriptor_sha256:
+    desc, rec = _dependency_record(studio, dctx, ref, dep, chain)
+    if desc.descriptor_sha256 != dep.descriptor_sha256:
         raise DependencyUnavailable(f"{ref.asset_id}/{ref.version_id} descriptor hash differs")
-    wanted = [d for d in result.deliveries if d.representation == dep.representation
-              and (dep.delivery_id is None or d.delivery_id == dep.delivery_id)]
-    rec = wanted[0] if len(wanted) == 1 else None
-    if rec is None:
-        raise DependencyUnavailable(f"{ref.asset_id}/{ref.version_id} has no {dep.representation} delivery")
-    out[ref.key()] = DeliveryDependency(
+    _merge(out, DeliveryDependency(
         asset_key=ref.key(), asset_ref=ref, descriptor_sha256=dep.descriptor_sha256,
-        representation=rec.representation, delivery_id=rec.delivery_id, manifest_sha256=rec.manifest_sha256)
+        representation=rec.representation, delivery_id=rec.delivery_id, manifest_sha256=rec.manifest_sha256))
     for nested in parse_manifest(store_delivery.manifest_bytes(dctx.store, rec)).dependencies:
-        out.setdefault(nested.asset_key, nested)
+        _merge(out, nested)
 
 
 def _files_for(store: ProjectStore, version: AssetVersion, role: str, path: str, media: str) -> list[DeliveryFile]:
@@ -150,100 +241,145 @@ def _files_for(store: ProjectStore, version: AssetVersion, role: str, path: str,
     return [DeliveryFile(path=path, sha256=art.sha256, size=art.size, media_type=media, artifact_id=art.id)]
 
 
-def _store_delivery(ctx: ProjectContext, ref: AssetRef, descriptor_sha: str, representation: str,
-                    profile: tuple[str, str], preparer: dict[str, str], files: list[DeliveryFile],
-                    capabilities: list[str], budget: dict[str, Any],
-                    dependencies: list[DeliveryDependency] | None = None) -> bool:
-    delivery_id = derived_id("dlv", ctx.id, ref.asset_id, ref.version_id, representation, *profile)
-    manifest: DeliveryManifestV1 = build_manifest(delivery_id, ref, descriptor_sha, representation, profile, preparer,
-                                                  files, files[0].path, capabilities, dependencies or [])
+def _store_delivery(ctx: ProjectContext, ref: AssetRef, descriptor_sha: str, p: _Pending) -> bool:
+    delivery_id = derived_id("dlv", ctx.id, ref.asset_id, ref.version_id, p.representation, *p.profile)
+    manifest: DeliveryManifestV1 = build_manifest(
+        delivery_id, ref, descriptor_sha, p.representation, p.profile, p.preparer, p.files, p.files[0].path,
+        p.capabilities, p.dependencies or [])
     fields = {"delivery_id": delivery_id, "asset_id": ref.asset_id, "version_id": ref.version_id,
-              "representation": representation, "profile_id": profile[0], "profile_version": profile[1],
-              "total_bytes": sum(f.size for f in files), "budget": budget}
+              "representation": p.representation, "profile_id": p.profile[0], "profile_version": p.profile[1],
+              "total_bytes": sum(f.size for f in p.files), "budget": p.budget}
     _, created = store_delivery.put_delivery(ctx.store, fields, manifest_bytes(manifest),
-                                             [f.artifact_id for f in files])
+                                             [f.artifact_id for f in p.files])
     return created
 
 
-def _legacy(studio: Studio, ctx: ProjectContext, ref: AssetRef, version: AssetVersion, limits: dict[str, Any]
-            ) -> tuple[bool, EnsureResult | None]:
-    """(created_any, early_result). Early result is set only for an unsupported model."""
+def _early(reps: Iterable[str], reason: str) -> EnsureResult:
+    return EnsureResult("unsupported", reason=reason, issues={r: ("unsupported", "unsupported_representation", reason)
+                                                              for r in reps})
+
+
+def _legacy(ctx: ProjectContext, ref: AssetRef, version: AssetVersion, limits: dict[str, Any]
+            ) -> _Plan | EnsureResult:
     store = ctx.store
     model = version.artifacts.get("model")
     if model is None:
-        return False, EnsureResult("unsupported", reason="version has no model artifact")
+        return _early([PORTABLE], "version has no model artifact")
     data = store.artifact_bytes(model["artifact_id"], max_bytes=MAX_GLB)
     try:
         info = inspect_static_glb(data)
         doc, _ = glb_json(data)
         descriptor = build_descriptor(ref, version, doc, info["bounds"])
     except (TransformRejected, GlbRejected, ValidationError, ValueError) as e:
-        return False, EnsureResult("unsupported", reason=str(e)[:300])
-    raw = descriptor_bytes(descriptor)
-    rec = store_delivery.freeze_descriptor(store, ref.asset_id, ref.version_id, raw, "projection", *LEGACY_PROFILE)
+        return _early([PORTABLE], str(e)[:300])
     files = _files_for(store, version, "model", "model.glb", "model/gltf-binary")
-    created = _store_delivery(ctx, ref, rec.descriptor_sha256, PORTABLE, LEGACY_PROFILE, PREPARER, files,
-                              glb_capabilities(doc), glb_budget(data, limits))
-    return created, None
+    plan = _Plan(descriptor_bytes(descriptor), "projection", LEGACY_PROFILE)
+    plan.pending.append(_Pending(PORTABLE, LEGACY_PROFILE, PREPARER, files, glb_capabilities(doc),
+                                 glb_budget(data, limits)))
+    return plan
 
 
-def _published(studio: Studio, ctx: ProjectContext, ref: AssetRef, version: AssetVersion, limits: dict[str, Any]
-               ) -> tuple[bool, EnsureResult | None]:
-    store = ctx.store
-    raw = store.artifact_bytes(version.artifacts["descriptor"]["artifact_id"], max_bytes=16 * 1024 * 1024)
+def _plan_portable(store: ProjectStore, version: AssetVersion, plan: _Plan, limits: dict[str, Any]) -> None:
+    data = store.artifact_bytes(version.artifacts["model"]["artifact_id"], max_bytes=MAX_GLB)
+    files = _files_for(store, version, "model", "model.glb", "model/gltf-binary")
+    try:
+        caps = glb_capabilities(glb_json(data)[0])
+    except (GlbRejected, ValueError) as e:
+        plan.issues[PORTABLE] = ("unsupported", "unsupported_representation", str(e)[:300])
+        return
+    plan.pending.append(_Pending(PORTABLE, PUBLISHED_PROFILE, PUBLISHED_PREPARER, files, caps,
+                                 glb_budget(data, limits)))
+
+
+def _plan_source(studio: Studio, ctx: ProjectContext, version: AssetVersion, plan: _Plan,
+                 chain: tuple[str, ...]) -> None:
+    manifest = functools.cache(functools.partial(_source_manifest, ctx.store, version))
+    try:
+        deps = _source_dependencies(studio, ctx, version, chain, manifest)
+    except (DependencyUnavailable, LookupFailed) as e:
+        # Never freeze a source delivery without its exact closure (first write wins forever).
+        reason = f"source dependency: {e}"[:300]
+        plan.issues[SOURCE] = (("unsupported", "unsupported_source_dependency", reason)
+                               if isinstance(e, DependencyRejected)
+                               else ("temporarily_unavailable", "temporarily_unavailable", reason))
+        return
+    files = _files_for(ctx.store, version, "godot_source", "source.zip", "application/zip")
+    caps = source_capabilities(version, lambda: manifest().capabilities)
+    budget = {"within_ipad_budget": None, "exceeded": [], "warnings": ["source package not measured"]}
+    plan.pending.append(_Pending(SOURCE, SOURCE_PROFILE, PUBLISHED_PREPARER, files, caps, budget, deps))
+
+
+def _published(studio: Studio, ctx: ProjectContext, ref: AssetRef, version: AssetVersion, limits: dict[str, Any],
+               missing: list[str], chain: tuple[str, ...]) -> _Plan | EnsureResult:
+    raw = ctx.store.artifact_bytes(version.artifacts["descriptor"]["artifact_id"], max_bytes=16 * 1024 * 1024)
     try:
         parsed = parse_descriptor(raw)
     except ValueError as e:
-        return False, EnsureResult("unsupported", reason=f"published descriptor invalid: {str(e)[:250]}")
+        return _early(missing, f"published descriptor invalid: {str(e)[:250]}")
     if parsed.asset_ref != ref:
-        return False, EnsureResult("unsupported", reason="published descriptor names a different asset reference")
-    rec = store_delivery.freeze_descriptor(store, ref.asset_id, ref.version_id, raw, "published", *PUBLISHED_PROFILE)
-    created = False
-    if "model" in version.artifacts:
-        data = store.artifact_bytes(version.artifacts["model"]["artifact_id"], max_bytes=MAX_GLB)
-        files = _files_for(store, version, "model", "model.glb", "model/gltf-binary")
-        try:
-            caps = glb_capabilities(glb_json(data)[0])
-        except (GlbRejected, ValueError) as e:
-            return False, EnsureResult("unsupported", reason=str(e)[:300])
-        created |= _store_delivery(ctx, ref, rec.descriptor_sha256, PORTABLE, PUBLISHED_PROFILE, PUBLISHED_PREPARER,
-                                   files, caps, glb_budget(data, limits))
-    if "godot_source" in version.artifacts:
-        try:
-            deps = _source_dependencies(studio, ctx, version)
-        except (DependencyUnavailable, LookupFailed) as e:
-            # Never freeze a source delivery without its exact closure (first write wins forever).
-            return created, EnsureResult("temporarily_unavailable", reason=f"source dependency: {e}"[:300])
-        files = _files_for(store, version, "godot_source", "source.zip", "application/zip")
-        caps = ["godot_text_scene_v1"] + (["static_collision"] if parsed.collision else [])
-        budget = {"within_ipad_budget": None, "exceeded": [], "warnings": ["source package not measured"]}
-        created |= _store_delivery(ctx, ref, rec.descriptor_sha256, SOURCE, PUBLISHED_PROFILE, PUBLISHED_PREPARER,
-                                   files, caps, budget, deps)
-    return created, None
+        return _early(missing, "published descriptor names a different asset reference")
+    plan = _Plan(raw, "published", PUBLISHED_PROFILE)
+    if PORTABLE in missing:
+        _plan_portable(ctx.store, version, plan, limits)
+    if SOURCE in missing:
+        _plan_source(studio, ctx, version, plan, chain)
+    return plan
+
+
+def _commit(ctx: ProjectContext, ref: AssetRef, plan: _Plan) -> bool:
+    """Short critical section: immutable create-if-absent writes only, no cross-library calls."""
+    with ctx.store.lock:
+        rec = store_delivery.freeze_descriptor(ctx.store, ref.asset_id, ref.version_id, plan.raw, plan.origin,
+                                               *plan.profile)
+        created = False
+        for pending in plan.pending:
+            created |= _store_delivery(ctx, ref, rec.descriptor_sha256, pending)
+    return created
+
+
+def _result(store: ProjectStore, asset_id: str, version: AssetVersion, want: list[str],
+            issues: dict[str, tuple[str, str, str]]) -> EnsureResult:
+    desc = store_delivery.descriptor(store, asset_id, version.version_id)
+    have = _current(version, store_delivery.deliveries(store, asset_id, version.version_id))
+    if desc is not None and {d.representation for d in have} & set(want):
+        return EnsureResult("ready", desc, have, issues=issues)
+    state, _, reason = next(iter(issues.values()), ("temporarily_unavailable", "", "delivery not stored"))
+    return EnsureResult(state, desc, have, reason, issues)
 
 
 def ensure_version(studio: Studio, ctx: ProjectContext, server_id: str, asset_id: str, version_id: str,
-                   limits: dict[str, Any] | None = None) -> EnsureResult:
-    """Prepare (once) and return a version's descriptor + deliveries. Pure read when already prepared."""
+                   limits: dict[str, Any] | None = None, *, representations: Collection[str] | None = None,
+                   _chain: tuple[str, ...] = ()) -> EnsureResult:
+    """Prepare (once) and return a version's descriptor + deliveries. Pure read when already prepared.
+
+    Computation (including other libraries' dependency preparation) runs without any project lock, so two
+    libraries preparing versions that depend on each other cannot deadlock."""
     _, version = load_version(ctx.store, asset_id, version_id)
-    done = _existing(ctx.store, asset_id, version)
+    expected = _expected(version)
+    want = expected if representations is None else [r for r in expected if r in set(representations)]
+    if not want:
+        return EnsureResult("unsupported", reason="no requested representation available")
+    done = _existing(ctx.store, asset_id, version, want)
     if done is not None:
         return done
     if ctx.read_only:
         return EnsureResult("temporarily_unavailable", reason="library is open read-only; cannot prepare deliveries")
+    key = f"{ctx.id}/{asset_id}/{version_id}"
+    if key in _chain:
+        raise DependencyRejected("dependency cycle")
+    if len(_chain) >= MAX_CHAIN:
+        raise DependencyRejected("dependency chain too deep")
     ref = AssetRef(server_id=server_id, library_id=ctx.id, asset_id=asset_id, version_id=version_id)
-    with ctx.store.lock:
-        done = _existing(ctx.store, asset_id, version)
-        if done is not None:
-            return done
-        build = _published if "descriptor" in version.artifacts else _legacy
-        created, early = build(studio, ctx, ref, version, limits or {})
-        if early is not None:
-            return early
-        result = _existing(ctx.store, asset_id, version)
+    have = {d.representation for d in _current(version, store_delivery.deliveries(ctx.store, asset_id, version_id))}
+    missing = [r for r in want if r not in have]
+    plan = (_published(studio, ctx, ref, version, limits or {}, missing, _chain + (key,))
+            if "descriptor" in version.artifacts else _legacy(ctx, ref, version, limits or {}))
+    if isinstance(plan, EnsureResult):
+        return plan
+    created = _commit(ctx, ref, plan) if plan.pending else False
     if created:
         studio.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="delivery_ready")
-    return result or EnsureResult("temporarily_unavailable", reason="delivery not stored")
+    return _result(ctx.store, asset_id, version, want, plan.issues)
 
 
 def summary(rec: DeliveryRecord) -> dict[str, Any]:

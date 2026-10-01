@@ -102,6 +102,23 @@ def test_reset_and_invalid_cursors(api: Api) -> None:
     assert c.get(CHANGES, params={"timeout_s": 21}).status_code == 400
 
 
+def test_overflow_during_active_long_poll_requires_reset(api: Api) -> None:
+    """H08: the ring wraps after the route's initial cursor check; the poll must not skip the lost events."""
+    c, lib, _ = _setup(api)
+    api.studio.events = bus = EventBus(maxlen=2)
+    cur = _poll(c)["cursor"]
+
+    def burst() -> None:
+        with bus._cond:  # one atomic burst: no collection can observe a partial ring
+            for i in range(4):
+                bus.publish("library", project_id=lib, asset_id=f"ast_{i}", change="published")
+
+    threading.Timer(0.3, burst).start()
+    got = _poll(c, cur, timeout_s=5)
+    assert got["reset_required"] is True and got["events"] == []
+    assert _poll(c, got["cursor"])["reset_required"] is False
+
+
 def test_epochs_are_unique_per_bus() -> None:
     a, b = EventBus(), EventBus()
     assert a.epoch != b.epoch and ":" not in a.epoch

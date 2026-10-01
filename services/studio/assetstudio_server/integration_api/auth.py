@@ -32,7 +32,7 @@ class IntegrationAuth:
             await response(scope, receive, send)
             return
         scope.setdefault("state", {})[STATE_KEY] = Principal(
-            info.name, frozenset(info.scopes), frozenset(info.library_ids))
+            info.credential_id, info.name, frozenset(info.scopes), frozenset(info.library_ids))
         await self.app(scope, receive, send)
 
 

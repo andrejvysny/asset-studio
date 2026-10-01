@@ -271,3 +271,13 @@ def test_read_token_gets_forbidden_before_body_validation(env: PubEnv) -> None:
     reader = client(env.app, make_token(env.app, "reader-only", ["assets:read"], [env.lib]))
     r = reader.post(env.url("/publications:commit"), json={})
     assert r.status_code == 403 and r.json()["error"]["code"] == "forbidden"
+
+
+def test_commit_while_shutting_down_is_retryable_503(env: PubEnv) -> None:
+    env.api.studio.mutations.close_and_wait(1)
+    r = env.c.post(env.url("/publications:commit"), json=commit_body(
+        {"preview_id": "x", "package_sha256": None, "portable_sha256": "0" * 64, "descriptor_draft_sha256": "0" * 64},
+        "key-12345678"))
+    assert r.status_code == 503, r.text
+    err = r.json()["error"]
+    assert err["code"] == "temporarily_unavailable" and err["retryable"] is True

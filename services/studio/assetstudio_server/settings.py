@@ -118,6 +118,16 @@ class Settings:
     # Set only by the Dockerfile: inside a container the bind is 0.0.0.0 and exposure is the compose port mapping.
     integration_container_bind: bool = field(
         default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_CONTAINER_BIND", "0") == "1")
+    # Publication admission: staging budget, free-disk floor, heavy-work slots + queue, pending previews per token.
+    integration_staging_max_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_STAGING_MAX_BYTES", str(8 << 30))))
+    integration_disk_floor_bytes: int = field(
+        default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_DISK_FLOOR_BYTES", str(2 << 30))))
+    integration_processing_slots: int = field(
+        default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_PROCESSING_SLOTS", "2")))
+    integration_queue_max: int = field(default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_QUEUE_MAX", "8")))
+    integration_previews_per_token: int = field(
+        default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_PREVIEWS_PER_TOKEN", "20")))
     contracts_dir: Path = field(default_factory=lambda: _path(
         "STUDIO_CONTRACTS_DIR", REPO_ROOT / "contracts" / "godot-integration" / "v1"))
 

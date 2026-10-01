@@ -64,6 +64,7 @@ def _validate(zip_path: Path, staging: Path, caps: Mapping[str, Any], resolver: 
     report.detected_capabilities = facts.detected
     report.dependency_closure = facts.reached
     report.asset_dependencies = facts.deps
+    report.structure = facts.structure
     if "shader_source" in facts.detected:
         sink.warn("shader_source_desktop_trust", "package contains shader source: desktop trust required, "
                   "not executed on iPad")

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..errors import ApiError
+from ..services.principals import ServiceError
 
 log = logging.getLogger("assetstudio.integration")
 
@@ -40,7 +41,18 @@ def _from_api_error(e: ApiError) -> JSONResponse:
     return respond(409, e.code, e.message)
 
 
+def _status(request: Request, e: ServiceError) -> int:
+    if e.status is not None:
+        return e.status
+    codes = {c["code"]: c["http_status"] for c in request.app.state.contracts.error_codes["codes"]}
+    return codes.get(e.code, 409)
+
+
 def install(app: FastAPI) -> None:
+    @app.exception_handler(ServiceError)
+    async def _service(request: Request, e: ServiceError) -> JSONResponse:
+        return respond(_status(request, e), e.code, e.message, e.retryable, e.details)
+
     @app.exception_handler(IntegrationError)
     async def _integration(_: Request, e: IntegrationError) -> JSONResponse:
         return respond(e.status, e.code, e.message, e.retryable, e.details)

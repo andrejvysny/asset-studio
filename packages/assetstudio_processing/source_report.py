@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from assetstudio_core.source_manifest import SourcePackageManifestV1
+
+if TYPE_CHECKING:
+    from .source_structure import SceneStructure
 
 MAX_PROBLEMS = 100
 
@@ -54,3 +57,4 @@ class SourcePackageReport:
     dependency_closure: list[str] = field(default_factory=list)
     asset_dependencies: list[str] = field(default_factory=list)
     expanded_bytes: int = 0
+    structure: SceneStructure | None = None

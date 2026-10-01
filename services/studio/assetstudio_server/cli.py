@@ -108,6 +108,23 @@ def cmd_project_restore_verify(s: Settings, a: argparse.Namespace) -> int:
     return 0 if rep.ok else 1
 
 
+def cmd_instance_backup(s: Settings, a: argparse.Namespace) -> int:
+    from .instance_backup import create_instance_backup
+
+    s.ensure()
+    path = create_instance_backup(s, Path(a.out) if a.out else s.instance_dir / "backups")
+    _print({"backup": str(path), "size": path.stat().st_size})
+    return 0
+
+
+def cmd_instance_restore_verify(_: Settings, a: argparse.Namespace) -> int:
+    from .instance_backup import verify_instance_backup
+
+    rep = verify_instance_backup(Path(a.backup))
+    _print(rep.__dict__)
+    return 0 if rep.ok else 1
+
+
 def _api(method: str, path: str, body: dict | None = None) -> object:
     """Production commands go through the running Studio (its command layer), never direct file mutations."""
     import os
@@ -430,6 +447,13 @@ def main(argv: list[str] | None = None) -> int:
     pv = pr.add_parser("restore-verify", help="verify a backup's inventory, hashes and journal (CPU only)")
     pv.add_argument("backup")
     pv.set_defaults(fn=cmd_project_restore_verify)
+    ins = sub.add_parser("instance").add_subparsers(dest="sub", required=True)
+    ib = ins.add_parser("backup", help="integration identity, token stores and journal snapshot (Studio stopped)")
+    ib.add_argument("--out", help="directory (default: <instance>/backups)")
+    ib.set_defaults(fn=cmd_instance_backup)
+    iv = ins.add_parser("restore-verify", help="verify an instance backup's hashes, identity, tokens and journal")
+    iv.add_argument("backup")
+    iv.set_defaults(fn=cmd_instance_restore_verify)
     st = sub.add_parser("storage").add_subparsers(dest="sub", required=True)
     for name, fn in (("reindex", cmd_storage_reindex), ("verify", cmd_storage_verify)):
         sp = st.add_parser(name)
