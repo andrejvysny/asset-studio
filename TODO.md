@@ -1,3 +1,29 @@
+# TODO — Review hardening 11f5b18 (2026-10-01)
+
+Source: review-and-hardening.md (H01–H18). Phase A on master (integration code); Phase B in worktree of
+feat/modular-arch after merging master (H07 switch, H10–H16). Baseline master: 654 pass, 2 pre-existing fails
+(dinov3 weights, GPU backoff).
+
+Phase A (master)
+- [x] H17 transport-neutral Principal/ServiceError (services/principals.py)
+- [x] H01 cross-process credential writer lock + immutable credential_id (integration + MCP stores)
+- [x] H08 change-feed gap propagated through every collection
+- [x] H02 full request binding (intent record before effects), per-op serialization, credential-owned previews
+- [x] H03/H04/H05 verified source capabilities (profile v2), lock-free dependency closure, per-representation readiness
+- [x] H09 source structure evidence: node/surface/collision checks, instancing/include cycles
+- [x] H07 (shutdown part) mutation gate + single studio close; H18 instance backup incl. integration identity
+- [ ] H06 integration admission: staging reservation, disk floor, bounded processing, render outside lock
+- [x] H08b asset-list pagination revision snapshot
+Phase B (feat/modular-arch worktree)
+- [ ] H13+H14 custody single-write + repair + late quarantine upload; quota in reservation txn
+- [ ] H12 effective engine id persisted; per-operation reconciliation
+- [ ] H15 MCP internal principal through role policy (agent deny list)
+- [ ] H10 studio-only/compute/combined compose, public routes 8191/8192, host-wide runner lock, Compose 2.24.4
+- [ ] H07 switch: transactional pause+generation fence in claim/place, quiesced->activate handshake
+- [ ] H16 one eligibility evaluator; nullable telemetry
+- [ ] H11 per-slot supervisors, bounded transfer workers, free-slot acquire
+- [ ] merge master (Phase A) into feat/modular-arch; full suites both branches
+
 # TODO — Godot integration backend, AS-00 → AS-05 (2026-10-01)
 
 Plan: ~/.claude/plans/act-as-senior-software-humble-curry.md. Specs: ../00_SHARED_INTEGRATION_SPEC.md (INT-SPEC-1.0),

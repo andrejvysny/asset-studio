@@ -13,6 +13,7 @@ from .adapters.worker3d import Worker3dClient
 from .events import EventBus
 from .gpu import GpuLane, LaneWorker
 from .journal import Journal
+from .lifecycle import MutationGate
 from .models import HashCache
 from .registry import Registry
 from .settings import Settings
@@ -32,6 +33,7 @@ class Studio:
     lanes: dict[str, GpuLane]
     hash_cache: HashCache
     extras: dict[str, Any] = field(default_factory=dict)
+    mutations: MutationGate = field(default_factory=MutationGate)
 
     @property
     def simulated(self) -> bool:

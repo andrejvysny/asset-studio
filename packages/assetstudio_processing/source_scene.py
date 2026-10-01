@@ -27,6 +27,7 @@ from .godot_text import (
 )
 from .source_media import IMAGE_KINDS, check_glb, check_image
 from .source_report import ProblemSink, SourcePackageError
+from .source_structure import NodeDef, SceneStructure, build_structure, find_cycles, scene_defs
 
 SCRIPT_TYPES = frozenset({"Script", "GDScript", "CSharpScript", "GDExtension"})
 SECTION_KINDS = frozenset({"ext_resource", "sub_resource", "node", "resource", "editable"})
@@ -46,6 +47,7 @@ class Facts:
     reached: list[str] = field(default_factory=list)
     deps: list[str] = field(default_factory=list)
     detected: list[str] = field(default_factory=list)
+    structure: SceneStructure | None = None
 
 
 class PackageChecker:
@@ -57,6 +59,9 @@ class PackageChecker:
         self.allowed_resources = frozenset(policy["allowed_resource_types"])
         self.edges: dict[str, set[str]] = {}
         self.deps: dict[str, set[str]] = {}
+        self.instances: dict[str, set[str]] = {}  # .tscn -> package .tscn it instances
+        self.includes: dict[str, set[str]] = {}  # shader-bearing file -> shader file it #includes
+        self.scenes: dict[str, list[NodeDef]] = {}
         self.detected = {"godot_text_scene_v1"}
 
     def run(self) -> Facts:
@@ -67,8 +72,23 @@ class PackageChecker:
                 self.sink.add(e.problem)
         reached, deps = self._closure()
         self._capabilities()
+        structure = self._structure()
         order = ("godot_text_scene_v1", "csg_static", "static_collision", "shader_source")
-        return Facts(sorted(reached), sorted(deps), [c for c in order if c in self.detected])
+        return Facts(sorted(reached), sorted(deps), [c for c in order if c in self.detected], structure)
+
+    def _structure(self) -> SceneStructure | None:
+        cyclic = False
+        for kind, graph in (("instance_cycle", self.instances), ("include_cycle", self.includes)):
+            for cycle in find_cycles(graph):
+                cyclic = True
+                self.sink.error("unsafe_package", kind, "cycle: " + " -> ".join(cycle), cycle[0])
+        if cyclic:
+            return None
+        try:
+            return build_structure(self.scenes, self.manifest.entry_scene)
+        except SourcePackageError as e:
+            self.sink.add(e.problem)
+            return None
 
     def _check_file(self, path: str) -> None:
         suffix = posixpath.splitext(path)[1]
@@ -118,6 +138,7 @@ class PackageChecker:
                                 f"#include {m.group(1).strip()} leaves the package or is unmapped (line {line})", path)
             else:
                 self.edges.setdefault(path, set()).add(target)
+                self.includes.setdefault(path, set()).add(target)
 
     def resolve_include(self, from_path: str, target: str) -> str | None:
         if target.startswith("res://"):
@@ -173,6 +194,8 @@ class _TextRules:
         self._ext_paths()
         self._nodes()
         self._inline_shaders()
+        if self.path.endswith(".tscn"):
+            self.ck.scenes[self.path] = scene_defs(self.doc, self.target)
 
     def _index(self) -> None:
         for sec in self.doc.ext_resources() + self.doc.sub_resources():
@@ -285,6 +308,8 @@ class _TextRules:
         target = self.target.get(ref.id) if isinstance(ref, Ref) and ref.kind == "ExtResource" else None
         if target is None or not (target.startswith("dep:") or target.endswith((".tscn", ".glb"))):
             self.err("bad_instance", "instance must reference a package .tscn/.glb or an asset dependency", sec.line)
+        elif target.endswith(".tscn"):
+            self.ck.instances.setdefault(self.path, set()).add(target)
 
     def _inline_shaders(self) -> None:
         for sec in self.doc.sections:

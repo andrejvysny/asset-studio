@@ -190,13 +190,25 @@ class AssetIndex:
               offset: int = 0, tags: list[str] | None = None) -> tuple[list[dict[str, Any]], int]:
         if categories is not None and not categories:
             return [], 0
+        rows, total, _ = self.query_at_revision(categories=categories, kind=kind, origin=origin, q=q,
+                                                family_id=family_id, limit=limit, offset=offset, tags=tags)
+        return rows, total
+
+    def query_at_revision(self, *, categories: set[str] | None = None, kind: str | None = None,
+                          origin: str | None = None, q: str | None = None, family_id: str | None = None,
+                          limit: int = 60, offset: int = 0, tags: list[str] | None = None
+                          ) -> tuple[list[dict[str, Any]], int, int]:
+        """(rows, total, revision) read under one lock: a page cursor names exactly the snapshot it came from."""
+        if categories is not None and not categories:
+            return [], 0, self.revision()
         clause, args = _filter(categories, kind, origin, q, family_id, tags)
         with self._lock:
+            rev = self._revision_locked()
             total = int(self._db.execute(f"SELECT COUNT(*) FROM assets WHERE {clause}", args).fetchone()[0])
             rows = self._db.execute(
                 f"SELECT * FROM assets WHERE {clause} ORDER BY {_ORDER} LIMIT ? OFFSET ?",
                 [*args, limit, offset]).fetchall()
-        return [_out(r) for r in rows], total
+        return [_out(r) for r in rows], total, rev
 
     def query_grouped(self, *, categories: set[str] | None = None, kind: str | None = None,
                       origin: str | None = None, q: str | None = None, family_id: str | None = None,

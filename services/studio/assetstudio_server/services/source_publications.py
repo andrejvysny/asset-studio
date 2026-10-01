@@ -2,7 +2,10 @@
 library mutation) then commit (one immutable version: portable GLB + source package + descriptor + report).
 
 Replay safety: every identity derives from the idempotency key (`op_id`), the publish receipt in the library is the
-durable commit point, and the staging directory is only removed after the journal records the response.
+durable commit point, and the staging directory is only removed after the journal records the response. The key is
+bound to the whole semantic request plus the publisher's immutable credential id (`_binding`): an intent record is
+created before any effect and the digest is stored with the publication, so crash recovery and replays by a different
+request or credential conflict. Commits of one op are serialized; previews are owned by the credential id.
 """
 from __future__ import annotations
 
@@ -10,6 +13,9 @@ import hashlib
 import json
 import logging
 import shutil
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,20 +33,21 @@ from assetstudio_storage.publication import NewAsset, PublishRequest, StalePoint
 from assetstudio_storage.repo import Conflict, NotFound, StorageError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..integration_api.errors import IntegrationError
-from ..integration_api.principal import Principal
 from ..journal import IdempotencyConflict
 from ..registry import ProjectContext
 from ..secure_files import write_private
 from ..studio import Studio
 from . import deliveries as svc
 from . import source_publication_checks as chk
+from .principals import Principal, ServiceError
 from .records import cmd_payload
 
 log = logging.getLogger("assetstudio.integration")
 EXPIRY, ORPHAN_AGE, SWEEP_BATCH = timedelta(hours=24), timedelta(hours=1), 50
 REQUIRED_PARTS, OPTIONAL_PARTS = ("portable", "descriptor"), ("source", "report", "thumbnail")
 ACTION = "integration_publish"
+_OP_LOCKS: dict[str, list[Any]] = {}  # op_id -> [lock, users]; dropped when unused
+_OP_LOCKS_GUARD = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -115,15 +122,16 @@ def _expired(directory: Path, now: datetime) -> bool:
         return False
 
 
-def sweep_expired(settings: Any, now: datetime | None = None) -> int:
-    """Remove up to SWEEP_BATCH expired preview directories (receipt expiry, or receipt-less and older than 1 h)."""
+def sweep_expired(settings: Any, now: datetime | None = None, active: frozenset[str] = frozenset()) -> int:
+    """Remove up to SWEEP_BATCH expired preview directories (receipt expiry, or receipt-less and older than 1 h);
+    directories named in `active` are in use and never removed."""
     root, now, removed = staging_root(settings), now or _now(), 0
     if not root.is_dir():
         return 0
     for d in sorted(root.iterdir()):
         if removed >= SWEEP_BATCH:
             break
-        if d.is_dir() and d.name.startswith("ipv_") and _expired(d, now):
+        if d.is_dir() and d.name.startswith("ipv_") and d.name not in active and _expired(d, now):
             shutil.rmtree(d, ignore_errors=True)
             removed += 1
     return removed
@@ -131,11 +139,11 @@ def sweep_expired(settings: Any, now: datetime | None = None) -> int:
 
 # --- preview ---------------------------------------------------------------------------------------------------------
 def preview(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, parts: dict[str, StagedPart],
-            capabilities: dict[str, Any]) -> dict[str, Any]:
+            capabilities: dict[str, Any], active: frozenset[str] = frozenset()) -> dict[str, Any]:
     ctx.require_writable()
     directory = next(iter(parts.values())).path.parent.parent
     try:
-        sweep_expired(studio.settings)
+        sweep_expired(studio.settings, active=active)
         receipt = _build_preview(studio, ctx, who, server_id, parts, capabilities, directory)
         write_private(directory / "receipt.json", receipt)
     except BaseException:
@@ -149,7 +157,7 @@ def _require_parts(parts: dict[str, StagedPart]) -> None:
     if ("source" in parts) != ("report" in parts):
         missing.append("report" if "source" in parts else "source")
     if missing:
-        raise IntegrationError(400, "invalid_request", "missing or unexpected multipart parts",
+        raise ServiceError("invalid_request", "missing or unexpected multipart parts",
                                details={"parts": sorted(set(missing))})
 
 
@@ -174,6 +182,7 @@ def _build_preview(studio: Studio, ctx: ProjectContext, who: Principal, server_i
     raw = draft_bytes(draft)
     now = _now()
     return {"preview_id": directory.name, "library_id": ctx.id, "token_name": who.token_name,
+            "credential_id": who.credential_id,
             "created_at": _iso(now), "expires_at": _iso(now + EXPIRY),
             "parts": {n: {"sha256": p.sha256, "size": p.size} for n, p in sorted(parts.items())},
             "package_sha256": parts["source"].sha256 if "source" in parts else None,
@@ -195,7 +204,8 @@ def _check_source(parts: dict[str, StagedPart], draft: Any, capabilities: dict[s
                "detected_capabilities": facts.report.detected_capabilities,
                "dependency_closure": facts.report.dependency_closure,
                "asset_dependencies": facts.report.asset_dependencies, "warnings": facts.warnings,
-               "source_godot_version": facts.manifest.source_godot_version, "source_surfaces": surfaces}
+               "source_godot_version": facts.manifest.source_godot_version, "source_surfaces": surfaces,
+               "evidence": facts.evidence}
     return summary, set(facts.warnings) | set(chk.report_warnings(report))
 
 
@@ -211,6 +221,53 @@ def _publish_receipt(ctx: ProjectContext, op_id: str) -> dict[str, Any] | None:
         return None
 
 
+def _binding(req: CommitPublication, who: Principal) -> str:
+    """Digest of the whole semantic request (not the retry-only fields) and the publisher's credential."""
+    body = {k: v for k, v in cmd_payload(req).items() if k not in ("idempotency_key", "job_id")}
+    return hashlib.sha256(canonical_bytes({**body, "credential_id": who.credential_id})).hexdigest()
+
+
+@contextmanager
+def _op_lock(op_id: str) -> Iterator[None]:
+    with _OP_LOCKS_GUARD:
+        entry = _OP_LOCKS.setdefault(op_id, [threading.Lock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _OP_LOCKS_GUARD:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _OP_LOCKS.pop(op_id, None)
+
+
+def _intent_key(op_id: str) -> str:
+    return f"integration_ops/{op_id}.json"
+
+
+def _record_intent(ctx: ProjectContext, who: Principal, req: CommitPublication, op_id: str, digest: str) -> None:
+    """Create-if-absent before any effect: a crashed attempt keeps the key bound to its request and credential."""
+    record = {"op_id": op_id, "request_sha256": digest, "credential_id": who.credential_id,
+              "preview_id": req.preview_id}
+    try:
+        ctx.store.create(_intent_key(op_id), record)
+    except Conflict:
+        if _intent_digest(ctx, op_id) != digest:
+            raise _key_reused() from None
+
+
+def _intent_digest(ctx: ProjectContext, op_id: str) -> str | None:
+    try:
+        return json.loads(ctx.store.repo.read_object(_intent_key(op_id)).data).get("request_sha256")
+    except NotFound:
+        return None
+
+
+def _key_reused() -> ServiceError:
+    return ServiceError("idempotency_conflict", "idempotency key reused with a different request")
+
+
 def operation(ctx: ProjectContext, key: str) -> dict[str, Any]:
     op_id = _op_id(ctx, key)
     done = _publish_receipt(ctx, op_id)
@@ -224,28 +281,37 @@ def commit(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, 
            limits: dict[str, Any] | None = None) -> dict[str, Any]:
     ctx.require_writable()
     if (req.target_asset_id is None) != (req.expected_current_version is None):
-        raise IntegrationError(400, "invalid_request",
+        raise ServiceError("invalid_request",
                                "target_asset_id and expected_current_version are given together or not at all")
     if not is_id(req.preview_id, "ipv"):
-        raise IntegrationError(400, "invalid_request", "invalid preview id")
-    op_id, payload = _op_id(ctx, req.idempotency_key), cmd_payload(req)
+        raise ServiceError("invalid_request", "invalid preview id")
+    op_id = _op_id(ctx, req.idempotency_key)
+    with _op_lock(op_id):
+        return _commit_locked(studio, ctx, who, server_id, req, op_id, limits)
+
+
+def _commit_locked(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, req: CommitPublication,
+                   op_id: str, limits: dict[str, Any] | None) -> dict[str, Any]:
+    payload = cmd_payload(req)
     try:
         prior = studio.journal.command_result(ctx.id, ACTION, req.idempotency_key, payload)
     except IdempotencyConflict:
-        raise IntegrationError(409, "idempotency_conflict", "idempotency key reused with a different request") \
-            from None
+        raise _key_reused() from None
     if prior is not None:
-        return _replay(studio, ctx, server_id, req, prior, limits)
+        return _replay(studio, ctx, who, server_id, req, prior, limits)
     done = _publish_receipt(ctx, op_id)
     if done is None:
         done = _publish_staged(studio, ctx, who, server_id, req, op_id)
     else:
-        _check_same_request(ctx, done, req)
+        _check_same_request(ctx, done, req, who)
     return _finalize(studio, ctx, server_id, req, payload, done, limits)
 
 
-def _replay(studio: Studio, ctx: ProjectContext, server_id: str, req: CommitPublication, prior: dict[str, Any],
-            limits: dict[str, Any] | None) -> dict[str, Any]:
+def _replay(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, req: CommitPublication,
+            prior: dict[str, Any], limits: dict[str, Any] | None) -> dict[str, Any]:
+    done = _publish_receipt(ctx, _op_id(ctx, req.idempotency_key))
+    if done is not None:
+        _check_same_request(ctx, done, req, who)
     discard(studio.settings, req.preview_id)
     if prior["deliveries"]:
         return prior
@@ -253,23 +319,32 @@ def _replay(studio: Studio, ctx: ProjectContext, server_id: str, req: CommitPubl
     return {**prior, "deliveries": _deliveries(studio, ctx, server_id, ref["asset_id"], ref["version_id"], limits)}
 
 
-def _check_same_request(ctx: ProjectContext, done: dict[str, Any], req: CommitPublication) -> None:
+def _check_same_request(ctx: ProjectContext, done: dict[str, Any], req: CommitPublication, who: Principal) -> None:
     version = ctx.store.get(version_key(done["asset_id"], done["version_id"]), AssetVersion)[0]
     mine = version.sources.get("integration", {})
-    if mine.get("preview_id") != req.preview_id or mine.get("package_sha256") != req.package_sha256:
-        raise IntegrationError(409, "idempotency_conflict", "idempotency key reused with a different request")
+    expected = mine.get("request_sha256")
+    if expected is None:
+        expected = _intent_digest(ctx, _op_id(ctx, req.idempotency_key))
+    if expected is not None:
+        same = expected == _binding(req, who)
+    else:  # published before the binding existed
+        same = mine.get("preview_id") == req.preview_id and mine.get("package_sha256") == req.package_sha256
+    if not same:
+        raise _key_reused()
 
 
 def _load_preview(studio: Studio, ctx: ProjectContext, who: Principal, req: CommitPublication) -> dict[str, Any]:
     directory = staging_root(studio.settings) / req.preview_id
     receipt = _read_receipt(directory)
     if receipt is None or _parse(receipt["expires_at"]) < _now():
-        raise IntegrationError(410, "preview_expired", "preview expired or unknown; upload again")
-    if receipt["library_id"] != ctx.id or receipt["token_name"] != who.token_name:
-        raise IntegrationError(403, "forbidden", "token does not grant this access")
+        raise ServiceError("preview_expired", "preview expired or unknown; upload again")
+    if "credential_id" not in receipt:  # written before previews were bound to the credential
+        raise ServiceError("preview_expired", "preview expired or unknown; upload again")
+    if receipt["library_id"] != ctx.id or receipt["credential_id"] != who.credential_id:
+        raise ServiceError("forbidden", "token does not grant this access")
     claimed = (req.package_sha256, req.portable_sha256, req.descriptor_draft_sha256)
     if claimed != (receipt["package_sha256"], receipt["portable_sha256"], receipt["descriptor_draft_sha256"]):
-        raise IntegrationError(409, "integrity_mismatch", "request hashes differ from the preview receipt")
+        raise ServiceError("integrity_mismatch", "request hashes differ from the preview receipt")
     for name, meta in receipt["parts"].items():
         h, size = hashlib.sha256(), 0
         with (directory / "parts" / name).open("rb") as fp:
@@ -277,7 +352,7 @@ def _load_preview(studio: Studio, ctx: ProjectContext, who: Principal, req: Comm
                 h.update(chunk)
                 size += len(chunk)
         if (h.hexdigest(), size) != (meta["sha256"], meta["size"]):
-            raise IntegrationError(409, "integrity_mismatch", f"staged part {name} changed since preview")
+            raise ServiceError("integrity_mismatch", f"staged part {name} changed since preview")
     return receipt
 
 
@@ -290,14 +365,14 @@ def _target(ctx: ProjectContext, req: CommitPublication, op_id: str) -> str:
     except NotFound:
         manifest = None
     if manifest is None or manifest.kind != Kind.model3d:
-        raise IntegrationError(404, "asset_not_found", "asset not found")
+        raise ServiceError("asset_not_found", "asset not found")
     if manifest.current_version_id != req.expected_current_version:
         raise _stale(manifest.current_version_id)
     return manifest.asset_id
 
 
-def _stale(current: str | None) -> IntegrationError:
-    return IntegrationError(409, "stale_pointer", "the asset changed since it was read",
+def _stale(current: str | None) -> ServiceError:
+    return ServiceError("stale_pointer", "the asset changed since it was read",
                             details={"current_version_id": current})
 
 
@@ -317,20 +392,27 @@ def _publish_staged(studio: Studio, ctx: ProjectContext, who: Principal, server_
     try:
         receipt = _load_preview(studio, ctx, who, req)
     except FileNotFoundError:
-        raise IntegrationError(410, "preview_expired", "preview expired or unknown; upload again") from None
+        raise ServiceError("preview_expired", "preview expired or unknown; upload again") from None
     cfg, _ = ctx.config()
     if req.category_id is not None and cfg.category(req.category_id) is None:
         raise chk.invalid(f"unknown category {req.category_id}", "unknown_category")
-    directory = staging_root(studio.settings) / req.preview_id
+    parts, digest = staging_root(studio.settings) / req.preview_id / "parts", _binding(req, who)
     try:
+        png = _preview_png(ctx, parts, derived_id("art", ctx.id, op_id, "preview"), "thumbnail" in receipt["parts"])
         with ctx.store.lock:
+            if (done := _publish_receipt(ctx, op_id)) is not None:  # committed meanwhile: no stale-pointer check
+                _check_same_request(ctx, done, req, who)
+                return done
+            if (bound := _intent_digest(ctx, op_id)) is not None and bound != digest:
+                raise _key_reused()  # before _target: a changed retry is a conflict, never a stale pointer
             asset_id = _target(ctx, req, op_id)
+            _record_intent(ctx, who, req, op_id, digest)
             version_id = derived_id("ver", asset_id, op_id)
             raw = _descriptor(ctx, who, server_id, req, receipt, asset_id, version_id)
-            roles = _register(ctx, who, req, receipt, directory / "parts", op_id, raw)
-            res = _publish_roles(ctx, who, req, receipt, op_id, asset_id, roles)
+            roles = _register(ctx, who, req, parts, op_id, raw, png, receipt)
+            res = _publish_roles(ctx, who, req, receipt, op_id, asset_id, roles, digest)
     except FileNotFoundError:
-        raise IntegrationError(410, "preview_expired", "preview expired or unknown; upload again") from None
+        raise ServiceError("preview_expired", "preview expired or unknown; upload again") from None
     return {"asset_id": res.asset_id, "version_id": res.version_id, "display_version": res.display_version}
 
 
@@ -366,8 +448,8 @@ def _descriptor(ctx: ProjectContext, who: Principal, server_id: str, req: Commit
     return descriptor_bytes(descriptor)
 
 
-def _register(ctx: ProjectContext, who: Principal, req: CommitPublication, receipt: dict[str, Any], parts: Path,
-              op_id: str, descriptor: bytes) -> dict[str, str]:
+def _register(ctx: ProjectContext, who: Principal, req: CommitPublication, parts: Path, op_id: str,
+              descriptor: bytes, png: bytes | None, receipt: dict[str, Any]) -> dict[str, str]:
     store = ctx.store
     src = {"integration": {"actor": who.actor, "preview_id": req.preview_id}}
 
@@ -377,8 +459,7 @@ def _register(ctx: ProjectContext, who: Principal, req: CommitPublication, recei
 
     with (parts / "portable").open("rb") as fp:
         roles = {"model": put("model", fp, "model/gltf-binary", receipt["portable_sha256"])}
-    art_id = derived_id("art", ctx.id, op_id, "preview")
-    if (png := _preview_png(ctx, parts, art_id, "thumbnail" in receipt["parts"])) is not None:
+    if png is not None:
         roles["preview"] = put("preview", png, "image/png", lineage=[roles["model"]])
     roles["descriptor"] = put("descriptor", descriptor, "application/json")
     if "source" in receipt["parts"]:
@@ -407,12 +488,13 @@ def _preview_png(ctx: ProjectContext, parts: Path, art_id: str, has_thumbnail: b
 
 
 def _publish_roles(ctx: ProjectContext, who: Principal, req: CommitPublication, receipt: dict[str, Any], op_id: str,
-                   asset_id: str, roles: dict[str, str]) -> Any:
+                   asset_id: str, roles: dict[str, str], digest: str) -> Any:
     existing = None if req.target_asset_id is None else asset_id
     new = None if existing else NewAsset(_free_name(ctx, req.name, asset_id), req.name, Kind.model3d, Origin.imported,
                                          req.category_id, sorted(set(req.tags)))
     status = "unknown" if req.licence == "unknown" else "review"
-    integration = {"actor": who.actor, "preview_id": req.preview_id, "package_sha256": req.package_sha256}
+    integration = {"actor": who.actor, "preview_id": req.preview_id, "package_sha256": req.package_sha256,
+                   "request_sha256": digest, "credential_id": who.credential_id}
     try:
         return publish(ctx.store, PublishRequest(
             op_id=op_id, idempotency_key=req.idempotency_key, artifacts=roles,
@@ -431,7 +513,7 @@ def _publish_roles(ctx: ProjectContext, who: Principal, req: CommitPublication, 
         current = ctx.store.get(manifest_key(asset_id), AssetManifest)[0].current_version_id
         raise _stale(current) from None
     except (Conflict, StorageError) as e:
-        raise IntegrationError(409, getattr(e, "code", "conflict"), str(e)[:300]) from None
+        raise ServiceError(getattr(e, "code", "conflict"), str(e)[:300], status=409) from None
 
 
 def _deliveries(studio: Studio, ctx: ProjectContext, server_id: str, asset_id: str, version_id: str,

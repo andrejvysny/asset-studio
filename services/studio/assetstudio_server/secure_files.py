@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 
@@ -46,3 +48,16 @@ def create_private_exclusive(path: Path, obj: object) -> bool:
         os.fsync(f.fileno())
     _fsync_dir(path.parent)
     return True
+
+
+@contextlib.contextmanager
+def exclusive(path: Path) -> Iterator[None]:
+    """Cross-process writer lock for `path`'s whole read-modify-write. Locks a separate, never-replaced
+    `<name>.lock` file: a lock on the data file itself would be lost when write_private() replaces it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path.with_name(path.name + ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # closing releases the flock

@@ -10,6 +10,7 @@ from ..services import source_publications
 from ..settings import Settings
 from ..studio import Studio
 from . import errors, routes_assets, routes_changes, routes_meta, routes_publish
+from .admission import Admission
 from .auth import IntegrationAuth
 from .capabilities import load_contracts
 from .identity import ServerIdentity, load_or_create
@@ -65,6 +66,7 @@ def build_integration_app(studio: Studio, settings: Settings, *, tokens: Integra
     app.state.tokens = tokens or token_store(settings)
     app.state.identity = identity or load_or_create(settings.integration_dir / "server.json")
     app.state.contracts = load_contracts(settings.contracts_dir)
+    app.state.admission = Admission(settings)
     errors.install(app)
     for router in ROUTERS:
         app.include_router(router)

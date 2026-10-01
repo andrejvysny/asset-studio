@@ -24,7 +24,11 @@ from .studio import Studio, build_studio
 CSRF_HEADER = "x-assetstudio"
 
 
-def create_app(settings: Settings | None = None, studio: Studio | None = None) -> FastAPI:
+log = logging.getLogger("assetstudio")
+
+
+def create_app(settings: Settings | None = None, studio: Studio | None = None, *, owns_studio: bool = True) -> FastAPI:
+    """owns_studio=False: the caller closes the Studio after ALL listeners (companions share it) have stopped."""
     settings = settings or (studio.settings if studio else Settings())
     st = studio or build_studio(settings)
 
@@ -38,7 +42,10 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None) -
         yield
         if coord is not None:
             coord.stop()
-        st.close()
+        if owns_studio:
+            if not st.mutations.close_and_wait(30):
+                log.error("integration mutations still running after 30s; closing Studio anyway")
+            st.close()
 
     app = FastAPI(title="AssetStudio", version="0.2.0", lifespan=lifespan)
     app.state.studio = st
@@ -115,15 +122,50 @@ class _CompanionServer(uvicorn.Server):
         return contextlib.nullcontext()
 
 
+async def _guarded(name: str, server: uvicorn.Server, everyone: list[uvicorn.Server], failures: list[str]) -> None:
+    """A listener that fails to start/serve takes the whole process down; any listener ending stops the others."""
+    try:
+        await server.serve()
+        # uvicorn returns quietly when startup fails without an exit request of its own (e.g. lifespan error)
+        if not server.started and not any(o.should_exit for o in everyone if o is not server):
+            raise RuntimeError("listener did not start")
+    except (SystemExit, Exception) as e:  # uvicorn bind failure raises SystemExit
+        if not any(o.should_exit for o in everyone if o is not server):
+            log.error("%s listener failed (%s: %s); stopping Studio", name, type(e).__name__, e)
+            failures.append(name)
+    finally:
+        for o in everyone:
+            o.should_exit = True
+
+
+def _close_studio(st: Studio, timeout: float = 60) -> None:
+    if not st.mutations.close_and_wait(timeout):
+        log.error("integration mutations still running after %ss; closing Studio anyway", timeout)
+    st.close()
+
+
 def run() -> None:
     logging.basicConfig(level=logging.INFO)
     settings = Settings()
-    app = create_app(settings)
+    app = create_app(settings, owns_studio=False)
+    st: Studio = app.state.studio
+    failures: list[str] = []
+    try:
+        _serve_all(app, st, settings, failures)
+    finally:
+        _close_studio(st)  # every listener has stopped (or never started): the only close
+    if failures:
+        raise SystemExit(1)
+
+
+def _serve_all(app: FastAPI, st: Studio, settings: Settings, failures: list[str]) -> None:
     companions: list[uvicorn.Server] = []
+    names: list[str] = []
     if settings.mcp_enabled:
         from .mcp_api.server import build_mcp_app
 
-        mcp_app = build_mcp_app(app, app.state.studio, settings)
+        mcp_app = build_mcp_app(app, st, settings)
+        names.append("mcp")
         companions.append(_CompanionServer(uvicorn.Config(
             mcp_app, host=settings.mcp_host, port=settings.mcp_port, log_level="info", timeout_graceful_shutdown=3)))
     if settings.integration_enabled:
@@ -134,8 +176,9 @@ def run() -> None:
             logging.getLogger("assetstudio.integration").error(problem)
             raise SystemExit(2)
         log_bind(settings)
+        names.append("integration")
         companions.append(_CompanionServer(uvicorn.Config(
-            build_integration_app(app.state.studio, settings), host=settings.integration_host,
+            build_integration_app(st, settings), host=settings.integration_host,
             port=settings.integration_port, log_level="info", timeout_graceful_shutdown=3,
             ssl_certfile=settings.integration_tls_cert or None, ssl_keyfile=settings.integration_tls_key or None)))
     main = _MainServer(uvicorn.Config(app, host=os.environ.get("STUDIO_HOST", "127.0.0.1"),
@@ -143,6 +186,9 @@ def run() -> None:
                                       timeout_graceful_shutdown=3),  # open SSE streams must not block shutdown
                        companions)
 
+    everyone = [main, *companions]
+
     async def serve() -> None:
-        await asyncio.gather(main.serve(), *(c.serve() for c in companions))
+        await asyncio.gather(_guarded("main", main, everyone, failures),
+                             *(_guarded(n, c, everyone, failures) for n, c in zip(names, companions, strict=False)))
     asyncio.run(serve())

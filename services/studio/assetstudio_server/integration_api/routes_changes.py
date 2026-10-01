@@ -60,9 +60,12 @@ def _reset(bus: EventBus) -> dict[str, Any]:
     return {"cursor": encode_cursor(bus.epoch, bus.seq), "events": [], "reset_required": True}
 
 
-def _collect(bus: EventBus, pos: int, allowed: frozenset[str]) -> tuple[int, list[dict[str, Any]]]:
-    """Advance past every event (visible or not); stop at the cap so the cursor never skips unsent ones."""
-    batch, _ = bus.since(pos, timeout=0)
+def _collect(bus: EventBus, pos: int, allowed: frozenset[str]) -> tuple[int, list[dict[str, Any]], bool]:
+    """Advance past every event (visible or not); stop at the cap so the cursor never skips unsent ones.
+    Third value: the ring dropped events after `pos` (batch and gap come from one bus snapshot) -> client must reset."""
+    batch, expired = bus.since(pos, timeout=0)
+    if expired:
+        return pos, [], True
     out: list[dict[str, Any]] = []
     for e in batch:
         if len(out) >= MAX_EVENTS:
@@ -71,7 +74,7 @@ def _collect(bus: EventBus, pos: int, allowed: frozenset[str]) -> tuple[int, lis
         shown = project_event(e, allowed)
         if shown is not None:
             out.append(shown)
-    return pos, out
+    return pos, out, False
 
 
 @router.get("/changes")
@@ -84,11 +87,13 @@ async def changes(request: Request, cursor: str | None = None,
     if cursor is None:
         return {"cursor": encode_cursor(bus.epoch, bus.seq), "events": [], "reset_required": False}
     epoch, pos = decode_cursor(cursor)
-    if epoch != bus.epoch or pos > bus.seq or bus.since(pos, timeout=0)[1]:
+    if epoch != bus.epoch or pos > bus.seq:
         return _reset(bus)
     deadline = time.monotonic() + timeout_s
     while True:
-        pos, events = _collect(bus, pos, who.library_ids)
+        pos, events, gap = _collect(bus, pos, who.library_ids)
+        if gap:
+            return _reset(bus)
         if events or time.monotonic() >= deadline or await request.is_disconnected():
             return {"cursor": encode_cursor(bus.epoch, pos), "events": events, "reset_required": False}
         await asyncio.sleep(min(POLL_S, max(0.0, deadline - time.monotonic())))

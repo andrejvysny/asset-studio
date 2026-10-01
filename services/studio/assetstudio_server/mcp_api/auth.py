@@ -20,7 +20,7 @@ from typing import Literal
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ..secure_files import write_private
+from ..secure_files import exclusive, write_private
 
 Scope_ = Literal["read", "full"]
 TOKEN_PREFIX = "ast_"
@@ -56,18 +56,19 @@ class TokenStore:
         self.path = path
         self._lock = threading.Lock()
         self._tokens: dict[str, TokenInfo] = {}
-        self._mtime: float | None = None
+        self._mtime: tuple[int, int, int] | None = None
         self._used_path = path.with_suffix(".used.json")
         self._used: dict[str, str] = {}
         self._used_written = 0.0
 
-    def _load(self) -> None:
+    def _load(self, force: bool = False) -> None:
         try:
-            mtime = self.path.stat().st_mtime
+            st = self.path.stat()
         except FileNotFoundError:
             self._tokens, self._mtime = {}, None
             return
-        if mtime == self._mtime:
+        mtime = (st.st_mtime_ns, st.st_size, st.st_ino)  # replace() changes the inode even within one mtime tick
+        if mtime == self._mtime and not force:
             return
         raw = json.loads(self.path.read_text())
         self._tokens = {t["name"]: TokenInfo(**t) for t in raw.get("tokens", [])}
@@ -75,7 +76,8 @@ class TokenStore:
 
     def _save(self) -> None:
         _write_private(self.path, {"tokens": [asdict(t) for t in self._tokens.values()]})
-        self._mtime = self.path.stat().st_mtime
+        st = self.path.stat()
+        self._mtime = (st.st_mtime_ns, st.st_size, st.st_ino)
 
     def create(self, name: str, scope: Scope_) -> str:
         """Returns the plaintext token; it is never stored or shown again."""
@@ -84,8 +86,8 @@ class TokenStore:
         if scope not in ("read", "full"):
             raise ValueError("scope must be 'read' or 'full'")
         token = TOKEN_PREFIX + secrets.token_urlsafe(32)
-        with self._lock:
-            self._load()
+        with self._lock, exclusive(self.path):
+            self._load(force=True)
             if name in self._tokens:
                 raise ValueError(f"token {name!r} already exists; revoke it first")
             self._tokens[name] = TokenInfo(name=name, scope=scope, sha256=_digest(token), created_at=_now())
@@ -93,8 +95,8 @@ class TokenStore:
         return token
 
     def revoke(self, name: str) -> bool:
-        with self._lock:
-            self._load()
+        with self._lock, exclusive(self.path):
+            self._load(force=True)
             if self._tokens.pop(name, None) is None:
                 return False
             self._save()
