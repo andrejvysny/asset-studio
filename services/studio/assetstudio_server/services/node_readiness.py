@@ -13,6 +13,7 @@ from assetstudio_protocol.inventory import Inventory
 
 from ..models import ModelStatus, load_lock
 from ..studio import Studio
+from .eligibility import FEATURE_PREFIX, RESEARCH_LABEL, Requirement, eligible, requirement_for
 from .placement import catalog_sha256, session_fresh, slot_problem
 
 __all__ = ["RunnerFacts", "fresh_inventories", "node_export_features", "node_exporters", "node_model_statuses",
@@ -85,25 +86,41 @@ def node_model_statuses(studio: Studio) -> dict[str, ModelStatus]:
     return out
 
 
-def operation_readiness(studio: Studio, operation: str) -> tuple[bool, list[str]]:
-    """True if some fresh slot could serve `operation` ignoring transient occupancy; else why none can."""
+def _servable_slots(studio: Studio, f: RunnerFacts, req: Requirement) -> tuple[list[str], list[str]]:
+    """(slot ids that could ever serve `req`, why the others cannot): occupancy ignored, requirement exact."""
+    devices = {d["uuid"]: d for d in studio.journal.runners.devices(f.runner_id)}
+    ok: list[str] = []
+    why: list[str] = []
+    for slot in studio.journal.runners.slots(f.runner_id):
+        if (p := slot_problem(slot, devices, set(), req.operation, transient=False)) is not None:
+            why.append(f"runner {f.name} slot {slot['slot_id']}: {p}")
+            continue
+        inv_slot = next(s for s in f.inventory.slots if s.slot_id == slot["slot_id"])
+        good, reasons = eligible(f.name, f.inventory, inv_slot, req, fresh=True)  # fresh_inventories filtered
+        if good:
+            ok.append(slot["slot_id"])
+        else:
+            why.append(f"runner {f.name}: {'; '.join(reasons)}")
+    return ok, why
+
+
+def operation_readiness(studio: Studio, operation: str,
+                        params: dict[str, Any] | None = None) -> tuple[bool, list[str]]:
+    """True if some fresh slot could serve the call ignoring transient occupancy; else the exact unmet requirement."""
     facts = fresh_inventories(studio)
     if not facts:
         return False, [NO_RUNNER]
+    req = requirement_for(operation, params)
     reasons: list[str] = []
     for f in facts:
         ops = f.group["operations"]
         if ops != "*" and operation not in ops:
             reasons.append(f"runner {f.name}: operation not allowed for runner group")
             continue
-        devices = {d["uuid"]: d for d in studio.journal.runners.devices(f.runner_id)}
-        slots = studio.journal.runners.slots(f.runner_id)
-        if not slots:
-            reasons.append(f"runner {f.name}: no slots advertised")
-        for slot in slots:
-            if (p := slot_problem(slot, devices, set(), operation, transient=False)) is None:
-                return True, []
-            reasons.append(f"runner {f.name} slot {slot['slot_id']}: {p}")
+        ok, why = _servable_slots(studio, f, req)
+        if ok:
+            return True, []
+        reasons += why or [f"runner {f.name}: no slots advertised"]
     return False, reasons
 
 
@@ -121,43 +138,35 @@ def nodes_simulated(studio: Studio) -> bool:
     return bool(facts) and all("simulated" in f.inventory.labels for f in facts)
 
 
+def _export_runners(studio: Studio) -> list[RunnerFacts]:
+    base = requirement_for("worker3d.export")
+    return [f for f in fresh_inventories(studio) if _servable_slots(studio, f, base)[0]]
+
+
 def node_exporters(studio: Studio) -> dict[str, bool]:
-    clean = research = False
-    for f in fresh_inventories(studio):
-        devices = {d["uuid"]: d for d in studio.journal.runners.devices(f.runner_id)}
-        can_export = any(slot_problem(s, devices, set(), "worker3d.export", transient=False) is None
-                         for s in studio.journal.runners.slots(f.runner_id))
-        clean = clean or can_export
-        research = research or (can_export and "exporter-research" in f.inventory.labels)
-    return {"clean": clean, "research": research}
+    runners = _export_runners(studio)
+    return {"clean": bool(runners), "research": any(RESEARCH_LABEL in f.inventory.labels for f in runners)}
 
 
 def node_export_features(studio: Studio) -> list[str]:
-    """Worker3d export features every export-capable runner advertises (`export-feature.<name>` labels).
-
-    Intersection, not union: placement does not route on these labels, so a feature counts only when any runner
-    that may receive the export supports it."""
-    common: set[str] | None = None
-    for f in fresh_inventories(studio):
-        devices = {d["uuid"]: d for d in studio.journal.runners.devices(f.runner_id)}
-        if not any(slot_problem(s, devices, set(), "worker3d.export", transient=False) is None
-                   for s in studio.journal.runners.slots(f.runner_id)):
-            continue
-        feats = {x.removeprefix("export-feature.") for x in f.inventory.labels if x.startswith("export-feature.")}
-        common = feats if common is None else common & feats
-    return sorted(common or ())
+    """Union of `export-feature.<name>` labels over export-capable runners: placement routes a call that needs a
+    feature only to a runner that has it, so one runner lacking it does not make it unavailable."""
+    return sorted({x.removeprefix(FEATURE_PREFIX) for f in _export_runners(studio) for x in f.inventory.labels
+                   if x.startswith(FEATURE_PREFIX)})
 
 
 def node_gpus(studio: Studio) -> list[dict[str, Any]]:
-    """Devices as runners advertise them. Usage is not reported, so it is 0 and `source` says so."""
+    """Devices as runners advertise them. Usage is not reported by the inventory/heartbeat protocol, so it is None
+    (unknown, never 0/idle) with no measurement time; `observed_at` is when the inventory was published."""
     out = []
     for f in fresh_inventories(studio):
         claims = {d["uuid"]: d["claim"] for d in studio.journal.runners.devices(f.runner_id)}
         lane = {u: s.capability for s in f.inventory.slots for u in s.device_uuids}
         for d in f.inventory.devices:
-            out.append({"index": str(d.index), "uuid": d.uuid, "name": d.name, "vram_used_mb": 0,
-                        "vram_total_mb": d.memory_mb, "util_pct": 0, "measured_at": f.inventory.observed_at,
-                        "source": f"runner {f.name} (usage not reported)", "lane": lane.get(d.uuid),
+            out.append({"index": str(d.index), "uuid": d.uuid, "name": d.name, "vram_used_mb": None,
+                        "vram_total_mb": d.memory_mb, "util_pct": None, "measured_at": None,
+                        "inventory_at": f.inventory.observed_at, "source": f"runner {f.name} (usage unknown)",
+                        "lane": lane.get(d.uuid),
                         "ownership": {"claim": claims.get(d.uuid, "unknown")}})
     return out
 

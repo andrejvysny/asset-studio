@@ -23,6 +23,7 @@ function gpuChip(rt: Runtime | null, lane: string): { text: string; color: strin
   const own = g.ownership;
   const running = rt.coordinator?.lanes[lane]?.running;
   if (own && own.state === "unknown" && own.last_error) return { text: "ownership unknown", color: BAD };
+  if (g.vram_used_mb === null || g.util_pct === null) return { text: running ? "busy · usage unknown" : "usage unknown", color: running ? WARN : NONE };
   if (running) return { text: `busy · ${g.util_pct}%`, color: WARN };
   return { text: `idle · ${Math.round(g.vram_used_mb / 1024)}/${Math.round(g.vram_total_mb / 1024)} GB`, color: OK };
 }

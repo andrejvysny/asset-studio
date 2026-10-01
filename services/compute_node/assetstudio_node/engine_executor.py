@@ -23,7 +23,7 @@ from .engines.aux import AuxClient
 from .engines.comfyui import ComfyEngine, WorkflowRegistry
 from .engines.fake import FakeAux, FakeEngine, FakeWorker3d
 from .engines.worker3d import Worker3dClient
-from .executor import ExecutionBlocked, ExecutionCancelled, ExecutionFailed
+from .executor import ExecutionBlocked, ExecutionCancelled, ExecutionFailed, engine_execution_id
 from .image_calls import Poll, run_edit, run_t2i
 from .state import RunnerState
 
@@ -87,9 +87,9 @@ def _single(blobs: Blobs, role: str) -> bytes:
 
 
 class EngineExecutor:
-    # Engine calls are keyed by Studio-chosen ids (prompt / execution id): re-running an interrupted call finds the
-    # engine's work instead of starting it again.
-    reconciles = True
+    # Image (Studio-chosen prompt id) and worker3d (Studio-chosen execution id) calls are found again by id after an
+    # interruption; the aux service is a synchronous HTTP call that only echoes the id, so it cannot be.
+    _RECONCILING = ("image.", "worker3d.")
 
     def __init__(self, config: RunnerConfig, state: RunnerState, engines: Engines, *,
                  sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
@@ -106,6 +106,18 @@ class EngineExecutor:
         return GpuLane(name=slot_id, workers=workers, next_epoch=lambda: state.next_epoch(slot_id))
 
     # -- Executor protocol ------------------------------------------------------------------------------------------
+
+    def reconciles(self, operation: str) -> bool:
+        return operation.startswith(self._RECONCILING)
+
+    def engine_execution_id(self, offer: Offer) -> str:
+        """The key the engine knows the call by: Studio's prompt / execution id where it sent one."""
+        try:
+            p = calls.parse_params(offer.operation, offer.params)
+        except ValueError:
+            return engine_execution_id(offer)  # execute() reports the invalid params
+        found = getattr(p, "execution_id", None) or getattr(p, "prompt_id", None)
+        return str(found) if found else engine_execution_id(offer)
 
     def execute(self, offer: Offer, inputs: dict[str, Path], out_dir: Path,
                 should_cancel: Callable[[], bool]) -> tuple[list[tuple[str, Path, str]], dict[str, Any]]:
@@ -166,7 +178,7 @@ class EngineExecutor:
         if offer.operation in ("aux.qa", "aux.cutout"):
             _single(blobs, "image")  # refuse before a GPU handoff is spent on an invalid call
         epoch = self._acquire(offer.slot_id, "aux")
-        res = _call_aux(aux, offer.operation, p, blobs, epoch)
+        res = _call_aux(aux, offer.operation, p, blobs, epoch, self.engine_execution_id(offer))
         doc, files = calls.encode_result(res)
         outputs: list[Output] = [("result.json", doc, "application/json"),
                                  *((k, v, "application/octet-stream") for k, v in files.items())]
@@ -182,8 +194,8 @@ class EngineExecutor:
         return [("result.bin", data, "application/octet-stream")], {**meta, "simulated": w.simulated}
 
 
-def _call_aux(aux: Any, op: str, p: Any, blobs: Blobs, epoch: int) -> dict[str, Any]:
-    common = {"epoch": epoch, "execution_id": p.execution_id}
+def _call_aux(aux: Any, op: str, p: Any, blobs: Blobs, epoch: int, execution_id: str) -> dict[str, Any]:
+    common = {"epoch": epoch, "execution_id": execution_id}
     triples = [(data, ref.role, ref.label) for ref, data in blobs]
     pairs = [(data, ref.role) for ref, data in blobs]
     if op == "aux.enhance":

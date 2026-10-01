@@ -32,8 +32,7 @@ Open:
 - [ ] research exporter in node mode depends on runner label `exporter-research` (untested on hardware)
 - [ ] merge of master (MCP, build profiles): geometry_policy in node mode needs every export-capable runner to
       advertise `export-feature.geometry_policy.v1` (placement does not route on it)
-- [ ] MCP in proxy auth mode: in-process loopback carries no proxy credential, so every MCP call gets 401 —
-      decide how the operator gate should trust the MCP loopback (security decision)
+- [x] MCP in proxy auth mode: loopback authorizes as agent principal from the MCP token (docs/modular/compute-runner.md R16)
 - [ ] reviewer role cannot cancel/retry tasks (owner only) — product decision
 - [ ] tests/unit/test_runner_agent.py and test_runner_services.py exceed 500 lines — split
 - [ ] P3–P7 detailed planning (source lifecycle, companion, providers, delivery, scale)

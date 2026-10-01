@@ -3,11 +3,15 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+from assetstudio_protocol.execution import Requirements
 from assetstudio_server.execution import NodeBackend
+from assetstudio_server.runner_errors import RunnerError
+from assetstudio_server.services import attempts
 from assetstudio_server.services import node_readiness as nr
 from assetstudio_server.services.placement import catalog_sha256
 
-from tests.unit.test_runner_services import MODEL, Handle, World, w  # noqa: F401 - `w` is the world fixture
+from tests.unit.test_runner_services import INPUT, MODEL, Handle, World, w  # noqa: F401 - `w` is the world fixture
 
 
 def _put(h: Handle, models: list[str] | None = None, revision: int = 1, *, status: str = "ok",
@@ -109,12 +113,91 @@ def test_exporters_follow_slots_and_the_research_label(w: World) -> None:  # noq
     assert NodeBackend(w.studio).worker3d().health()["exporters"] == {"clean": True, "research": True}  # type: ignore[union-attr]
 
 
-def test_export_features_are_the_intersection_over_export_capable_runners(w: World) -> None:  # noqa: F811
+def test_export_features_are_the_union_over_export_capable_runners(w: World) -> None:  # noqa: F811
     feat = "export-feature.geometry_policy.v1"
     a, b, c = w.runner("a"), w.runner("b"), w.runner("c")
     a.put_inventory(inv=_with_3d(a).model_copy(update={"labels": [feat]}))
-    _put(c, labels=[])  # no export slot: does not narrow the set
+    _put(c, labels=[])  # no export slot: contributes nothing
     assert nr.node_export_features(w.studio) == ["geometry_policy.v1"]
     assert NodeBackend(w.studio).worker3d().health()["export_features"] == ["geometry_policy.v1"]  # type: ignore[union-attr]
-    b.put_inventory(inv=_with_3d(b))  # an older worker without the feature may receive the export
-    assert nr.node_export_features(w.studio) == []
+    b.put_inventory(inv=_with_3d(b))  # a runner without the feature does not hide it: placement routes around it
+    assert nr.node_export_features(w.studio) == ["geometry_policy.v1"]
+
+
+EXPORT = {"execution_id": "e", "op": "export", "params": {"exporter": "clean", "small_components": "preserve"}}
+PLAIN = {"execution_id": "e", "op": "export", "params": {"exporter": "clean"}}
+FEAT = "export-feature.geometry_policy.v1"
+
+
+def _export_offer(w: World, key: str, params: dict[str, Any]) -> dict[str, Any]:  # noqa: F811
+    req = Requirements(capability="aux3d", engine="worker3d")
+    return attempts.offer_call(w.studio, task_id=w.task(), call_key=key, project_id=w.project_id,
+                               operation="worker3d.export", inputs=[INPUT], params=params, requirements=req)
+
+
+def _mixed(w: World) -> tuple[Handle, Handle]:  # noqa: F811
+    a, b = w.runner("a"), w.runner("b")
+    a.put_inventory(inv=_with_3d(a).model_copy(update={"labels": [FEAT]}))
+    b.put_inventory(inv=_with_3d(b))
+    return a, b
+
+
+def test_feature_call_is_placed_only_on_the_runner_with_the_feature(w: World) -> None:  # noqa: F811
+    a, b = _mixed(w)
+    assert nr.node_export_features(w.studio) == ["geometry_policy.v1"]
+    off = _export_offer(w, "t/needs", EXPORT)  # offer_call places at creation
+    assert off["runner_id"] == a.id and off["slot_id"] == "aux"
+    assert b.acquire() is None
+
+
+def test_unplaceable_feature_call_names_the_missing_feature(w: World) -> None:  # noqa: F811
+    b = w.runner("b")
+    b.put_inventory(inv=_with_3d(b))
+    off = _export_offer(w, "t/needs", EXPORT)
+    assert off["runner_id"] is None
+    reasons = w.get(off["id"])["progress"]["placement"]["reasons"]
+    assert any("slot aux lacks export-feature.geometry_policy.v1" in r for r in reasons)
+
+
+def test_plain_call_may_go_to_either_runner(w: World) -> None:  # noqa: F811
+    a, b = _mixed(w)
+    placed = {_export_offer(w, f"t/plain{i}", PLAIN)["runner_id"] for i in range(2)}
+    assert placed <= {a.id, b.id} and None not in placed
+    only_b = w.runner("c")
+    only_b.put_inventory(inv=_with_3d(only_b))
+    assert nr.operation_readiness(w.studio, "worker3d.export", PLAIN) == (True, [])
+
+
+def test_readiness_names_the_exact_unmet_requirement(w: World) -> None:  # noqa: F811
+    h = w.runner("b")
+    h.put_inventory(inv=_with_3d(h))
+    assert nr.operation_readiness(w.studio, "worker3d.export", PLAIN) == (True, [])
+    ok, reasons = nr.operation_readiness(w.studio, "worker3d.export", EXPORT)
+    assert not ok and "runner b: slot aux lacks export-feature.geometry_policy.v1" in reasons
+    ok, reasons = nr.operation_readiness(w.studio, "worker3d.export", {"params": {"exporter": "research"}})
+    assert not ok and any("exporter-research" in r for r in reasons)
+
+
+def test_acquire_binds_only_free_slots(w: World) -> None:  # noqa: F811
+    a, _ = _mixed(w)
+    _export_offer(w, "t/needs", EXPORT)
+    assert a.acquire(free_slots=["img"]) is None
+    assert a.acquire(free_slots=["aux"]) is not None
+
+
+def test_accept_rechecks_eligibility(w: World) -> None:  # noqa: F811
+    a, _ = _mixed(w)
+    _export_offer(w, "t/needs", EXPORT)
+    offer = a.acquire()
+    assert offer is not None
+    a.put_inventory(inv=_with_3d(a).model_copy(update={"revision": 3, "labels": []}))  # lost the feature
+    with pytest.raises(RunnerError) as e:
+        a.accept(offer)
+    assert e.value.code == "admission_rejected" and "geometry_policy.v1" in str(e.value)
+
+
+def test_unknown_gpu_usage_is_none_not_zero(w: World) -> None:  # noqa: F811
+    w.runner("r")
+    gpus = nr.node_gpus(w.studio)
+    assert gpus and all(g["vram_used_mb"] is None and g["util_pct"] is None and g["measured_at"] is None
+                        and "unknown" in g["source"] and g["vram_total_mb"] == 24000 for g in gpus)

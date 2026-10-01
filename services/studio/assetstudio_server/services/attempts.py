@@ -3,6 +3,7 @@ lease expiry (R5, R6, R8). Runner-reported progress lives in `attempt_reports` a
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timedelta
@@ -28,6 +29,7 @@ from ..attemptstore import AttemptStore, StaleRevision
 from ..journal import ADMISSION_PAUSED_KEY
 from ..runner_errors import RunnerError
 from ..studio import Studio
+from ..taskstore import fence_clause
 from ._runner_util import (
     LIVE,
     NON_TERMINAL,
@@ -41,8 +43,11 @@ from ._runner_util import (
     touch,
 )
 from .attempt_reports import complete, heartbeat, reconcile_session, report
+from .eligibility import Requirement, requirement_for, slot_eligible
 from .placement import eligible_slots
 from .runners import require_session
+
+log = logging.getLogger("assetstudio")
 
 __all__ = ["complete", "heartbeat", "reconcile_session", "report"]
 
@@ -135,8 +140,10 @@ def place(studio: Studio, attempt_id: str, now: datetime | None = None) -> bool:
         a = studio.journal.attempts.get(attempt_id)
         if a is None or a["state"] != "offered" or a["control"] != "run":
             return False
-        if studio.journal.meta_get(ADMISSION_PAUSED_KEY) == "1" and not _task_in_flight(studio, a["task_id"]):
-            return False  # a mode switch is draining: calls of tasks already running may finish, nothing new starts
+        # a mode switch is draining: calls of tasks already running may finish, nothing new starts
+        in_flight = _task_in_flight(studio, a["task_id"])
+        if studio.journal.meta_get(ADMISSION_PAUSED_KEY) == "1" and not in_flight:
+            return False
         if a["runner_id"] is not None and not expired(a["offer_expires_at"], now):
             return False
         spec, prefer = a["offer"], a["progress"].get("preferred")
@@ -146,6 +153,8 @@ def place(studio: Studio, attempt_id: str, now: datetime | None = None) -> bool:
         cooling = _rejected_recently(studio, a, now)
         reasons += [f"slot {s} on {r} rejected this offer recently" for r, s in sorted(cooling)]
         choices = [c for c in choices if (c.runner_id, c.slot_id) not in cooling]
+        req = _requirement(a["operation"], spec)
+        choices = _eligible_choices(studio, choices, req, reasons)
         if not choices:
             _note_blocked(studio, a, reasons)
             return False
@@ -159,10 +168,30 @@ def place(studio: Studio, attempt_id: str, now: datetime | None = None) -> bool:
         placed = studio.journal.attempts.transition(
             a["id"], ("offered",), "offered", runner_id=best.runner_id, session_id=best.session_id,
             slot_id=best.slot_id, offer_expires_at=offer.offer_expires_at, offer=offer.model_dump(mode="json"),
-            progress=progress, event="placed", detail={"runner_id": best.runner_id, "slot_id": best.slot_id})
+            progress=progress, event="placed", detail={"runner_id": best.runner_id, "slot_id": best.slot_id},
+            fence=fence_clause(studio.execution_generation, paused=not in_flight))
     if placed:
         _maybe_push(studio, attempt_id, best.session_id, best.runner_id)
     return placed
+
+
+def _requirement(operation: str, offer: dict[str, Any]) -> Requirement:
+    return requirement_for(operation, offer.get("params"),
+                           Requirements.model_validate(offer["requirements"]))
+
+
+def _eligible_choices(studio: Studio, choices: list[Any], req: Requirement, reasons: list[str]) -> list[Any]:
+    """Placement binds only slots the shared evaluator accepts for this call; the rest are named in `reasons`."""
+    kept = []
+    for c in choices:
+        runner = studio.auth.get_runner(c.runner_id)
+        ok, why = slot_eligible(studio, runner, c.slot_id, req) if runner else (False, ["runner gone"])
+        if ok:
+            kept.append(c)
+        else:
+            name = runner["name"] if runner else c.runner_id
+            reasons += [f"runner {name} slot {c.slot_id}: {w}" for w in why]
+    return kept
 
 
 def _maybe_push(studio: Studio, attempt_id: str, session_id: str, runner_id: str) -> None:
@@ -226,7 +255,8 @@ def acquire(studio: Studio, runner: dict[str, Any], session_id: str, req: Acquir
     a = _live_offer(studio, _remembered(runner["id"], req.request_id), runner["id"], session_id, now)
     if a is None:
         a = next((x for x in studio.journal.attempts.list(states=("offered",), runner_id=runner["id"])
-                  if _live_offer(studio, x["id"], runner["id"], session_id, now)), None)
+                  if x["slot_id"] in req.free_slots and _live_offer(studio, x["id"], runner["id"], session_id, now)
+                  and slot_eligible(studio, runner, x["slot_id"], _requirement(x["operation"], x["offer"]))[0]), None)
     if a is None:
         return None
     with _acquired_lock:
@@ -260,6 +290,17 @@ def _authorize_offer(studio: Studio, db: Any, runner: dict[str, Any], row: dict[
         raise RunnerError(409, "admission_rejected", "ephemeral runner already used")
 
 
+def _require_eligible(studio: Studio, db: Any, runner: dict[str, Any], row: dict[str, Any]) -> None:
+    """The inventory may have changed since placement: re-ask the shared evaluator inside the commit."""
+    found = db.execute("SELECT * FROM runner_sessions WHERE id=?", (row["session_id"],)).fetchone()
+    session = {**dict(found), "inventory": json.loads(found["inventory"]) if found["inventory"] else None} \
+        if found else None
+    req = _requirement(row["operation"], json.loads(row["offer"]))
+    ok, why = slot_eligible(studio, runner, row["slot_id"], req, session=session)
+    if not ok:
+        raise RunnerError(409, "admission_rejected", f"slot no longer eligible: {'; '.join(why)}")
+
+
 def _reserve_devices(db: Any, row: dict[str, Any]) -> None:
     slot = db.execute("SELECT device_uuids FROM slots WHERE runner_id=? AND slot_id=?",
                       (row["runner_id"], row["slot_id"])).fetchone()
@@ -283,6 +324,10 @@ def accept(studio: Studio, runner: dict[str, Any], attempt_id: str, req: AcceptR
             raise RunnerError(404 if found is None else 403, "invalid_input" if found is None else "forbidden_scope",
                               "attempt is not placed on this runner")
         row = dict(found)
+        # generation only: calls of tasks already running may still start while a switch drains
+        sql, args = fence_clause(studio.execution_generation, paused=False)
+        if not db.execute(f"SELECT {sql}", args).fetchone()[0]:
+            raise RunnerError(409, "admission_rejected", "studio execution generation superseded")
         _bound_attempt(studio, runner, row, req.session_id, req.generation)
         if row["state"] == "cancelled":
             raise RunnerError(409, "cancelled_by_operator", "attempt cancelled")
@@ -295,6 +340,7 @@ def accept(studio: Studio, runner: dict[str, Any], attempt_id: str, req: AcceptR
         if row["state"] != "offered":
             raise RunnerError(409, "stale_generation", f"attempt is {row['state']}")
         _authorize_offer(studio, db, runner, row, now)
+        _require_eligible(studio, db, runner, row)
         _reserve_devices(db, row)
         lease = after(studio.settings.runner_lease_s, now)
         db.execute("UPDATE attempts SET state='leased', lease_until=?, updated_at=?, revision=revision+1 "
@@ -356,19 +402,38 @@ def declare_lost(studio: Studio, attempt_id: str, actor: str) -> bool:
 
 # --- completion by Studio stage code --------------------------------------------------------------------------------
 def commit(studio: Studio, attempt_id: str) -> bool:
-    done = studio.journal.attempts.transition(attempt_id, ("ingested",), "committed")
-    if done:
-        studio.journal.attempts.set_disposition(attempt_id, "committed")
-    return done
+    return studio.journal.attempts.transition(attempt_id, ("ingested",), "committed", disposition="committed")
 
 
 def dispose(studio: Studio, attempt_id: str, disposition: Literal["rejected", "cancelled"]) -> bool:
     state = "failed" if disposition == "rejected" else "cancelled"
     error = {"code": "validation_failed", "message": "output rejected"} if disposition == "rejected" else None
-    done = studio.journal.attempts.transition(attempt_id, ("ingested",), state, error=error, event=disposition)
-    if done:
-        studio.journal.attempts.set_disposition(attempt_id, disposition)
-    return done
+    return studio.journal.attempts.transition(attempt_id, ("ingested",), state, error=error, event=disposition,
+                                              disposition=disposition)
+
+
+_TASK_DISPOSITION = {"failed": "rejected", "cancelled": "cancelled"}
+_STATE_DISPOSITION = {"committed": "committed", "quarantined": "quarantined", "failed": "rejected",
+                      "cancelled": "cancelled"}
+
+
+def repair_custody(studio: Studio) -> int:
+    """Closes gaps a crash can leave: a terminal attempt that went through ingestion/quarantine without a
+    disposition, and an ingested attempt whose task already finished. Idempotent."""
+    store, fixed = studio.journal.attempts, 0
+    for a in store.undisposed(tuple(_STATE_DISPOSITION)):
+        fixed += store.set_disposition(a["id"], _STATE_DISPOSITION[a["state"]])
+    for a in store.list(states=("ingested",)):
+        task = studio.journal.tasks.get(a["task_id"])
+        if task is None or task.state not in ("succeeded", "failed", "cancelled"):
+            continue
+        if task.state == "succeeded":
+            fixed += commit(studio, a["id"])
+        else:
+            fixed += dispose(studio, a["id"], _TASK_DISPOSITION[task.state])  # type: ignore[arg-type]
+    if fixed:
+        log.info("custody repair: %d attempts settled", fixed)
+    return fixed
 
 
 def receipt(studio: Studio, runner: dict[str, Any], attempt_id: str) -> DispositionReceipt | None:

@@ -228,8 +228,8 @@ export interface ModelRow { key: string; repo: string; revision: string; status:
   bytes_expected: number; full_verified: boolean }
 export interface Runtime {
   simulated: boolean; engine_mode: string;
-  gpus: { index: string; uuid: string; name: string; vram_used_mb: number; vram_total_mb: number; util_pct: number;
-    measured_at: string; lane: string | null;
+  gpus: { index: string; uuid: string; name: string; vram_used_mb: number | null; vram_total_mb: number; util_pct: number | null;
+    measured_at: string | null; lane: string | null;
     ownership: { owner: string | null; state: string; last_error: string | null; workers: string[] } | null }[];
   services: { name: string; role: string; url: string; reachable: boolean; ready: boolean; problems: string[];
     version?: string | null; loaded?: Record<string, boolean> }[];

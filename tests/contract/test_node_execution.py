@@ -52,7 +52,7 @@ class Runner:
         client = RunnerClient(BASE, private_key=load_or_create_key(self.cfg), http=TestClient(api.c.app))
         self.agent = RunnerAgent(self.cfg, client=client, executor=EngineExecutor(self.cfg, state, engines),
                                  state=state, spool=Spool(self.cfg.state_dir / "spool"),
-                                 clock=lambda: time.monotonic() * FAST, idle_s=0.0)
+                                 clock=lambda: time.monotonic() * FAST, idle_s=0.0, concurrent=False)
         self._stop, self._thread = threading.Event(), threading.Thread(target=self._loop, daemon=True)
 
     def start(self) -> Runner:
@@ -268,6 +268,7 @@ def test_runner_declared_readiness_drives_runtime_and_recipes(node_api: Api, run
     assert rt["simulated"] is True and all(r["ready"] for r in rt["runner_readiness"])
     assert {g["uuid"] for g in rt["gpus"]} == {"GPU-img-r1", "GPU-aux-r1"}
     assert {g["lane"] for g in rt["gpus"]} == {"image", "aux3d"}
+    assert all(g["vram_used_mb"] is None and g["util_pct"] is None and g["measured_at"] is None for g in rt["gpus"])
     assert all(m["ready"] and m["full_verified"] for m in rt["models"])
     assert _recipe(node_api, "concept.default")["generation"]["state"] == "experimental"
 

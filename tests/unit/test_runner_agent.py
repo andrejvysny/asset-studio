@@ -27,6 +27,8 @@ from assetstudio_node.spool import Spool
 from assetstudio_node.state import RunnerState
 from assetstudio_protocol.engine import AckError
 from assetstudio_protocol.execution import (
+    OPERATION_CAPABILITY,
+    OPERATION_ENGINE,
     AcceptResponse,
     DispositionReceipt,
     InputRef,
@@ -71,7 +73,7 @@ def make_offer(aid: str | None = None, operation: str = "image.t2i", params: dic
                signed: bool = False) -> Offer:
     inputs = [InputRef(sha256=INPUT_SHA, size=len(INPUT), role="source", mime="image/png")]
     params = params or {"prompt": "x"}
-    req = Requirements(capability="image", engine="comfyui")
+    req = Requirements(capability=OPERATION_CAPABILITY[operation], engine=OPERATION_ENGINE[operation])
     offer = Offer(schema="assetstudio.execution.v1", attempt_id=aid or new_id("atp"), task_id="t", call_key="j/1",
                   generation=1, runner_id=RID, session_id=SID, slot_id="gpu0", operation=operation,
                   operation_version=1, input_digest=compute_input_digest(operation, 1, inputs, params, req, Policy()),
@@ -187,7 +189,8 @@ def make_agent(tmp_path: Path, stub: StubClient | None = None, *, executor: Any 
     if callable(executor):
         executor = executor(config, state)
     agent = RunnerAgent(config, client=stub, executor=executor or FakeExecutor(), state=state,
-                        spool=Spool(config.state_dir / "spool"), clock=clock, idle_s=0.0)  # type: ignore[arg-type]
+                        spool=Spool(config.state_dir / "spool"), clock=clock, idle_s=0.0,  # type: ignore[arg-type]
+                        concurrent=False)
     agent.bootstrap(TOKEN)
     agent.open_session()
     return agent, stub, clock
@@ -316,7 +319,8 @@ def test_happy_path_spools_uploads_and_receipt_releases(tmp_path: Path) -> None:
     assert content.startswith(b"SIMULATED:") and (up_aid, gen, role) == (aid, 1, "result.bin")
     (complete,) = stub.names("complete")
     assert complete.manifest.files[0].sha256 == hashlib.sha256(content).hexdigest()
-    assert complete.manifest.meta == {"simulated": True, "operation": "image.t2i"}
+    assert complete.manifest.meta == {"simulated": True, "operation": "image.t2i",
+                                      "engine_execution_id": f"{aid}-g1"}
     assert agent.state.get_attempt(aid).state == "ingested"  # type: ignore[union-attr]
     assert stub.names("download_input") == [INPUT_SHA]
     assert spool_has(agent, aid)
@@ -450,6 +454,71 @@ def test_restart_reports_crashed_execution_as_lost(tmp_path: Path) -> None:
     (local,) = stub2.hello.local_attempts
     assert local.attempt_id == offer.attempt_id and local.state == "lost"
     assert agent2.state.get_attempt(offer.attempt_id) is None
+
+
+class ReconcilingExecutor(FakeExecutor):
+    def reconciles(self, operation: str) -> bool:
+        return not operation.startswith("aux.")
+
+
+def crash_executing(tmp_path: Path, operation: str, executor: Any) -> tuple[RunnerAgent, StubClient, Offer]:
+    agent, _, _ = make_agent(tmp_path)
+    offer = make_offer(operation=operation)
+    agent.state.record_attempt(offer)
+    agent.state.set_state(offer.attempt_id, "executing", engine_execution_id="eid")
+    agent.state.close()
+    agent2, stub2, _ = make_agent(tmp_path, executor=executor)
+    return agent2, stub2, offer
+
+
+@pytest.mark.parametrize(("op", "survives"), [("aux.qa", False), ("image.t2i", True), ("worker3d.generate", True)])
+def test_restart_reconciles_per_operation(tmp_path: Path, op: str, survives: bool) -> None:
+    """H12: only operations whose engine finds earlier work by id are re-run; the rest are reported lost."""
+    agent, stub, offer = crash_executing(tmp_path, op, ReconcilingExecutor())
+    (local,) = stub.hello.local_attempts
+    assert local.state == ("admitted" if survives else "lost")
+    assert (agent.state.get_attempt(offer.attempt_id) is not None) is survives
+
+
+def test_bool_reconciles_attribute_still_applies_to_all_operations(tmp_path: Path) -> None:
+    class Legacy(FakeExecutor):
+        reconciles = True  # type: ignore[assignment,misc]
+
+    _, stub, _ = crash_executing(tmp_path, "aux.qa", Legacy())
+    assert stub.hello.local_attempts[0].state == "admitted"
+
+
+def test_engine_execution_id_is_persisted_before_the_engine_is_called(tmp_path: Path) -> None:
+    seen: list[str | None] = []
+
+    class Probe(FakeExecutor):
+        def execute(self, offer: Offer, inputs: Any, out_dir: Path, should_cancel: Any) -> Any:
+            seen.append(agent.state.get_attempt(offer.attempt_id).engine_execution_id)  # type: ignore[union-attr]
+            return super().execute(offer, inputs, out_dir, should_cancel)
+
+    agent, stub, _ = make_agent(tmp_path, executor=Probe())
+    offer = make_offer()
+    stub.offers.append(offer)
+    agent.step()
+    assert seen == [f"{offer.attempt_id}-g1"]
+    assert agent.state.get_attempt(offer.attempt_id).engine_execution_id == seen[0]  # type: ignore[union-attr]
+    assert agent.spool.manifest(offer.attempt_id).meta["engine_execution_id"] == seen[0]  # type: ignore[union-attr]
+
+
+def test_state_migrates_a_database_without_the_engine_id_column(tmp_path: Path) -> None:
+    import sqlite3
+    d = tmp_path / "old"
+    d.mkdir()
+    db = sqlite3.connect(d / "runner.sqlite")
+    db.executescript("CREATE TABLE attempts(attempt_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, offer TEXT "
+                     "NOT NULL, state TEXT NOT NULL, manifest TEXT, error TEXT, created_at TEXT NOT NULL, "
+                     "updated_at TEXT NOT NULL);")
+    db.close()
+    state = RunnerState(d)
+    offer = make_offer()
+    state.record_attempt(offer)
+    state.set_state(offer.attempt_id, "executing", engine_execution_id="e1")
+    assert state.get_attempt(offer.attempt_id).engine_execution_id == "e1"  # type: ignore[union-attr]
 
 
 def test_restart_finishes_a_spool_written_before_the_crash(tmp_path: Path) -> None:

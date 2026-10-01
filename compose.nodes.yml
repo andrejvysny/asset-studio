@@ -1,6 +1,6 @@
 # Node mode, profile S (single machine): Studio without model weights + one runner that owns the GPUs and engines.
 #   docker compose -f compose.yml -f compose.nodes.yml up -d      (or: make runner-token up-nodes)
-# Needs Docker Compose >= 2.24 (`!override` / `!reset` tags). Not supported by podman-compose (Makefile refuses).
+# Needs Docker Compose >= 2.24.4 (`!override` / `!reset` tags; earlier 2.24.x mis-merged `!override`). Not supported by podman-compose (Makefile refuses).
 # Direct mode (compose.yml alone) stays the default.
 
 services:
@@ -30,7 +30,10 @@ services:
       DO_NOT_TRACK: "1"
     volumes:
       - ${MODELS_DIR:-./models}:/models:ro
-      - runner-state:/var/lib/assetstudio-runner   # state dir, key, host lock: one runner per host
+      - runner-state:/var/lib/assetstudio-runner   # state dir and key (per Compose project)
+      # Host lock: a HOST path, so two Compose projects on one machine cannot both run a runner.
+      # Create it once: sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner
+      - ${RUNNER_HOST_LOCK_DIR:-/var/lock/assetstudio-runner}:/var/lock/assetstudio-runner
       - ./config/runner.single.yaml:/etc/assetstudio/runner.yaml:ro
     secrets:
       - source: runner_registration_token

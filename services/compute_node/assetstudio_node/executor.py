@@ -32,7 +32,21 @@ class ExecutionBlocked(Exception):
         self.code = code
 
 
+def engine_execution_id(offer: Offer) -> str:
+    """Stable per attempt+generation and independent of the offer digest, so Studio's offers stay unchanged. Fits
+    the 80-char X-Execution-Id limit of the aux service."""
+    return f"{offer.attempt_id}-g{offer.generation}"
+
+
 class Executor(Protocol):
+    def reconciles(self, operation: str) -> bool:
+        """True if an interrupted call of `operation` can be found again in the engine by its execution id."""
+        ...
+
+    def engine_execution_id(self, offer: Offer) -> str:
+        """The id the engine knows this call by; persisted before the engine is called."""
+        ...
+
     def execute(self, offer: Offer, inputs: dict[str, Path], out_dir: Path,
                 should_cancel: Callable[[], bool]) -> tuple[list[tuple[str, Path, str]], dict[str, Any]]:
         """Returns ([(name, path, mime)], meta). `inputs` maps each input sha256 to its local file. Must poll
@@ -44,7 +58,23 @@ class Executor(Protocol):
         ...
 
 
+def can_reconcile(executor: Any, operation: str) -> bool:
+    found = getattr(executor, "reconciles", False)
+    return bool(found(operation)) if callable(found) else bool(found)  # a bool attribute means "all operations"
+
+
+def effective_engine_id(executor: Any, offer: Offer) -> str:
+    fn = getattr(executor, "engine_execution_id", None)
+    return fn(offer) if callable(fn) else engine_execution_id(offer)
+
+
 class FakeExecutor:
+    def reconciles(self, operation: str) -> bool:
+        return False  # in-process: dies with the agent
+
+    def engine_execution_id(self, offer: Offer) -> str:
+        return engine_execution_id(offer)
+
     def __init__(self, *, fail_ops: dict[str, FailureCode] | None = None, delay_s: float = 0.0,
                  poll_s: float = 0.02) -> None:
         self.fail_ops = fail_ops or {}

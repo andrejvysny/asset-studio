@@ -2,8 +2,8 @@
 studio_url: http://studio:8190
 name: gpu-box
 state_dir: /var/lib/assetstudio-runner/state
-# One runner per host: the lock (on the runner-state volume) stops a second runner from claiming the same GPUs.
-host_lock: /var/lib/assetstudio-runner/host.lock
+# One runner per host: the lock (a host path bind-mounted by the compose files, shared across Compose projects) stops a second runner from claiming the same GPUs.
+host_lock: /var/lock/assetstudio-runner/host.lock
 registration_token_file: /run/secrets/runner_registration_token   # from `make runner-token`
 dispatch: pull
 

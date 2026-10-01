@@ -28,6 +28,16 @@ class StaleRevision(Exception):
     code = "stale_revision"
 
 
+class UploadConflict(Exception):
+    """A live upload for the same (attempt, generation, sha256) was declared with different size/role/mime."""
+
+
+class QuotaExceeded(Exception):
+    def __init__(self, reason: str, details: dict[str, Any]) -> None:
+        super().__init__(reason)
+        self.reason, self.details = reason, details
+
+
 def _attempt(row: sqlite3.Row) -> dict[str, Any]:
     d = dict(row)
     for k in _JSON_COLS:
@@ -113,18 +123,28 @@ class AttemptStore:
             return [_attempt(r) for r in self._db.execute(sql + " ORDER BY created_at, id LIMIT ?", (*args, limit))]
 
     def transition(self, attempt_id: str, from_states: tuple[str, ...], state: str, *, event: str | None = None,
-                   detail: dict[str, Any] | None = None, **cols: Any) -> bool:
+                   detail: dict[str, Any] | None = None, disposition: str | None = None,
+                   fence: tuple[str, list[Any]] | None = None, **cols: Any) -> bool:
+        """`disposition` lands in the same write as the state: a crash can never leave a terminal attempt whose
+        runner has no release receipt. `fence` (taskstore.fence_clause) is ANDed into the UPDATE's WHERE."""
         if (bad := set(cols) - _TRANSITION_COLS):
             raise ValueError(f"unknown attempt columns: {sorted(bad)}")
-        sets, args = ["state=?", "updated_at=?", "revision=revision+1"], [state, now_iso()]
+        now = now_iso()
+        sets, args = ["state=?", "updated_at=?", "revision=revision+1"], [state, now]
+        if disposition is not None:
+            sets += ["disposition=COALESCE(disposition, ?)", "disposition_at=COALESCE(disposition_at, ?)"]
+            args += [disposition, now]
         for k, v in cols.items():
             sets.append(f"{k}=?")
             args.append(json.dumps(v) if k in _JSON_COLS and v is not None else v)
         with self.txn() as db:
-            n = db.execute(f"UPDATE attempts SET {', '.join(sets)} WHERE id=? AND state IN ({_in(from_states)})",
-                           [*args, attempt_id, *from_states]).rowcount
+            n = db.execute(f"UPDATE attempts SET {', '.join(sets)} WHERE id=? AND state IN ({_in(from_states)})"
+                           + (f" AND {fence[0]}" if fence else ""),
+                           [*args, attempt_id, *from_states, *(fence[1] if fence else [])]).rowcount
             if n == 1:
                 self._event(db, attempt_id, event or state, detail)
+                if disposition is not None:
+                    self._event(db, attempt_id, "disposition", {"disposition": disposition})
         return n == 1
 
     def set_control(self, attempt_id: str, control: str) -> bool:
@@ -146,6 +166,13 @@ class AttemptStore:
             if n == 1:
                 self._event(db, attempt_id, "disposition", {"disposition": disposition})
         return n == 1
+
+    def undisposed(self, states: tuple[str, ...], limit: int = 1000) -> list[dict[str, Any]]:
+        """Attempts in `states` that hold a result manifest but no disposition (custody repair candidates)."""
+        with self._lock:
+            return [_attempt(r) for r in self._db.execute(
+                f"SELECT * FROM attempts WHERE state IN ({_in(states)}) AND disposition IS NULL "
+                "AND manifest IS NOT NULL ORDER BY updated_at, id LIMIT ?", (*states, limit))]
 
     def pending_receipts(self, runner_id: str) -> list[dict[str, Any]]:
         with self._lock:
@@ -169,13 +196,17 @@ class AttemptStore:
 
     # --- uploads -------------------------------------------------------------------------------------------------
     def create_upload(self, *, attempt_id: str, generation: int, project_id: str, runner_id: str, sha256: str,
-                      size: int, role: str, mime: str, chunk_size: int,
-                      expires_at: str) -> tuple[dict[str, Any], bool]:
+                      size: int, role: str, mime: str, chunk_size: int, expires_at: str, global_max: int,
+                      runner_max: int, free_bytes: int, disk_floor: int) -> tuple[dict[str, Any], bool]:
+        """Quota is checked and the reservation inserted in one txn, so concurrent creates cannot overshoot."""
         with self.txn() as db:
             row = db.execute("SELECT * FROM uploads WHERE attempt_id=? AND generation=? AND sha256=?",
                              (attempt_id, generation, sha256)).fetchone()
             if row is not None and row["state"] != "expired":
+                if (row["size"], row["role"], row["mime"]) != (size, role, mime):
+                    raise UploadConflict("upload already declared with a different size, role or mime")
                 return _upload(row), False
+            self._check_quota(db, runner_id, size, global_max, runner_max, free_bytes, disk_floor)
             if row is not None:  # an expired session (abandoned or failed verification) must not block a retry
                 db.execute("DELETE FROM uploads WHERE id=?", (row["id"],))
             uid = new_id("xfr")
@@ -185,6 +216,22 @@ class AttemptStore:
                 (uid, attempt_id, generation, project_id, runner_id, sha256, size, role, mime, chunk_size, size,
                  now_iso(), expires_at))
             return _upload(db.execute("SELECT * FROM uploads WHERE id=?", (uid,)).fetchone()), True
+
+    @staticmethod
+    def _check_quota(db: sqlite3.Connection, runner_id: str, size: int, global_max: int, runner_max: int,
+                     free_bytes: int, disk_floor: int) -> None:
+        sql = f"SELECT COALESCE(SUM(reserved_bytes), 0) FROM uploads WHERE state IN ({_in(_LIVE_UPLOAD)})"
+        total = int(db.execute(sql, _LIVE_UPLOAD).fetchone()[0])
+        mine = int(db.execute(sql + " AND runner_id=?", (*_LIVE_UPLOAD, runner_id)).fetchone()[0])
+        problem = None
+        if total + size > global_max:
+            problem = "global upload quota exceeded"
+        elif mine + size > runner_max:
+            problem = "runner upload quota exceeded"
+        elif free_bytes - total - size < disk_floor:  # live reservations will land on the same disk
+            problem = "disk reserve would be breached"
+        if problem:
+            raise QuotaExceeded(problem, {"size": size, "free_bytes": free_bytes})
 
     def find_upload(self, attempt_id: str, generation: int, sha256: str) -> dict[str, Any] | None:
         with self._lock:

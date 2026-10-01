@@ -118,8 +118,10 @@ class Handle:
     def put_inventory(self, models: list[str] | None = None, revision: int = 0, inv: Inventory | None = None):
         return runners.put_inventory(self.w.studio, self.runner, self.sid, inv or self.inventory(models, revision))
 
-    def acquire(self) -> Offer | None:
-        return attempts.acquire(self.w.studio, self.runner, self.sid, AcquireRequest(request_id=str(uuid.uuid4())))
+    def acquire(self, free_slots: list[str] | None = None) -> Offer | None:
+        free = [s["slot_id"] for s in self.w.studio.journal.runners.slots(self.id)] if free_slots is None else free_slots
+        return attempts.acquire(self.w.studio, self.runner, self.sid,
+                                AcquireRequest(request_id=str(uuid.uuid4()), free_slots=free))
 
     def accept(self, offer: Offer):
         return attempts.accept(self.w.studio, self.runner, offer.attempt_id,
@@ -320,7 +322,7 @@ def test_offer_place_acquire_same_request_id(w: World) -> None:
     h = w.runner()
     a = w.offer()
     assert a["generation"] == 1 and a["runner_id"] == h.id and a["slot_id"] == "aux"
-    req = AcquireRequest(request_id=str(uuid.uuid4()))
+    req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=["aux"])
     first = attempts.acquire(w.studio, h.runner, h.sid, req)
     again = attempts.acquire(w.studio, h.runner, h.sid, req)
     assert first is not None and again == first and first.attempt_id == a["id"]
@@ -722,3 +724,122 @@ def test_push_offer_does_not_follow_redirects_or_raise(w: World) -> None:
 
     w.studio.extras["push_http"] = httpx.Client(transport=httpx.MockTransport(boom))
     assert attempts.push_offer(w.studio, w.get(a["id"])) is False  # runner can still pull
+
+
+# --- custody (H13) and transactional upload accounting (H14) --------------------------------------------------------
+def _raw_attempt_state(w: World, attempt_id: str, state: str, manifest: bool = True) -> None:
+    with w.studio.journal.attempts.txn() as db:
+        db.execute("UPDATE attempts SET state=?, manifest=? WHERE id=?",
+                   (state, json.dumps({"files": []}) if manifest else None, attempt_id))
+
+
+def test_terminal_state_and_disposition_are_one_write(w: World) -> None:
+    h = w.runner()
+    a, _ = w.leased(h)
+    _raw_attempt_state(w, a["id"], "ingested")
+    store = w.studio.journal.attempts
+    calls: list[str] = []
+    store.set_disposition = lambda *a_, **k: calls.append("x") or False  # type: ignore[method-assign]
+    assert attempts.commit(w.studio, a["id"])
+    row = w.get(a["id"])
+    assert not calls and row["state"] == "committed" and row["disposition"] == "committed"
+    assert [e["event"] for e in store.events(a["id"])][-2:] == ["committed", "disposition"]
+
+
+def test_repair_custody_fixes_gaps_idempotently(w: World) -> None:
+    h = w.runner()
+    a, _ = w.leased(h)
+    _raw_attempt_state(w, a["id"], "committed")  # pre-existing crash gap: no disposition
+    assert w.get(a["id"])["disposition"] is None
+    assert attempts.repair_custody(w.studio) == 1
+    assert w.get(a["id"])["disposition"] == "committed" and attempts.repair_custody(w.studio) == 0
+    assert [r.disposition for r in h.beat().receipts] == ["committed"]
+    # ingested attempts of finished tasks are settled with the task's mapping
+    for task_state, state, disp in (("succeeded", "committed", "committed"), ("failed", "failed", "rejected"),
+                                    ("cancelled", "cancelled", "cancelled")):
+        b = w.offer(key=f"t/{task_state}")
+        _raw_attempt_state(w, b["id"], "ingested")
+        with w.studio.journal.tasks._lock:  # noqa: SLF001
+            w.studio.journal.tasks._db.execute("UPDATE stage_tasks SET state=? WHERE id=?",  # noqa: SLF001
+                                               (task_state, b["task_id"]))
+        assert attempts.repair_custody(w.studio) == 1
+        row = w.get(b["id"])
+        assert (row["state"], row["disposition"]) == (state, disp)
+
+
+def test_lost_attempt_late_output_is_quarantined_never_ingested(w: World) -> None:
+    h = w.runner()
+    a, _ = w.leased(h)
+    h.beat((a["id"], 1, "executing"))
+    attempts.expire(w.studio, now=now_dt() + timedelta(hours=1))
+    assert attempts.declare_lost(w.studio, a["id"], "op")
+    f = _upload(w, h, a["id"], os.urandom(300))
+    assert w.get(a["id"])["state"] == "lost"  # an upload does not revive it
+    assert _complete(h, a["id"], [f]).state == "quarantined"
+    row = w.get(a["id"])
+    assert row["state"] == "quarantined" and row["disposition"] == "quarantined"
+    assert "ingested" not in [e["event"] for e in w.studio.journal.attempts.events(a["id"])]
+
+
+def test_concurrent_creates_never_exceed_quota(w: World) -> None:
+    import threading
+
+    h = w.runner()
+    a, _ = w.leased(h)
+    h.beat((a["id"], 1, "executing"))
+    w.studio.settings.upload_quota_bytes = 1000
+    results: list[str] = []
+    barrier = threading.Barrier(8)
+
+    def go(i: int) -> None:
+        data = bytes([i]) * 400
+        barrier.wait()
+        try:
+            transfers.create_upload(w.studio, h.runner, UploadCreate(
+                attempt_id=a["id"], generation=1, sha256=hashlib.sha256(data).hexdigest(), size=400, role="r",
+                mime="image/png"))
+            results.append("ok")
+        except RunnerError as e:
+            results.append(e.code)
+
+    ts = [threading.Thread(target=go, args=(i,)) for i in range(8)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert results.count("ok") == 2 and results.count("resource_exhausted") == 6
+    assert w.studio.journal.attempts.reserved_bytes() == 800
+
+
+def test_expired_upload_retry_rechecks_quota_and_mismatch_conflicts(w: World) -> None:
+    h = w.runner()
+    a, _ = w.leased(h)
+    h.beat((a["id"], 1, "executing"))
+    s, store = w.studio.settings, w.studio.journal.attempts
+    s.upload_quota_bytes = 500
+    req = lambda data, **kw: UploadCreate(attempt_id=a["id"], generation=1,  # noqa: E731
+                                          sha256=hashlib.sha256(data).hexdigest(), size=kw.get("size", len(data)),
+                                          role=kw.get("role", "r"), mime="image/png")
+    first = transfers.create_upload(w.studio, h.runner, req(b"a" * 400))
+    with _raises("invalid_input", 409):
+        transfers.create_upload(w.studio, h.runner, req(b"a" * 400, size=399))
+    with _raises("invalid_input", 409):
+        transfers.create_upload(w.studio, h.runner, req(b"a" * 400, role="other"))
+    assert store.set_upload_state(first.upload_id, ("open",), "expired")
+    transfers.create_upload(w.studio, h.runner, req(b"b" * 400))  # others now hold the quota
+    with _raises("resource_exhausted", 507):
+        transfers.create_upload(w.studio, h.runner, req(b"a" * 400))
+    assert store.get_upload(first.upload_id)["state"] == "expired"  # the old row is kept on refusal
+
+
+def test_expire_uploads_skips_in_process_finalize(w: World) -> None:
+    h = w.runner()
+    a, up = _created(w, h, b"z" * 100)
+    store = w.studio.journal.attempts
+    with store.txn() as db:
+        db.execute("UPDATE uploads SET expires_at='2000-01-01T00:00:00.000Z', state='finalizing' WHERE id=?",
+                   (up.upload_id,))
+    transfers._finalizing.add(up.upload_id)  # noqa: SLF001
+    try:
+        assert transfers.expire_uploads(w.studio) == 0
+    finally:
+        transfers._finalizing.discard(up.upload_id)  # noqa: SLF001
+    assert transfers.expire_uploads(w.studio) == 1  # a crashed finalize has no owner

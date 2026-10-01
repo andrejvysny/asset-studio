@@ -53,6 +53,8 @@ def test_runner_service() -> None:
     assert runner["networks"] == ["internal"]
     assert any(v.endswith(":/models:ro") for v in runner["volumes"])
     assert any(v.startswith("runner-state:") for v in runner["volumes"])
+    lock = [v for v in runner["volumes"] if v.endswith(":/var/lock/assetstudio-runner")]
+    assert lock and lock[0].startswith("${RUNNER_HOST_LOCK_DIR:-/var/lock/assetstudio-runner}")  # host path, not a volume
     assert runner["secrets"][0]["source"] == "runner_registration_token"
     assert "runner_registration_token" in doc["secrets"]
     assert "runner-state" in doc["volumes"]
@@ -62,6 +64,7 @@ def test_runner_service() -> None:
 
 def test_runner_config_validates() -> None:
     cfg = RunnerConfig.model_validate(yaml.safe_load((ROOT / "config/runner.single.yaml").read_text()))
+    assert cfg.host_lock == Path("/var/lock/assetstudio-runner/host.lock")
     assert {s.slot_id for s in cfg.slots} == {"image", "aux3d"}
     devices = [d for s in cfg.slots for d in s.devices]
     assert len(devices) == len(set(devices))

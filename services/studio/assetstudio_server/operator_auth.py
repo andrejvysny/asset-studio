@@ -3,7 +3,8 @@
 Local mode (profile S): the local operator is owner. Proxy mode (profile P): Traefik + Authelia authenticate and
 set `Remote-User`/`Remote-Groups`; Studio trusts them only with the proxy shared secret, so a request that reaches
 Studio around the proxy cannot claim an identity. Mutating routes are classified in ROLE_RULES; a mutating route
-that matches no rule needs `owner`.
+that matches no rule needs `owner`. The MCP loopback authorizes as an agent principal derived from the MCP token
+(read -> viewer, full -> owner minus AGENT_DENY), in both modes, never as a blanket owner (H15).
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from typing import Literal
 
 from fastapi import Request
 
+from . import actor as actor_mod
 from .settings import ROLES, Settings
 
 Role = Literal["viewer", "reviewer", "owner"]
@@ -26,6 +28,7 @@ _RANK = {r: i for i, r in enumerate(ROLES)}
 class Operator:
     name: str
     role: Role
+    agent: bool = False
 
 
 class AuthError(Exception):
@@ -63,6 +66,19 @@ ROLE_RULES: list[tuple[str, str, Role]] = [
     ("*", r"^/api/v1/runners/[^/:]+(?::revoke|/push-url)$", "owner"),
     ("*", r"^/api/v1/attempts/[^/:]+:declare-lost$", "owner"),
 ]
+# Operator administration an MCP agent may never perform, whatever its token scope (proxy mode; local mode keeps the
+# single trusted operator). `config:validate` is deliberately not matched: it is side-effect free.
+AGENT_DENY: list[tuple[str, str]] = [
+    ("GET", r"^/api/v1/audit$"),
+    ("*", r"^/api/v1/projects:register$"),
+    ("*", r"^/api/v1/projects/[^/]+/(?:config|storage:(?:test|rebuild-index))$"),
+    ("*", r"^/api/v1/runtime/lanes/[^/:]+:reset$"),
+    ("*", r"^/api/v1/runner-groups(?:/[^/]+/registration-tokens)?$"),
+    ("*", r"^/api/v1/runners/[^/:]+(?::revoke|/push-url)$"),
+    ("*", r"^/api/v1/attempts/[^/:]+:declare-lost$"),
+]
+_DENY = [(m, re.compile(p)) for m, p in AGENT_DENY]
+_READ_POST = re.compile(r"^/api/v1/projects/[^/]+/config:validate$")  # read-scope tool that POSTs
 _COMPILED = [(m, re.compile(p), role) for m, p, role in ROLE_RULES]
 _SAFE = ("GET", "HEAD", "OPTIONS")
 
@@ -89,7 +105,15 @@ def proxy_trusted(request: Request, settings: Settings) -> bool:
     return bool(given) and hmac.compare_digest(given.encode(), settings.proxy_secret.encode())
 
 
+def agent_denied(method: str, path: str) -> bool:
+    return any((m == "*" and method not in _SAFE or m == method) and rx.match(path) for m, rx in _DENY)
+
+
 def resolve_operator(request: Request, settings: Settings) -> Operator:
+    internal = actor_mod.internal_principal(request.headers)
+    if internal is not None:
+        who, scope = internal
+        return Operator(who, "viewer" if scope == "read" else "owner", agent=True)
     if settings.auth_mode == "local":
         return Operator(LOCAL_NAME, "owner")
     if not proxy_trusted(request, settings):
@@ -106,7 +130,13 @@ def resolve_operator(request: Request, settings: Settings) -> Operator:
 
 def authorize(request: Request, settings: Settings) -> Operator:
     op = resolve_operator(request, settings)
-    need = required_role(request.method, request.url.path)
+    path = request.url.path
+    if op.agent:
+        if settings.auth_mode == "proxy" and agent_denied(request.method, path):
+            raise AuthError(403, "forbidden", "agents may not perform operator administration")
+        if op.role == "viewer" and request.method == "POST" and _READ_POST.match(path):
+            return op
+    need = required_role(request.method, path)
     if _RANK[op.role] < _RANK[need]:
         raise AuthError(403, "forbidden", f"{need} role required")
     return op

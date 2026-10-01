@@ -16,7 +16,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS identity(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS attempts(
     attempt_id TEXT PRIMARY KEY, generation INTEGER NOT NULL, offer TEXT NOT NULL, state TEXT NOT NULL,
-    manifest TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    manifest TEXT, error TEXT, engine_execution_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS epochs(slot_id TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
 """
 
@@ -33,6 +33,7 @@ class AttemptRow:
     state: str
     manifest: str | None
     error: str | None
+    engine_execution_id: str | None = None
 
 
 class RunnerState:
@@ -43,6 +44,8 @@ class RunnerState:
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
         self._db.executescript(_SCHEMA)
+        if "engine_execution_id" not in {r[1] for r in self._db.execute("PRAGMA table_info(attempts)")}:
+            self._db.execute("ALTER TABLE attempts ADD COLUMN engine_execution_id TEXT")  # pre-H12 databases
 
     def close(self) -> None:
         with self._lock:
@@ -78,9 +81,9 @@ class RunnerState:
 
     @staticmethod
     def _row(r: tuple) -> AttemptRow:
-        return AttemptRow(r[0], r[1], Offer.model_validate_json(r[2]), r[3], r[4], r[5])
+        return AttemptRow(r[0], r[1], Offer.model_validate_json(r[2]), r[3], r[4], r[5], r[6])
 
-    _COLS = "attempt_id, generation, offer, state, manifest, error"
+    _COLS = "attempt_id, generation, offer, state, manifest, error, engine_execution_id"
 
     def get_attempt(self, attempt_id: str) -> AttemptRow | None:
         with self._lock:
@@ -92,11 +95,13 @@ class RunnerState:
             rows = self._db.execute(f"SELECT {self._COLS} FROM attempts ORDER BY created_at").fetchall()
         return [self._row(r) for r in rows]
 
-    def set_state(self, attempt_id: str, state: str, *, manifest: str | None = None, error: str | None = None) -> None:
+    def set_state(self, attempt_id: str, state: str, *, manifest: str | None = None, error: str | None = None,
+                  engine_execution_id: str | None = None) -> None:
         with self._lock:
             self._db.execute(
                 "UPDATE attempts SET state=?, manifest=COALESCE(?, manifest), error=COALESCE(?, error), "
-                "updated_at=? WHERE attempt_id=?", (state, manifest, error, _now(), attempt_id))
+                "engine_execution_id=COALESCE(?, engine_execution_id), updated_at=? WHERE attempt_id=?",
+                (state, manifest, error, engine_execution_id, _now(), attempt_id))
 
     def local_attempts(self, spool: Spool) -> list[LocalAttempt]:
         out = []

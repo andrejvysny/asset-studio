@@ -20,6 +20,23 @@ from assetstudio_core.ids import derived_id, new_id
 from . import runcontrol
 from .runcontrol import NOT_HELD_SQL, RunControlMixin, RunNotOpen
 
+ADMISSION_PAUSED_KEY = "admission_paused"  # "1" while `execution switch` drains or holds the journal (R15)
+EXECUTION_GENERATION_KEY = "execution_generation"  # bumped by every serving-process activation
+
+
+def fence_clause(generation: int | None, *, paused: bool = True) -> tuple[str, list[Any]]:
+    """SQL predicate (journal_meta lives in the same database) that makes an UPDATE fail once the pause flag is set
+    or a newer serving process has activated. generation=None skips the generation check (never activated)."""
+    parts: list[str] = []
+    args: list[Any] = []
+    if paused:
+        parts.append("COALESCE((SELECT value FROM journal_meta WHERE key=?),'0') != '1'")
+        args.append(ADMISSION_PAUSED_KEY)
+    if generation is not None:
+        parts.append("CAST(COALESCE((SELECT value FROM journal_meta WHERE key=?),'0') AS INTEGER) = ?")
+        args += [EXECUTION_GENERATION_KEY, generation]
+    return " AND ".join(parts) or "1", args
+
 TASK_ACTIVE = ("queued", "running", "reconciling", "blocked")
 # Attempt states where a runner may still be working (or its outcome is unknown); `ingested` is delivered.
 INFLIGHT_ATTEMPTS = ("offered", "leased", "admitted", "executing", "spooled", "uploading", "uncertain")
@@ -262,7 +279,9 @@ class TaskStore(RunControlMixin):
             self.changed.notify_all()
         return n == 1
 
-    def claim(self, task_id: str, pass_id: str) -> bool:
+    def claim(self, task_id: str, pass_id: str, generation: int | None = None) -> bool:
+        """The pause/generation fence is part of the UPDATE: a stale process cannot win a claim from a cache."""
+        fence, fence_args = fence_clause(generation)
         with self._lock:
             n = self._db.execute(
                 "UPDATE stage_tasks SET state='running', pass_id=?, attempts=attempts+1, updated_at=?, "
@@ -270,8 +289,8 @@ class TaskStore(RunControlMixin):
                 "NOT EXISTS (SELECT 1 FROM stage_tasks o WHERE o.project_id=stage_tasks.project_id "
                 "AND o.item_id=stage_tasks.item_id AND o.family=stage_tasks.family "
                 "AND o.state IN ('running','reconciling') "
-                "AND o.command_id != stage_tasks.command_id)",
-                (pass_id, now_iso(), task_id)).rowcount
+                "AND o.command_id != stage_tasks.command_id) AND " + fence,
+                (pass_id, now_iso(), task_id, *fence_args)).rowcount
         return n == 1
 
     def progress(self, task_id: str, progress: dict[str, Any], touch: bool = True) -> None:

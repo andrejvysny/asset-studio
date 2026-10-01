@@ -21,12 +21,13 @@ from assetstudio_protocol.transfer import (
 )
 from assetstudio_storage.repo import StorageError
 
+from ..attemptstore import QuotaExceeded, UploadConflict
 from ..errors import ApiError
 from ..runner_errors import RunnerError
 from ..studio import Studio
 from ._runner_util import after, fmt, load_attempt, now_dt
 
-_UPLOADING = ("executing", "spooled", "uploading")
+_UPLOADING = ("executing", "spooled", "uploading", "uncertain", "lost")
 _FINALIZE_SLOTS = threading.BoundedSemaphore(2)
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -83,34 +84,25 @@ def open_input(studio: Studio, project_id: str, sha: str) -> BinaryIO:
 
 
 # --- uploads ------------------------------------------------------------------------------------------------------
-def _check_quotas(studio: Studio, runner: dict[str, Any], size: int) -> None:
-    s, store = studio.settings, studio.journal.attempts
-    free = shutil.disk_usage(s.instance_dir).free
-    problem = None
-    if store.reserved_bytes() + size > s.upload_quota_bytes:
-        problem = "global upload quota exceeded"
-    elif store.reserved_bytes(runner_id=runner["id"]) + size > s.upload_runner_quota_bytes:
-        problem = "runner upload quota exceeded"
-    elif free - size < s.disk_floor_bytes:
-        problem = "disk reserve would be breached"
-    if problem:
-        raise RunnerError(507, "resource_exhausted", problem, {"size": size, "free_bytes": free})
-
-
 def create_upload(studio: Studio, runner: dict[str, Any], req: UploadCreate) -> UploadCreated:
     attempt = load_attempt(studio, runner, req.attempt_id)
     if attempt["generation"] != req.generation:
         raise RunnerError(409, "stale_generation", "generation does not match the attempt")
     if attempt["state"] not in _UPLOADING:
         raise RunnerError(409, "invalid_input", f"attempt is {attempt['state']}, not accepting uploads")
-    store = studio.journal.attempts
-    existing = store.find_upload(attempt["id"], req.generation, req.sha256)
-    if existing is None:
-        _check_quotas(studio, runner, req.size)
-    row, _ = store.create_upload(
-        attempt_id=attempt["id"], generation=req.generation, project_id=attempt["project_id"],
-        runner_id=runner["id"], sha256=req.sha256, size=req.size, role=req.role, mime=req.mime,
-        chunk_size=studio.settings.upload_chunk_size, expires_at=after(studio.settings.upload_ttl_s))
+    store, s = studio.journal.attempts, studio.settings
+    try:
+        row, _ = store.create_upload(
+            attempt_id=attempt["id"], generation=req.generation, project_id=attempt["project_id"],
+            runner_id=runner["id"], sha256=req.sha256, size=req.size, role=req.role, mime=req.mime,
+            chunk_size=s.upload_chunk_size, expires_at=after(s.upload_ttl_s), global_max=s.upload_quota_bytes,
+            runner_max=s.upload_runner_quota_bytes, free_bytes=shutil.disk_usage(s.instance_dir).free,
+            disk_floor=s.disk_floor_bytes)
+    except QuotaExceeded as e:
+        raise RunnerError(507, "resource_exhausted", e.reason, e.details) from e
+    except UploadConflict as e:
+        raise RunnerError(409, "invalid_input", str(e)) from e
+    # lost/uncertain attempts keep their state: late output is custody, not a revival
     store.transition(attempt["id"], ("executing", "spooled"), "uploading", event="upload_started")
     return UploadCreated(upload_id=row["id"], chunk_size=row["chunk_size"], expires_at=row["expires_at"])
 
@@ -240,7 +232,8 @@ def _verify_and_store(studio: Studio, up: dict[str, Any]) -> IngestReceipt:
     except (ApiError, StorageError) as e:
         store.set_upload_state(up["id"], ("finalizing",), "open")
         raise RunnerError(503, "node_unavailable", "project storage could not take the blob") from e
-    store.set_upload_state(up["id"], ("finalizing",), "finalized", finalized_at=fmt(now_dt()))
+    if not store.set_upload_state(up["id"], ("finalizing",), "finalized", finalized_at=fmt(now_dt())):
+        raise RunnerError(409, "invalid_input", "upload expired during finalize")
     part.unlink(missing_ok=True)
     return _receipt(store.get_upload(up["id"]) or up)
 
@@ -248,7 +241,9 @@ def _verify_and_store(studio: Studio, up: dict[str, Any]) -> IngestReceipt:
 def expire_uploads(studio: Studio) -> int:
     n = 0
     for up in studio.journal.attempts.expired_uploads(fmt(now_dt())):
-        if studio.journal.attempts.set_upload_state(up["id"], ("open", "finalizing"), "expired"):
+        with _locks_guard:
+            owned = up["id"] in _finalizing  # a live in-process finalize owns the part file
+        if not owned and studio.journal.attempts.set_upload_state(up["id"], ("open", "finalizing"), "expired"):
             _part(studio, up["id"]).unlink(missing_ok=True)
             n += 1
     return n

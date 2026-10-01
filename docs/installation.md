@@ -22,7 +22,7 @@
 Studio runs without model weights; a `runner` container owns the GPUs and engines (profile S,
 `docs/modular/compute-runner.md`). Direct mode stays the default.
 
-Prerequisites: Docker Compose >= 2.24 (`!override`/`!reset` tags; `make PODMAN=1` is refused) and the NVIDIA Container
+Prerequisites: Docker Compose >= 2.24.4 (`!override`/`!reset` tags; earlier 2.24.x mis-merges `!override`; `make PODMAN=1` is refused) and the NVIDIA Container
 Toolkit. The models from `make models` must already be on this host.
 
 1. `make build`
@@ -48,19 +48,37 @@ Troubleshooting:
 - `forbidden_scope` on inventory: the GPU UUID is already claimed by another runner (one runner per host; check for a
   stale runner from another machine or name).
 
+## Supported topologies
+
+| Topology | Files | Command |
+|---|---|---|
+| Studio only (VPS, no GPU/engines/runner) | `compose.studio.yml` | `docker compose -f compose.studio.yml up -d` |
+| Studio only, public behind Traefik | `compose.studio.yml` + `compose.public.yml` | `docker compose -f compose.studio.yml -f compose.public.yml up -d` |
+| Compute only (remote runner host) | `compose.node-remote.yml` | `docker compose -f compose.node-remote.yml up -d` |
+| Combined development (one machine) | `compose.yml` (+ `compose.nodes.yml`) | `make up` / `make up-nodes` |
+
+All need Docker Compose >= 2.24.4 for the overlays (`!override`/`!reset`); `make up-nodes` and friends check it.
+The runner host lock is a host path (`RUNNER_HOST_LOCK_DIR`, default `/var/lock/assetstudio-runner`), so two Compose
+project names on one machine cannot run two runners. Create it once on every runner host:
+`sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner`.
+
 ## Public Studio (VPS) with home runners
 
 Profile P (`docs/modular/compute-runner.md` R11, R14, R16): Studio on a VPS behind Traefik + Authelia; GPU runners
-stay at home and connect outbound. Traefik and Authelia are external to these files.
+stay at home and connect outbound. Traefik and Authelia are external to these files. `compose.public.yml` is an
+overlay over `compose.studio.yml` (no GPU services, no model mounts, no host ports).
 
 Steps:
 1. Secrets on the VPS: `mkdir -p secrets && openssl rand -hex 32 > secrets/studio_proxy_secret && chmod 600 secrets/*`.
    Export the same value for the Traefik labels: `export STUDIO_PROXY_SECRET=$(cat secrets/studio_proxy_secret)`.
-2. Set `STUDIO_HOST=studio.example.com` (and optionally `TRAEFIK_CERTRESOLVER`, `TRAEFIK_ENTRYPOINT`,
-   `AUTHELIA_MIDDLEWARE`, `PROXY_NETWORK`); the Traefik container must share the `proxy` network.
-3. Start: `docker compose -f compose.yml -f compose.nodes.yml -f compose.public.yml up -d`.
+2. Set `STUDIO_HOST=studio.example.com` (and optionally `MCP_PUBLIC_HOST`, `INTEGRATION_PUBLIC_HOST`, default
+   `mcp.$STUDIO_HOST` / `integration.$STUDIO_HOST`; `TRAEFIK_CERTRESOLVER`, `TRAEFIK_ENTRYPOINT`,
+   `AUTHELIA_MIDDLEWARE`, `PROXY_NETWORK`); the Traefik container must share the `proxy` network. DNS and certificates
+   are needed for all three hosts. Set `STUDIO_MCP=0` / `STUDIO_INTEGRATION_ENABLED=0` to disable a listener.
+3. Start: `docker compose -f compose.studio.yml -f compose.public.yml up -d`.
 4. Authelia access control (groups match `STUDIO_ROLE_GROUPS`; owner/reviewer/viewer map to `assetstudio-owners`,
-   `assetstudio-reviewers`, `assetstudio-viewers`):
+   `assetstudio-reviewers`, `assetstudio-viewers`). Only the operator host goes through Authelia; the MCP and
+   integration hosts must not be routed through forward-auth:
    ```yaml
    access_control:
      rules:
@@ -74,9 +92,18 @@ Steps:
    indices in `config/runner.remote.yaml`, then `docker compose -f compose.node-remote.yml up -d`.
    The runner connects outbound only (`dispatch: pull`).
 
-Exposed: the browser UI and operator API (Authelia two-factor, role per group), and `/api/runner/*` (no Authelia;
-runner signatures, single-use registration tokens, per-IP limits in Traefik and Studio, transfer in-flight limit).
-Studio publishes no host port.
+Routes (all TLS; Studio publishes no host port; the integration listener binds `0.0.0.0` inside the container via
+`STUDIO_INTEGRATION_CONTAINER_BIND=1`, TLS ends at Traefik):
+
+| Host / path | Listener | Auth | Traefik middlewares |
+|---|---|---|---|
+| `$STUDIO_HOST` | 8190 UI + operator REST | Authelia, role per group; proxy secret stamped | `assetstudio-headers`, Authelia |
+| `$STUDIO_HOST/api/runner/*` | 8190 runner protocol | runner signatures, single-use registration tokens | headers, per-IP rate limit, in-flight limits |
+| `$MCP_PUBLIC_HOST` (`/mcp`, `/files/`) | 8191 MCP | MCP bearer tokens; no Authelia, no proxy secret | `assetstudio-strip`, rate limit, 64 MiB body cap |
+| `$INTEGRATION_PUBLIC_HOST` (`/api/integration/v1`) | 8192 Godot integration | library-scoped bearer tokens; no Authelia, no proxy secret | `assetstudio-strip`, rate limit, 512 MiB body cap |
+
+`assetstudio-strip` blanks `Remote-User`, `Remote-Groups`, `X-AssetStudio-Proxy-Secret`, `X-AssetStudio-Internal`,
+`X-AssetStudio-Actor` and `X-AssetStudio-Agent-Scope`, so a client cannot spoof them on the token-authenticated hosts.
 
 Security notes:
 - Never expose Studio without the proxy secret: without it `STUDIO_AUTH_MODE=proxy` refuses to start, and requests

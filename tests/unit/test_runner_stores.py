@@ -196,7 +196,8 @@ def _upload(j: Journal, sha: str = "a" * 64, size: int = 100, expires: str = "20
             ) -> tuple[dict[str, Any], bool]:
     return j.attempts.create_upload(attempt_id="atp_1", generation=1, project_id="prj_1", runner_id="rnr_a",
                                     sha256=sha, size=size, role="output", mime="image/png", chunk_size=50,
-                                    expires_at=expires)
+                                    expires_at=expires, global_max=10**9, runner_max=10**9, free_bytes=10**12,
+                                    disk_floor=0)
 
 
 def test_uploads(journal: Journal) -> None:

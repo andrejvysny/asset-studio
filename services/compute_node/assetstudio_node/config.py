@@ -59,6 +59,7 @@ class RunnerConfig(_Strict):
     workflows_dir: Path | None = None  # ComfyUI workflow bindings; required for a real (non-simulated) image slot
     poll_s: float = Field(default=0.5, gt=0)  # image engine status poll interval
     acquire_wait_s: int = Field(default=25, ge=0, le=50)
+    transfer_workers: int = Field(default=2, ge=1)  # concurrent result uploads
     simulated: bool = False
 
     @model_validator(mode="after")

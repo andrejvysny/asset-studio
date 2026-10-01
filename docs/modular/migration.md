@@ -88,11 +88,25 @@ under `/api/runner/v1` with their own authentication (R3) and are the only CSRF 
 The journal records `execution_mode` (an absent row means `direct`; a never-switched direct instance writes nothing).
 
 1. Deploy with `STUDIO_EXECUTION=direct` (default); verify the journal migration.
-2. `assetstudio execution switch --to nodes [--timeout 300]` sets `admission_paused`, waits until no task is
-   running or reconciling and no attempt is non-terminal, records `execution_mode=nodes`, clears the pause and prints
-   the mode to restart with. While paused Studio claims no new tasks and places no new offers (the flag is re-read at
-   most once a second). On timeout it exits 3 with the live counts, restores admission and changes nothing.
-   `assetstudio execution status` prints the persisted and configured mode, live counts and the pause flag.
+2. `assetstudio execution switch --to nodes [--timeout 300]` is the CLI half of a handoff: pause -> quiesce -> fence
+   -> start new -> activate -> resume.
+   - The journal holds `execution_switch` (`active` -> `draining` -> `quiesced`, with `from`/`to`) and an
+     `execution_generation`. The CLI compare-and-sets `active -> draining` (a second switch is refused; re-running the
+     same target on a `quiesced` journal just prints success, for a lost CLI response), sets `admission_paused`, waits
+     until no task is running or reconciling and no attempt is non-terminal, then records `execution_mode=nodes` and
+     `quiesced`. The pause STAYS set. On timeout or Ctrl-C it exits 3 with the live counts, returns to `active`,
+     clears the pause and changes nothing.
+   - The fence is in SQL, not in a cache: task claims and offer placement are UPDATEs that require the pause flag
+     unset and `execution_generation` equal to the process's own; `accept` (start authorization) requires the
+     generation. The 1 s cached pause in the coordinator is only a scheduling hint. The old process therefore cannot
+     claim, place or authorize anything after the switch returns.
+   - Restart Studio with `STUDIO_EXECUTION=nodes`. `Coordinator.start()` (not `build_studio`, so CLI commands never
+     fence the running server) calls `Journal.activate`, which bumps the generation (every serving start does, fencing
+     any zombie), marks the switch `active` and resumes admission. A `quiesced` switch whose target differs from the
+     configured mode, or a `draining` one (CLI died), refuses to start and admission stays paused.
+   - `assetstudio execution abort` (from `draining` or `quiesced`) restores the previous mode and resumes admission;
+     the old process continues with its unchanged generation. `execution status` shows the switch state and generation.
+   - Integration publication is control-plane only: it is not paused by the GPU switch (shutdown drains it separately).
 3. Startup compares `STUDIO_EXECUTION` with the recorded mode. A difference with work in flight (running, reconciling
    or queued tasks, non-terminal attempts) is refused, naming both modes, the counts and the switch command; Studio
    never switches itself with live work. A difference on a quiesced journal is recorded and logged as a warning, since

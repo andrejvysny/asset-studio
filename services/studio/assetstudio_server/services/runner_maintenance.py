@@ -39,7 +39,8 @@ class RunnerMaintenance:
     def run_once(self) -> None:
         steps: tuple[tuple[str, Callable[[Studio], object]], ...] = (
             ("expire attempts", attempts.expire), ("place pending offers", attempts.place_pending),
-            ("expire uploads", transfers.expire_uploads), ("reconcile tasks", reconcile_tasks))
+            ("expire uploads", transfers.expire_uploads), ("reconcile tasks", reconcile_tasks),
+            ("repair custody", attempts.repair_custody))
         for name, step in steps:
             try:
                 step(self.studio)

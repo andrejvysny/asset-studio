@@ -16,8 +16,8 @@ from assetstudio_core.ids import new_id
 from assetstudio_protocol.execution import TERMINAL_STATES as ATTEMPT_TERMINAL
 
 from .attemptstore import AttemptStore
-from .runnerstore import RunnerStore
-from .taskstore import TaskStore
+from .runnerstore import RunnerStore, journal_txn
+from .taskstore import ADMISSION_PAUSED_KEY, EXECUTION_GENERATION_KEY, TaskStore
 
 ACTIVE_STATES = ("held", "queued", "running", "cancel_requested", "reconciling")
 TERMINAL_STATES = ("succeeded", "failed", "cancelled")
@@ -90,7 +90,12 @@ CREATE TABLE IF NOT EXISTS uploads (
 _MIGRATIONS = ((2, _V2), (3, _V3), (4, _V4))
 # Absent row means "direct" (Studio-local execution); no data migration writes it.
 EXECUTION_MODE_KEY = "execution_mode"
-ADMISSION_PAUSED_KEY = "admission_paused"  # "1" while `execution switch` drains the journal (R15)
+EXECUTION_SWITCH_KEY = "execution_switch"  # JSON {"state": active|draining|quiesced, "from", "to", "at"}
+__all__ = ["ADMISSION_PAUSED_KEY", "EXECUTION_GENERATION_KEY", "EXECUTION_MODE_KEY", "EXECUTION_SWITCH_KEY"]
+
+
+class ExecutionModeMismatch(RuntimeError):
+    """Configured execution mode differs from the journal's (live work, or a pending switch handoff) (R15)."""
 
 
 class JournalTooNew(Exception):
@@ -164,6 +169,88 @@ class Journal:
         with self._lock:
             row = self._db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
         return None if row is None else str(row["value"])
+
+    def _meta(self, db: sqlite3.Connection, key: str) -> str | None:
+        row = db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    @staticmethod
+    def _put(db: sqlite3.Connection, key: str, value: str) -> None:
+        db.execute("INSERT INTO journal_meta(key, value, updated_at) VALUES (?,?,?) "
+                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                   (key, value, now_iso()))
+
+    def _switch(self, db: sqlite3.Connection) -> dict[str, Any]:
+        raw = self._meta(db, EXECUTION_SWITCH_KEY)
+        return json.loads(raw) if raw else {"state": "active"}
+
+    def _set_switch(self, db: sqlite3.Connection, state: str, frm: str | None, to: str | None) -> None:
+        self._put(db, EXECUTION_SWITCH_KEY, json.dumps({"state": state, "from": frm, "to": to, "at": now_iso()}))
+
+    def switch_state(self) -> dict[str, Any]:
+        with self._lock:
+            return self._switch(self._db)
+
+    def generation(self) -> int:
+        return int(self.meta_get(EXECUTION_GENERATION_KEY) or 0)
+
+    # Switch transitions are compare-and-set under BEGIN IMMEDIATE, so a CLI and a Studio in different processes
+    # cannot both win; the claim/placement fences read the same rows inside their own UPDATE.
+    def begin_switch(self, to: str) -> str:
+        """'started' (active -> draining, admission paused), 'done' (same target already quiesced: a lost CLI
+        response), or 'busy' (another switch is in progress)."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] == "quiesced" and cur.get("to") == to:
+                return "done"
+            if cur["state"] != "active":
+                return "busy"
+            self._set_switch(db, "draining", self._meta(db, EXECUTION_MODE_KEY) or "direct", to)
+            self._put(db, ADMISSION_PAUSED_KEY, "1")
+        return "started"
+
+    def complete_switch(self) -> bool:
+        """draining -> quiesced, records the target mode; the pause STAYS until the new process activates."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] != "draining":
+                return False
+            self._put(db, EXECUTION_MODE_KEY, cur["to"])
+            self._set_switch(db, "quiesced", cur["from"], cur["to"])
+        return True
+
+    def abort_switch(self, states: tuple[str, ...] = ("draining", "quiesced")) -> bool:
+        """-> active with the original mode and admission resumed; the generation is untouched, so the old process
+        keeps working."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] not in states:
+                return False
+            if cur["state"] == "quiesced":  # draining never touched the mode (an absent row stays absent)
+                self._put(db, EXECUTION_MODE_KEY, cur["from"] or "direct")
+            self._set_switch(db, "active", cur["from"], cur["to"])
+            self._put(db, ADMISSION_PAUSED_KEY, "0")
+        return True
+
+    def activate(self, expected_mode: str) -> int:
+        """Called by the serving process only. Bumps the generation (fencing any older process) and resumes
+        admission; refuses while a switch is draining or targets another mode (admission stays paused)."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] == "draining":
+                raise ExecutionModeMismatch(
+                    f"an execution switch to {cur['to']!r} is still draining (the CLI died?). Re-run "
+                    f"`assetstudio execution switch --to {cur['to']}` or `assetstudio execution abort`")
+            if cur["state"] == "quiesced" and cur.get("to") != expected_mode:
+                raise ExecutionModeMismatch(
+                    f"journal is quiesced for a switch to {cur['to']!r} but STUDIO_EXECUTION={expected_mode!r}; "
+                    f"admission stays paused. Restart with STUDIO_EXECUTION={cur['to']}, or run "
+                    "`assetstudio execution abort` to resume the previous mode")
+            gen = int(self._meta(db, EXECUTION_GENERATION_KEY) or 0) + 1
+            self._put(db, EXECUTION_GENERATION_KEY, str(gen))
+            self._set_switch(db, "active", cur.get("from"), cur.get("to"))
+            self._put(db, ADMISSION_PAUSED_KEY, "0")
+        return gen
 
     def live_work(self) -> dict[str, int]:
         """Work a mode change could orphan: running/reconciling tasks, queued tasks that may run, open attempts."""

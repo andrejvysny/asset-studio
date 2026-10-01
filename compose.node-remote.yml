@@ -1,7 +1,7 @@
 # A remote runner host (home box, node B): runner + engines only, no Studio. Registers over the internet with
 # the public Studio URL from config/runner.remote.yaml (docs/installation.md "Public Studio (VPS)").
 #   docker compose -f compose.node-remote.yml up -d
-# Standalone file (does not layer on compose.yml). Needs the image from `make build` (or a registry copy), the models
+# Needs Docker Compose >= 2.24.4. Standalone file (does not layer on compose.yml). Needs the image from `make build` (or a registry copy), the models
 # from `make models`, and secrets/runner_registration_token (minted in Studio: Runtime -> Compute runners).
 
 name: assetstudio-node
@@ -20,7 +20,10 @@ services:
     environment: *offline
     volumes:
       - ${MODELS_DIR:-./models}:/models:ro
-      - runner-state:/var/lib/assetstudio-runner   # state dir, key, host lock: one runner per host
+      - runner-state:/var/lib/assetstudio-runner   # state dir and key (per Compose project)
+      # Host lock: a HOST path, shared by every Compose project on this machine (one runner per host).
+      # Create it once: sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner
+      - ${RUNNER_HOST_LOCK_DIR:-/var/lock/assetstudio-runner}:/var/lock/assetstudio-runner
       - ./config/runner.remote.yaml:/etc/assetstudio/runner.yaml:ro
     secrets:
       - source: runner_registration_token

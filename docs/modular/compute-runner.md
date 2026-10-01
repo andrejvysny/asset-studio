@@ -71,6 +71,13 @@ Delivery differs between pull and push; the commit point is identical.
 
 - **Offer**: Studio places a call on an eligible slot. The attempt becomes `offered` with its generation, an offer
   deadline, frozen inputs, requirements, policy and `input_digest`.
+- **Eligibility** is one evaluator (`services/eligibility.py`) shared by preflight readiness, placement, acquire and
+  accept. A call's typed requirement is capability, engine, export features (`geometry_policy.v1` when a geometry
+  cleanup key is set), exporter (`exporter-research`) and model receipts; runner `export-feature.*` labels apply to
+  all its slots. Placement binds only eligible slots, acquire only offers whose slot is in `free_slots` and still
+  eligible, and accept re-checks the bound slot against the current inventory (`admission_rejected` when it lost a
+  feature or model). Advertised export features are the union over eligible runners, not the intersection; readiness
+  for a call names the exact unsatisfied requirement.
 - **Pull**: `POST /sessions/{sid}/acquire {request_id, free_slots, cached_residencies, wait_s ≤ 50}` returns an offer
   or 204. It is an async long-poll with `wait_s` below the proxy idle timeout. Repeating a `request_id` returns the
   same offer (lost response); `request_id`s are retained for the offer TTL. One outstanding acquire per session.
@@ -113,6 +120,19 @@ Delivery differs between pull and push; the commit point is identical.
   every leased worker, **including the one about to be granted**, acknowledges unload at a new persisted epoch with
   `active = 0`; unknown ComfyUI queue entries block the slot until drained or reset by an operator. Epochs are
   persisted in the runner database. In node deployments ComfyUI has no host port, so only the runner submits work.
+- **Effective engine execution id (H12).** Every engine call carries a stable id, persisted on the attempt row
+  before the engine is called (and echoed as `engine_execution_id` in the result manifest meta): the Studio-chosen
+  ComfyUI `prompt_id` or worker3d `execution_id` where one exists, else `<attempt_id>-g<generation>` (within the aux
+  service's 80-char `X-Execution-Id` limit). It is independent of the input/offer digest. Reconciliation after an
+  interrupted (`executing`, no spool) call is declared per operation:
+
+  | operation | engine finds earlier work by id | after a runner crash |
+  |---|---|---|
+  | `image.*` | yes (ComfyUI history/queue by prompt id) | re-run; picks up the engine's result |
+  | `worker3d.*` | yes (worker status by execution id) | re-run; picks up the engine's result |
+  | `aux.*` | no (synchronous HTTP, id only echoed) | reported `lost`; Studio recomputes under a new generation |
+
+  Executors expose `reconciles(operation)`; the in-process fake executor reconciles nothing.
 
 ## R8 Execution, identity and receipts
 
@@ -201,6 +221,18 @@ runner; a pending cancel stays pending until the runner acknowledges it. This re
   The upload is frozen during finalize. Abandoned uploads are garbage-collected after a TTL. Handlers stream and
   never hold a whole file in memory.
 
+### Slot concurrency (agent)
+
+- Each slot runs at most one attempt on its own thread; independent slots execute concurrently. A physical device is
+  held by at most one running attempt, so slots that share a device (a config the validator rejects, enforced again
+  by the agent) never run heavy work together.
+- A result is uploaded by a bounded transfer pool (`transfer_workers`, default 2). The slot is free as soon as the
+  result is spooled, so its next attempt overlaps the upload.
+- `acquire` advertises only idle, barrier-ready slots whose devices are not held; while any slot runs, the long poll is
+  capped at 2 s so a freed slot is offered work promptly. A pushed offer for a busy slot is rejected with
+  `admission_busy`. The barrier recheck runs only while no slot is executing. On shutdown the agent waits up to 30 s
+  for running attempts and uploads; whatever is unfinished stays in local state and is recovered on restart.
+
 ## R10 Readiness and model assurance
 
 Studio sends the catalog (the content and sha256 of `config/models.lock.yaml`) at session start. Every catalog file
@@ -234,6 +266,9 @@ The runner view shows online/stale/offline, profile, dispatch mode, devices (UUI
 models, active attempts, unsynced spool bytes, upload progress, recent errors, and per task the reason it cannot run
 (no compatible model revision, insufficient resources, disconnected runner, unknown device ownership).
 
+GPU usage is not carried by the inventory or heartbeat, so the Runtime payload reports `vram_used_mb`, `util_pct` and
+`measured_at` as `null` (unknown, never zero/idle); `inventory_at` is when the device list was published.
+
 ## R14 Resource budgets on a public endpoint
 
 - Unauthenticated endpoints (`register`, `token/challenge`, `token`): per-IP rate limits in Traefik and an in-app
@@ -243,6 +278,10 @@ models, active attempts, unsynced spool bytes, upload progress, recent errors, a
   `X-Forwarded-For` hop only when the proxy secret header is valid.
 - Storage: global, project and runner byte quotas; reservation before upload; a **disk reserve** below which uploads
   are refused so journal and control writes always succeed. Rejected and quarantined bytes count against quota.
+  Quota is checked inside the reservation transaction (an expired-session retry re-checks it). `lost` / `uncertain`
+  attempts may still upload late output; it is quarantined on `complete`, never ingested.
+- Custody: terminal state and disposition are one write; a maintenance step (and Studio start) repairs any gap, so the
+  runner always receives its release receipt.
 - CPU and memory: semaphores bound concurrent finalize/hash work and in-flight remote-result bytes (remote adapters
   still return bytes to stage code). An oversize result blocks its task with a reason instead of exhausting memory.
 - Control-plane isolation: heartbeat, acquire and accept are async and never queue behind transfers. Transfers use a
@@ -253,7 +292,9 @@ models, active attempts, unsynced spool bytes, upload progress, recent errors, a
 The journal records `execution_mode` and an activation marker. Startup refuses when the configured mode differs from
 the persisted one while non-terminal tasks or attempts exist. Switching is explicit:
 `assetstudio execution switch --to nodes|direct` pauses admission, waits until no task is running or reconciling and
-no attempt is non-terminal, then flips (calls of tasks already running may finish; nothing new starts). A configured
+no attempt is non-terminal, then records the mode and leaves admission paused until the restarted Studio activates
+(a new execution generation fences the old process in SQL; `execution abort` backs out; calls of tasks already
+running may finish while draining, nothing new starts). A configured
 mode that differs from the persisted one is recorded automatically only when nothing is in flight, so nothing can be
 orphaned; otherwise startup is refused. The journal refuses to open a schema version newer than it knows.
 
@@ -275,6 +316,14 @@ mapped by `STUDIO_ROLE_GROUPS` (default `owner:assetstudio-owners,reviewer:asset
 viewer:assetstudio-viewers`; highest mapped role wins, none = 403). The audit actor is the `Remote-User` value
 (`operator` in local mode). The table lives in `operator_auth.ROLE_RULES`; `tests/unit/test_operator_auth.py` fails
 when a mutating route matches no rule.
+
+**MCP agents.** The in-process MCP loopback is not a loopback bypass: `StudioClient` sends the per-process internal
+secret, the actor and the token scope (`x-assetstudio-agent-scope`); `actor.internal_principal` accepts them only on a
+constant-time secret match (forged or partial headers fall through to normal auth). `read` scope is `viewer`, `full` is
+`owner` minus `operator_auth.AGENT_DENY` (in proxy mode: audit, runner groups/tokens/revoke/push-url, declare-lost,
+lane reset, project register, project config writes and storage test/rebuild; `config:validate` stays allowed) which
+returns 403 "agents may not perform operator administration". The audit actor is the agent (`agent:<name>`); revoked
+tokens are refused by the MCP listener before any tool runs.
 
 ### Appendix: route to role
 

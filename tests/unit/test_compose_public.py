@@ -44,11 +44,11 @@ def _middlewares(router: str) -> list[str]:
 def test_studio_has_no_host_port_and_uses_proxy_auth() -> None:
     doc = _load("compose.public.yml")
     studio = doc["services"]["studio"]
-    assert studio["ports"] == {"!reset": []}
+    assert "ports" not in studio  # compose.studio.yml publishes nothing; only Traefik reaches Studio
     assert studio["environment"]["STUDIO_AUTH_MODE"] == "proxy"
     assert studio["environment"]["STUDIO_PROXY_SECRET_FILE"] == "/run/secrets/studio_proxy_secret"
     assert studio["environment"]["STUDIO_PUBLIC_URL"].startswith("https://")
-    assert "proxy" in studio["networks"] and doc["networks"]["proxy"]["external"] is True
+    assert studio["networks"] == ["proxy"] and doc["networks"]["proxy"]["external"] is True
     assert "studio_proxy_secret" in doc["secrets"]
 
 
@@ -88,9 +88,12 @@ def test_node_remote_has_runner_and_no_studio() -> None:
     assert any(v.endswith(":/etc/assetstudio/runner.yaml:ro") and "runner.remote.yaml" in v
                for v in runner["volumes"])
     assert runner["secrets"][0]["source"] == "runner_registration_token"
+    assert any(v.endswith(":/var/lock/assetstudio-runner") and v.startswith("${RUNNER_HOST_LOCK_DIR:-/")
+               for v in runner["volumes"])
 
 
 def test_remote_runner_config_validates() -> None:
     cfg = RunnerConfig.model_validate(load_yaml((ROOT / "config" / "runner.remote.yaml").read_text()))
     assert cfg.studio_url.startswith("https://") and cfg.dispatch == "pull"
     assert [s.capability for s in cfg.slots] == ["aux3d"]
+    assert cfg.host_lock == Path("/var/lock/assetstudio-runner/host.lock")

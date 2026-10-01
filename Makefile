@@ -10,7 +10,7 @@ COMPOSE ?= docker compose
 NODE_RUN = docker run --rm -v "$$PWD/web":/web -w /web docker.io/library/node:22.20-slim
 endif
 PY = uv run
-# Node mode (profile S) uses `!override`/`!reset` compose tags (Compose >= 2.24); podman-compose lacks them and would
+# Node mode (profile S) uses `!override`/`!reset` compose tags (Compose >= 2.24.4); podman-compose lacks them and would
 # silently keep mounting ./models into Studio, so the nodes targets refuse PODMAN=1.
 NODES = -f compose.yml -f compose.nodes.yml
 
@@ -58,8 +58,11 @@ test-worker3d: ; podman run --rm --network none -v "$$PWD":/src:ro,Z -w /src \
 # Node mode (docs/installation.md). Token file is gitignored under secrets/.
 nodes-guard:
 ifeq ($(PODMAN),1)
-	@echo "node mode needs Docker Compose >= 2.24 (!override/!reset); not supported with PODMAN=1" >&2; exit 1
+	@echo "node mode needs Docker Compose >= 2.24.4 (!override/!reset); not supported with PODMAN=1" >&2; exit 1
 endif
+	@v=$$($(COMPOSE) version --short 2>/dev/null | sed 's/^v//'); \
+	  [ -n "$$v" ] && [ "$$(printf '%s\n2.24.4\n' "$$v" | sort -V | head -n1)" = "2.24.4" ] \
+	  || { echo "node mode needs Docker Compose >= 2.24.4 (found: $${v:-none})" >&2; exit 1; }
 runner-token: nodes-guard
 	mkdir -p secrets && $(COMPOSE) run --rm studio assetstudio runners group-create --name local --projects '*' --operations '*' 2>/dev/null || true; \
 	$(COMPOSE) run --rm studio assetstudio runners token --group local > secrets/runner_registration_token && chmod 600 secrets/runner_registration_token

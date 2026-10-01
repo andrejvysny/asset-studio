@@ -27,6 +27,7 @@ from assetstudio_protocol.execution import (
     DispositionReceipt,
     FileRef,
     Offer,
+    RejectRequest,
     ReportRequest,
 )
 from assetstudio_protocol.runners import (
@@ -44,9 +45,17 @@ from pydantic import TypeAdapter
 from . import __version__
 from .barrier import recover_slots
 from .config import RunnerConfig
-from .executor import ExecutionBlocked, ExecutionCancelled, ExecutionFailed, Executor
+from .executor import (
+    ExecutionBlocked,
+    ExecutionCancelled,
+    ExecutionFailed,
+    Executor,
+    can_reconcile,
+    effective_engine_id,
+)
 from .inventory import build_inventory
 from .receipts import session_receipts
+from .slots import SlotSupervisor
 from .spool import Spool
 from .state import AttemptRow, RunnerState
 
@@ -58,6 +67,8 @@ _FEATURE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,47}")  # "export-feature." + this 
 _KEYS = TypeAdapter(list[StudioKey])
 _BACKOFF_MAX_S = 30.0
 _BARRIER_RETRY_S = 30.0
+_BUSY_WAIT_S = 2  # long-poll cap while a slot runs: a slot that frees up must not idle for a full acquire wait
+_SHUTDOWN_WAIT_S = 30.0
 
 
 def load_or_create_key(config: RunnerConfig) -> bytes:
@@ -79,13 +90,16 @@ def _is_stale(e: ApiError) -> bool:
 
 class RunnerAgent:
     def __init__(self, config: RunnerConfig, *, client: RunnerClient, executor: Executor, state: RunnerState,
-                 spool: Spool, clock: Callable[[], float] = time.monotonic, idle_s: float = 0.5) -> None:
+                 spool: Spool, clock: Callable[[], float] = time.monotonic, idle_s: float = 0.5,
+                 concurrent: bool = True) -> None:
         self.config = config
         self.client = client
         self.executor = executor
         self.state = state
         self.spool = spool
         self.clock = clock
+        self.concurrent = concurrent  # False runs attempts and uploads inline in step() (deterministic tests)
+        self._sup = SlotSupervisor(config)
         self.stopped = False
         self.lifecycle = "active"
         self._idle_s = idle_s
@@ -107,6 +121,7 @@ class RunnerAgent:
         self._queued: set[tuple[str, int]] = set()
         self._qlock = threading.Lock()
         self._hb_lock = threading.Lock()
+        self._inv_lock = threading.Lock()
 
     @property
     def studio_keys(self) -> list[StudioKey]:
@@ -143,9 +158,10 @@ class RunnerAgent:
 
     def _mark_crashed_executions(self) -> list[str]:
         """Resolve attempts the previous agent process left `executing`. A complete spool only missed its `spooled`
-        step: finish it (worker ack) and deliver. Without a spool, an executor that reconciles by engine id (prompt /
-        execution id) re-runs the call and picks up the engine's result instead of recomputing; the in-process fake
-        executor died with the agent, so its attempt is reported lost (A09)."""
+        step: finish it (worker ack) and deliver. Without a spool, an operation whose engine finds earlier work by the
+        persisted engine execution id (image prompt, worker3d execution) is re-run and picks up that result; any other
+        (aux, in-process fake) cannot be matched, so it is reported lost and Studio recomputes under a new generation
+        (A09) instead of silently recomputing under this attempt."""
         lost = []
         for a in self.state.list_attempts():
             if a.state != "executing":
@@ -153,7 +169,7 @@ class RunnerAgent:
             if self.spool.manifest(a.attempt_id) is not None:
                 self.executor.spooled(a.offer)
                 self.state.set_state(a.attempt_id, "spooled")
-            elif getattr(self.executor, "reconciles", False):
+            elif can_reconcile(self.executor, a.offer.operation):
                 self.state.set_state(a.attempt_id, "admitted")
             else:
                 self.state.set_state(a.attempt_id, "lost")
@@ -203,6 +219,10 @@ class RunnerAgent:
         return labels
 
     def _put_inventory(self) -> None:
+        with self._inv_lock:
+            self._put_inventory_locked()
+
+    def _put_inventory_locked(self) -> None:
         self._inv_revision += 1
         models = session_receipts(self.config, self.state, self._catalog, self._catalog_sha)
         inv = build_inventory(self.config, self._inv_revision, self._catalog_sha, runner_id=self._runner_id,
@@ -211,9 +231,9 @@ class RunnerAgent:
 
     def _recheck_slots(self) -> None:
         """A slot that failed the barrier is retried at most every 30 s; a changed state is re-published. Runs
-        between attempts only: the barrier unloads workers, which must never happen under running work."""
+        while no slot runs an attempt: the barrier unloads workers, which must never happen under running work."""
         bad = {s for s, st in self._slot_states.items() if st != "ready"}
-        if not bad or self.clock() < self._next_barrier:
+        if not bad or self.clock() < self._next_barrier or self._sup.any_busy():
             return
         self._next_barrier = self.clock() + _BARRIER_RETRY_S
         fresh = recover_slots(self.config, self.executor, self.state, only=bad)
@@ -225,6 +245,7 @@ class RunnerAgent:
 
     def step(self) -> bool:
         """One loop iteration; True if it did work."""
+        self._raise_async_error()
         worked = self.resume_pending()
         self._recheck_slots()
         self._heartbeat_if_due()
@@ -256,6 +277,15 @@ class RunnerAgent:
                 log.error("api error: %s", e)
                 stop.wait(backoff)
                 backoff = min(backoff * 2, _BACKOFF_MAX_S)
+        self._sup.shutdown(_SHUTDOWN_WAIT_S)
+
+    def _raise_async_error(self) -> None:
+        """Failures of slot/transfer threads are handled by the main loop's backoff and re-session logic."""
+        try:
+            err = self._sup.errors.get_nowait()
+        except queue.Empty:
+            return
+        raise err
 
     def enqueue_offer(self, offer: Offer) -> bool:
         """Called by the push listener; False when this attempt+generation is already queued."""
@@ -280,11 +310,11 @@ class RunnerAgent:
             return None, False
         if self.config.dispatch == "push":
             return None, False
-        free = [s.slot_id for s in self.config.slots if self._slot_states.get(s.slot_id, "ready") == "ready"]
-        if not free:  # every slot failed the barrier: nothing may be scheduled until a recheck passes
+        free = self._sup.idle_slots(self._slot_states)
+        if not free:  # every slot is busy or failed the barrier: nothing may be scheduled until one frees up
             return None, False
-        req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=free, cached_residencies=[],
-                             wait_s=self.config.acquire_wait_s)
+        wait_s = min(self.config.acquire_wait_s, _BUSY_WAIT_S) if self._sup.any_busy() else self.config.acquire_wait_s
+        req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=free, cached_residencies=[], wait_s=wait_s)
         return self.client.acquire(self._session_id, req), False
 
     # -- heartbeat -----------------------------------------------------------------------------------------------
@@ -346,6 +376,31 @@ class RunnerAgent:
         if pushed and (offer.runner_id != self._runner_id or not keys.verify_offer(offer, self._studio_keys)):
             log.warning("ignoring pushed offer %s: not addressed to us or bad signature", offer.attempt_id)
             return
+        if not self._sup.claim(offer.slot_id, offer.attempt_id):
+            return self._reject_busy(offer)
+        self._safely(offer, lambda: self._admit(offer))
+
+    def _reject_busy(self, offer: Offer) -> None:
+        """The slot (or a device it shares) is running another attempt: Studio re-places this one."""
+        log.info("offer %s for busy slot %s rejected", offer.attempt_id, offer.slot_id)
+        req = RejectRequest(session_id=self._session_id, generation=offer.generation, reason="admission_busy",
+                            detail=f"slot {offer.slot_id} busy")
+        self._safely(offer, lambda: self.client.reject(offer.attempt_id, req))
+
+    def _safely(self, offer: Offer, fn: Callable[[], None]) -> None:
+        try:
+            fn()
+        except ApiError as e:
+            if _is_stale(e):
+                self._abandon(offer.attempt_id, e.code)
+            else:
+                log.error("attempt %s: %s", offer.attempt_id, e)
+        except TransportError as e:
+            log.warning("attempt %s: transport failure, local state kept: %s", offer.attempt_id, e)
+
+    def _admit(self, offer: Offer) -> None:
+        """Runs with the slot claimed; the claim is released here on early exit, else by the worker or inline."""
+        launched = False
         try:
             resp = self.client.accept(offer.attempt_id, AcceptRequest(session_id=self._session_id,
                                                                       generation=offer.generation))
@@ -356,21 +411,26 @@ class RunnerAgent:
                 log.info("duplicate delivery of %s: not executing again", offer.attempt_id)
                 return
             self._taken = True
-            self._run_admitted(offer)
-        except ApiError as e:
-            if _is_stale(e):
-                self._abandon(offer.attempt_id, e.code)
-            else:
-                log.error("attempt %s: %s", offer.attempt_id, e)
-        except TransportError as e:
-            log.warning("attempt %s: transport failure, local state kept: %s", offer.attempt_id, e)
+            launched = self._launch(offer)
+        finally:
+            if not launched:
+                self._sup.release(offer.slot_id)
+
+    def _launch(self, offer: Offer) -> bool:
+        """True when a slot thread took over the (already claimed) slot; inline mode runs to completion here."""
+        if self.concurrent:
+            self._sup.spawn(offer.slot_id, lambda: self._safely(offer, lambda: self._run_admitted(offer)))
+            return True
+        self._run_admitted(offer)
+        return False
 
     def _run_admitted(self, offer: Offer) -> None:
         aid = offer.attempt_id
         self._report(aid, offer.generation, "admitted")
         try:
             inputs = self._fetch_inputs(offer)
-            self.state.set_state(aid, "executing")
+            engine_id = effective_engine_id(self.executor, offer)
+            self.state.set_state(aid, "executing", engine_execution_id=engine_id)
             self._report(aid, offer.generation, "executing")
             work = self.config.state_dir / "work" / aid
             shutil.rmtree(work, ignore_errors=True)
@@ -384,11 +444,26 @@ class RunnerAgent:
             return self._finish_blocked(offer, e)
         refs = [self.spool.write_file(aid, name, path, mime) for name, path, mime in outputs]
         shutil.rmtree(work, ignore_errors=True)
-        manifest = self.spool.write_manifest(aid, offer.generation, refs, meta)
+        manifest = self.spool.write_manifest(aid, offer.generation, refs,
+                                             {**meta, "engine_execution_id": engine_id})
         self._notify_spooled(offer)
         self.state.set_state(aid, "spooled", manifest=manifest.model_dump_json())
         self._report(aid, offer.generation, "spooled")
-        self._deliver(aid, offer.generation)
+        self._start_delivery(aid, offer.generation)
+
+    def _start_delivery(self, aid: str, generation: int) -> None:
+        """Concurrent mode hands the upload to the transfer pool so the slot is free as soon as it is spooled."""
+        if not self.concurrent:
+            return self._deliver(aid, generation)
+        self._sup.submit_transfer(aid, lambda: self._deliver_async(aid, generation))
+
+    def _deliver_async(self, aid: str, generation: int) -> None:
+        try:
+            self._deliver(aid, generation)
+        except ApiError as e:
+            if not _is_stale(e):
+                raise
+            self._abandon(aid, e.code)
 
     def _notify_spooled(self, offer: Offer) -> None:
         """R8/I07: the engine may release its copy of the result only now that the manifest is durable."""
@@ -508,10 +583,12 @@ class RunnerAgent:
 
     def _resume_one(self, row: AttemptRow) -> bool:
         if row.state == "admitted":
-            self._run_admitted(row.offer)
-            return True
+            return self._resume_admitted(row)
         if row.state in ("spooled", "uploading"):
-            self._deliver(row.attempt_id, row.generation)
+            if self.concurrent:
+                self._sup.submit_transfer(row.attempt_id, lambda: self._deliver_async(row.attempt_id, row.generation))
+            else:
+                self._deliver(row.attempt_id, row.generation)
             return True
         if row.state in ("ingested", "quarantined", "cancelled", "failed") and self.clock() >= self._next_receipt_poll:
             self._next_receipt_poll = self.clock() + self._heartbeat_s
@@ -520,6 +597,18 @@ class RunnerAgent:
                 self._on_receipt(receipt)
                 return True
         return False
+
+    def _resume_admitted(self, row: AttemptRow) -> bool:
+        offer = row.offer
+        if not self._sup.claim(offer.slot_id, offer.attempt_id):
+            return False  # its slot is busy (possibly with this very attempt, still starting)
+        launched = False
+        try:
+            launched = self._launch(offer)
+        finally:
+            if not launched:
+                self._sup.release(offer.slot_id)
+        return True
 
 
 def _sha256_file(path: Path) -> str:

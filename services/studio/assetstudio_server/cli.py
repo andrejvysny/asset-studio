@@ -271,7 +271,8 @@ def cmd_execution_status(s: Settings, _: argparse.Namespace) -> int:
     j = _journal(s)
     try:
         _print({"persisted_mode": j.meta_get(EXECUTION_MODE_KEY) or "direct", "configured_mode": s.execution,
-                "admission_paused": j.meta_get(ADMISSION_PAUSED_KEY) == "1", "live": j.live_work()})
+                "admission_paused": j.meta_get(ADMISSION_PAUSED_KEY) == "1", "switch": j.switch_state(),
+                "generation": j.generation(), "live": j.live_work()})
     finally:
         j.close()
     return 0
@@ -281,31 +282,52 @@ def _draining(live: dict[str, int]) -> bool:
     return bool(live["running"] or live["reconciling"] or live["attempts"])
 
 
+def _await_quiescence(j: Journal, a: argparse.Namespace) -> dict[str, int]:
+    deadline = time.monotonic() + a.timeout
+    live = j.live_work()
+    try:
+        while _draining(live) and time.monotonic() < deadline:
+            time.sleep(a.poll)
+            live = j.live_work()
+    except BaseException:  # Ctrl-C must not leave Studio paused
+        j.abort_switch(("draining",))
+        raise
+    return live
+
+
 def cmd_execution_switch(s: Settings, a: argparse.Namespace) -> int:
-    """R15: pause admission, wait for quiescence, flip the recorded mode. Works beside a running Studio (same
-    host, SQLite WAL); Studio reads the pause flag and stops claiming tasks and placing offers."""
+    """R15 handoff, CLI half: draining -> quiesced with admission STILL paused. Only the new Studio process
+    (Coordinator.start -> Journal.activate) resumes it, so the old process can never claim after this returns."""
     j = _journal(s)
     try:
-        j.meta_set(ADMISSION_PAUSED_KEY, "1")
-        deadline = time.monotonic() + a.timeout
-        live = j.live_work()
-        try:
-            while _draining(live) and time.monotonic() < deadline:
-                time.sleep(a.poll)
-                live = j.live_work()
-        except BaseException:  # Ctrl-C must not leave Studio paused
-            j.meta_set(ADMISSION_PAUSED_KEY, "0")
-            raise
-        if _draining(live):
-            j.meta_set(ADMISSION_PAUSED_KEY, "0")
-            print(f"timed out after {a.timeout:g}s with work in flight ({live}); admission restored, "
-                  "nothing changed", file=sys.stderr)
-            return 3
-        j.meta_set(EXECUTION_MODE_KEY, a.to)
-        j.meta_set(ADMISSION_PAUSED_KEY, "0")
+        began = j.begin_switch(a.to)
+        if began == "busy":
+            print(f"error: an execution switch is already {j.switch_state()['state']}; wait for it, re-run it, or "
+                  "run `assetstudio execution abort`", file=sys.stderr)
+            return 2
+        if began == "started":
+            live = _await_quiescence(j, a)
+            if _draining(live):
+                j.abort_switch(("draining",))
+                print(f"timed out after {a.timeout:g}s with work in flight ({live}); admission restored, "
+                      "nothing changed", file=sys.stderr)
+                return 3
+            if not j.complete_switch():
+                print("error: the switch was aborted while draining", file=sys.stderr)
+                return 1
     finally:
         j.close()
-    print(f"switched to {a.to}; restart Studio with STUDIO_EXECUTION={a.to}")
+    print(f"quiesced for {a.to}; restart Studio with STUDIO_EXECUTION={a.to}; admission resumes when it activates")
+    return 0
+
+
+def cmd_execution_abort(s: Settings, _: argparse.Namespace) -> int:
+    j = _journal(s)
+    try:
+        aborted = j.abort_switch()
+    finally:
+        j.close()
+    print("switch aborted; previous mode and admission restored" if aborted else "no switch in progress")
     return 0
 
 
@@ -456,6 +478,8 @@ def main(argv: list[str] | None = None) -> int:
     sw.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for quiescence")
     sw.add_argument("--poll", type=float, default=1.0, help="seconds between checks")
     sw.set_defaults(fn=cmd_execution_switch)
+    ex.add_parser("abort", help="cancel a draining/quiesced switch; the previous mode resumes").set_defaults(
+        fn=cmd_execution_abort)
     oa = sub.add_parser("openapi", help="write Studio's OpenAPI schema (default: stdout)")
     oa.add_argument("--out", help="file to write")
     oa.set_defaults(fn=cmd_openapi)

@@ -134,8 +134,8 @@ def complete(studio: Studio, runner: dict[str, Any], attempt_id: str, req: Compl
         "generation"]
     if superseded or attempt["state"] == "lost":
         if store.transition(attempt_id, ("executing", "spooled", "uploading", "uncertain", "lost"), "quarantined",
-                            manifest=req.manifest.model_dump(mode="json"), event="quarantined"):
-            store.set_disposition(attempt_id, "quarantined")
+                            manifest=req.manifest.model_dump(mode="json"), event="quarantined",
+                            disposition="quarantined"):
             if attempt["state"] != "lost":
                 release_claims(studio, attempt)
     elif store.transition(attempt_id, ("executing", "spooled", "uploading", "uncertain"), "ingested",

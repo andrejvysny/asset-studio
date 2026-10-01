@@ -398,3 +398,28 @@ def test_files_sha256_prefix_is_the_studio_residency_identity() -> None:
                            "files": entry.get("files")}, sort_keys=True, default=str)
         assert r.files_sha256[:12] == hashlib.sha256(blob.encode()).hexdigest()[:12]
         assert r.files_sha256 == lock_identity(entry)
+
+
+# -- engine execution id / per-operation reconciliation (H12) --------------------------------------------------------
+
+
+def test_reconciles_is_declared_per_operation(rig: Rig) -> None:
+    table = {op: rig.ex.reconciles(op) for op in OPERATION_ENGINE}
+    assert all(v == (not op.startswith("aux.")) for op, v in table.items()), table
+    assert FakeExecutor().reconciles("image.t2i") is False
+
+
+def test_aux_receives_the_effective_engine_id_it_is_persisted_under(rig: Rig) -> None:
+    seen: list[str | None] = []
+    real = rig.aux.qa
+    rig.aux.qa = lambda **kw: (seen.append(kw["execution_id"]), real(**kw))[1]  # type: ignore[method-assign]
+    params = {"questions": [["q1", "ok?"]], "context": "c"}  # Studio does not send execution_id for aux
+    offer = make_offer("aux.qa", params, [(png(), "image", "")])
+    rig.run(offer, [png()])
+    assert seen == [rig.ex.engine_execution_id(offer)] == [f"{offer.attempt_id}-g1"]
+
+
+def test_image_and_worker3d_ids_are_the_studio_chosen_keys(rig: Rig) -> None:
+    assert rig.ex.engine_execution_id(make_offer("image.t2i", T2I)) == "p1"
+    w3d = make_offer("worker3d.generate", {**GEN, "execution_id": "w1"}, [(b"b", "body", "")])
+    assert rig.ex.engine_execution_id(w3d) == "w1"

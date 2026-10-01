@@ -1,21 +1,30 @@
 # Profile P: Studio published on a VPS behind Traefik + Authelia (docs/installation.md "Public Studio (VPS)").
-#   docker compose -f compose.yml -f compose.nodes.yml -f compose.public.yml up -d
-# Traefik and Authelia run elsewhere (external); Studio only joins the `proxy` network Traefik watches.
-# Needs Docker Compose >= 2.24 (`!reset`). Required env: STUDIO_HOST, STUDIO_PROXY_SECRET (same value as the
+#   docker compose -f compose.studio.yml -f compose.public.yml up -d
+# Overlay over compose.studio.yml (Studio only: no GPU, engines or runner). Traefik and Authelia run elsewhere
+# (external); Studio only joins the `proxy` network Traefik watches. Three listeners, three auth models:
+#   STUDIO_HOST                 8190 operator UI + REST: Authelia forward-auth, proxy secret stamped
+#   STUDIO_HOST /api/runner/*   8190 runner protocol: Studio's own signatures, no Authelia
+#   MCP_PUBLIC_HOST             8191 MCP: Studio's own bearer tokens, no Authelia, no proxy secret
+#   INTEGRATION_PUBLIC_HOST     8192 Godot integration API: library-scoped bearer tokens, no Authelia, no proxy secret
+# Needs Docker Compose >= 2.24.4 (`!reset`). Required env: STUDIO_HOST, STUDIO_PROXY_SECRET (same value as the
 # secret file: `export STUDIO_PROXY_SECRET=$(cat secrets/studio_proxy_secret)`).
-# Optional: TRAEFIK_ENTRYPOINT, TRAEFIK_CERTRESOLVER, AUTHELIA_MIDDLEWARE, PROXY_NETWORK.
+# Optional: MCP_PUBLIC_HOST / INTEGRATION_PUBLIC_HOST (default mcp.$STUDIO_HOST / integration.$STUDIO_HOST),
+# STUDIO_MCP / STUDIO_INTEGRATION_ENABLED (default 1 here; a disabled listener's routes answer 502),
+# TRAEFIK_ENTRYPOINT, TRAEFIK_CERTRESOLVER, AUTHELIA_MIDDLEWARE, PROXY_NETWORK.
 
 services:
   studio:
-    ports: !reset []   # no host port: only Traefik reaches Studio, over the proxy network
     environment:
       STUDIO_AUTH_MODE: proxy
       STUDIO_PROXY_SECRET_FILE: /run/secrets/studio_proxy_secret
       STUDIO_PUBLIC_URL: https://${STUDIO_HOST:?set STUDIO_HOST}   # audience remote runners sign
+      STUDIO_MCP: ${STUDIO_MCP:-1}
+      STUDIO_MCP_PUBLIC_URL: https://${MCP_PUBLIC_HOST:-mcp.${STUDIO_HOST}}
+      STUDIO_INTEGRATION_ENABLED: ${STUDIO_INTEGRATION_ENABLED:-1}   # container bind is set by the image; TLS ends at Traefik
     secrets:
       - source: studio_proxy_secret
         target: /run/secrets/studio_proxy_secret
-    networks: [internal, public, proxy]
+    networks: [proxy]   # merged with `internal` from compose.studio.yml
     labels:
       traefik.enable: "true"
       traefik.docker.network: ${PROXY_NETWORK:-proxy}
@@ -65,6 +74,39 @@ services:
       traefik.http.routers.assetstudio-runner-transfer.middlewares: assetstudio-headers,assetstudio-transfer-inflight
       traefik.http.routers.assetstudio-runner-transfer.service: assetstudio
       traefik.http.middlewares.assetstudio-transfer-inflight.inflightreq.amount: "4"
+
+      # MCP and integration listeners authenticate with their own bearer tokens: NO Authelia and NO proxy secret.
+      # Every identity/internal header a client could spoof is blanked (blank value = removed before forwarding).
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.Remote-User: ""
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.Remote-Groups: ""
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.X-AssetStudio-Proxy-Secret: ""
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.X-AssetStudio-Internal: ""
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.X-AssetStudio-Actor: ""
+      traefik.http.middlewares.assetstudio-strip.headers.customrequestheaders.X-AssetStudio-Agent-Scope: ""
+
+      # MCP (8191): Streamable HTTP /mcp and signed /files/. Request bodies are tool calls: small cap.
+      traefik.http.services.assetstudio-mcp.loadbalancer.server.port: "8191"
+      traefik.http.routers.assetstudio-mcp.rule: Host(`${MCP_PUBLIC_HOST:-mcp.${STUDIO_HOST}}`) && (PathPrefix(`/mcp`) || PathPrefix(`/files/`))
+      traefik.http.routers.assetstudio-mcp.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio-mcp.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio-mcp.middlewares: assetstudio-strip,assetstudio-mcp-rl,assetstudio-mcp-body
+      traefik.http.routers.assetstudio-mcp.service: assetstudio-mcp
+      traefik.http.middlewares.assetstudio-mcp-rl.ratelimit.average: "30"
+      traefik.http.middlewares.assetstudio-mcp-rl.ratelimit.period: 1s
+      traefik.http.middlewares.assetstudio-mcp-rl.ratelimit.burst: "60"
+      traefik.http.middlewares.assetstudio-mcp-body.buffering.maxrequestbodybytes: "67108864"
+
+      # Godot integration API (8192): uploads up to 512 MiB (max_upload_bytes), so the body cap matches it.
+      traefik.http.services.assetstudio-integration.loadbalancer.server.port: "8192"
+      traefik.http.routers.assetstudio-integration.rule: Host(`${INTEGRATION_PUBLIC_HOST:-integration.${STUDIO_HOST}}`) && PathPrefix(`/api/integration/v1`)
+      traefik.http.routers.assetstudio-integration.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.assetstudio-integration.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      traefik.http.routers.assetstudio-integration.middlewares: assetstudio-strip,assetstudio-integration-rl,assetstudio-integration-body
+      traefik.http.routers.assetstudio-integration.service: assetstudio-integration
+      traefik.http.middlewares.assetstudio-integration-rl.ratelimit.average: "30"
+      traefik.http.middlewares.assetstudio-integration-rl.ratelimit.period: 1s
+      traefik.http.middlewares.assetstudio-integration-rl.ratelimit.burst: "60"
+      traefik.http.middlewares.assetstudio-integration-body.buffering.maxrequestbodybytes: "536870912"
 
 secrets:
   studio_proxy_secret:

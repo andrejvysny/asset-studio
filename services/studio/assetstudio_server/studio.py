@@ -14,16 +14,12 @@ from .authstore import AuthStore
 from .events import EventBus
 from .execution import DirectBackend, ExecutionBackend, NodeBackend
 from .gpu import GpuLane, LaneWorker
-from .journal import EXECUTION_MODE_KEY, Journal
+from .journal import EXECUTION_MODE_KEY, ExecutionModeMismatch, Journal
 from .models import HashCache
 from .registry import Registry
 from .settings import Settings
 
 log = logging.getLogger("assetstudio")
-
-
-class ExecutionModeMismatch(RuntimeError):
-    """Configured execution mode differs from the journal's while work is in flight (R15)."""
 
 
 @dataclass
@@ -39,6 +35,7 @@ class Studio:
     lanes: dict[str, GpuLane]
     hash_cache: HashCache
     extras: dict[str, Any] = field(default_factory=dict)
+    execution_generation: int | None = None  # set by Coordinator.start(); None = this process never activated
     execution: ExecutionBackend = field(init=False)  # set by build_studio once the Studio exists
 
     @property
@@ -55,6 +52,12 @@ def _fence(journal: Journal, configured: str) -> None:
     persisted = journal.meta_get(EXECUTION_MODE_KEY) or "direct"
     if configured == persisted:
         return
+    switch = journal.switch_state()
+    if switch["state"] != "active":  # a handoff is pending: only its target may activate, never an auto-adopt
+        raise ExecutionModeMismatch(
+            f"an execution switch is {switch['state']} ({switch.get('from')!r} -> {switch.get('to')!r}) but "
+            f"STUDIO_EXECUTION={configured!r}. Start with STUDIO_EXECUTION={switch.get('to')} to complete it, or "
+            "run `assetstudio execution abort`")
     live = journal.live_work()
     if any(live.values()):
         raise ExecutionModeMismatch(

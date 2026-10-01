@@ -2,7 +2,7 @@
 studio_url: https://studio.example.com   # EDIT: the public Studio URL (STUDIO_HOST); never an internal address
 name: home-box                            # EDIT: unique per runner
 state_dir: /var/lib/assetstudio-runner/state
-host_lock: /var/lib/assetstudio-runner/host.lock
+host_lock: /var/lock/assetstudio-runner/host.lock
 registration_token_file: /run/secrets/runner_registration_token   # token minted in Studio (Runtime UI), single use
 dispatch: pull   # a runner behind NAT cannot be pushed to
 

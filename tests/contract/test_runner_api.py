@@ -118,7 +118,8 @@ class Node:
         return self.sid
 
     def acquire(self, wait_s: int = 0) -> Offer | None:
-        return self.client.acquire(self.sid, AcquireRequest(request_id=str(uuid.uuid4()), wait_s=wait_s))
+        req = AcquireRequest(request_id=str(uuid.uuid4()), free_slots=["aux"], wait_s=wait_s)
+        return self.client.acquire(self.sid, req)
 
     def accept(self, offer: Offer) -> Any:
         return self.client.accept(offer.attempt_id, AcceptRequest(session_id=self.sid, generation=offer.generation))
@@ -202,7 +203,8 @@ def test_agent_end_to_end(env: Env, tmp_path: Path) -> None:
     now = [1000.0]
     agent = RunnerAgent(cfg, client=RunnerClient(BASE, private_key=load_or_create_key(cfg), http=api.c),
                         executor=FakeExecutor(), state=RunnerState(cfg.state_dir),
-                        spool=Spool(cfg.state_dir / "spool"), clock=lambda: now[0], idle_s=0.0)
+                        spool=Spool(cfg.state_dir / "spool"), clock=lambda: now[0], idle_s=0.0,
+                        concurrent=False)
     agent.bootstrap(token)
     agent.open_session()
     offered = env.offer(b"agent input bytes")

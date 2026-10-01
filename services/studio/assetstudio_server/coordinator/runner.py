@@ -136,6 +136,7 @@ class Coordinator:
         self._pick_lock = threading.Lock()
         self._admission_failures: dict[str, dict[str, Any]] = {}  # residency -> {"count", "since"}
         self._pause_read: tuple[float, bool] = (float("-inf"), False)
+        self.generation: int | None = None  # set by start(): this process's execution generation
         self._pool = NodePool(self)
         self._task_worker: dict[str, str] = {}  # claimed task id -> worker key (kept out of _run_task's signature)
         self._preferred: dict[str, tuple[str, str]] = {}  # worker key -> slot of its last call in the pass
@@ -153,20 +154,29 @@ class Coordinator:
                          if journal.attempts.list(task_id=t.id, states=NON_TERMINAL, limit=1))
 
     def paused(self) -> bool:
-        """`assetstudio execution switch` is draining the journal (R15); re-read at most once a second."""
+        """Scheduling hint only (the authoritative fence is in claim/place/accept SQL): a switch holds the journal,
+        or a newer process superseded this one (R15). Re-read at most once a second."""
         at, value = self._pause_read
         if time.monotonic() - at >= 1.0:
-            value = self.studio.journal.meta_get(ADMISSION_PAUSED_KEY) == "1"
+            journal = self.studio.journal
+            value = journal.meta_get(ADMISSION_PAUSED_KEY) == "1" or (
+                self.generation is not None and journal.generation() != self.generation)
             self._pause_read = (time.monotonic(), value)
         return value
 
     def start(self) -> None:
+        # Activation first: it fences any older process before this one reconciles or claims anything.
+        self.generation = self.studio.execution_generation = self.studio.journal.activate(
+            self.studio.settings.execution)
         keep = self._kept_after_restart()
         rec = self.studio.journal.tasks.recover_after_restart(keep)
         orphans = rec.pop("orphans", [])
         if rec["requeued"] or rec["cancelled"] or keep:
             log.warning("restart reconciliation: %s (reconciling against live attempts: %d)", rec, len(keep))
         self.studio.execution.cancel_orphans(orphans)
+        from ..services.attempts import repair_custody
+
+        repair_custody(self.studio)
         if keep:
             from ..services.runner_maintenance import reconcile_tasks
 
@@ -322,7 +332,7 @@ class Coordinator:
                 reason = "admission_paused"
                 break
             t = queue.pop(0)
-            if not tasks.claim(t.id, pid):
+            if not tasks.claim(t.id, pid, self.generation):
                 continue
             self._current[key]["task"] = t.id
             self._task_worker[t.id] = key
