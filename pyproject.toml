@@ -15,7 +15,7 @@ dependencies = [
   "scipy>=1.14,<1.17",
   "trimesh==4.9.0",
   "networkx>=3.3,<3.6",
-  "cryptography==48.0.0",
+  "cryptography==50.0.1",
   "mcp==1.30.0",
 ]
 
