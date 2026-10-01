@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "asset_ref": {
+    "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+    "library_id": "prj_0000000000000001",
+    "asset_id": "ast_00000000000000aa",
+    "version_id": "ver_00000000000000v1"
+  },
+  "kind": "model3d",
+  "units": "m",
+  "up_axis": "+Y",
+  "forward_axis": "+Z",
+  "bounds_min": [
+    "-0.5",
+    "0",
+    "-1"
+  ],
+  "bounds_max": [
+    "0.5",
+    "0.5",
+    "1"
+  ],
+  "placement_anchor": [
+    "0.25",
+    "0",
+    "-0.5"
+  ],
+  "footprint_radius_m": "1.1",
+  "scale_range": [
+    "0",
+    "2"
+  ],
+  "height_offset_range_m": [
+    "-0.1",
+    "0.5"
+  ],
+  "default_grounding": "FOLLOW_TERRAIN",
+  "material_slots": [
+    {
+      "slot_id": "body",
+      "role": "surface",
+      "surfaces": {
+        "portable_glb_v1": [
+          {
+            "mesh": 0,
+            "primitive": 0
+          }
+        ],
+        "godot_static_source_v1": [
+          {
+            "node_path": "Body",
+            "surface": 0
+          }
+        ]
+      }
+    }
+  ],
+  "collision": null,
+  "preview_warnings": [],
+  "source_provenance": {
+    "generator": "assetstudio-integration-fixtures",
+    "method": "procedural",
+    "note": ""
+  },
+  "licence": {
+    "name": "CC0-1.0",
+    "rights_verified": false
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "generator": {
+    "addon_version": "1.0.0",
+    "installer_version": "1.0.0"
+  },
+  "dependencies": {
+    "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf": {
+      "asset_ref": {
+        "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+        "library_id": "prj_0000000000000001",
+        "asset_id": "ast_00000000000000aa",
+        "version_id": "ver_00000000000000v1"
+      },
+      "descriptor_sha256": "5b8517a39e3892184c5df6b733884265adae4289345cca8bd6172ffab15fb49b",
+      "deliveries": {
+        "portable_glb_v1": {
+          "delivery_id": "dlv_00000000000000d1",
+          "manifest_sha256": "3af631546729db64d1b19e56406e7c5f1787f2801e1fa953c86e467714c4f011",
+          "profile_id": "portable-default",
+          "profile_version": "1.0.0"
+        }
+      },
+      "requires": [
+        "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519"
+      ]
+    },
+    "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519": {
+      "asset_ref": {
+        "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+        "library_id": "prj_0000000000000001",
+        "asset_id": "ast_00000000000000aa",
+        "version_id": "ver_00000000000000v2"
+      },
+      "descriptor_sha256": "cddb2fdecc889f788d6f2965e15fde4c04c67574e63fe1d981543c9715dbd861",
+      "deliveries": {
+        "portable_glb_v1": {
+          "delivery_id": "dlv_00000000000000d2",
+          "manifest_sha256": "f20aafafe4966cf1bc6501330412e87214a92e032c2d6fa998e1f628e625e1d7",
+          "profile_id": "portable-default",
+          "profile_version": "1.0.0"
+        }
+      },
+      "requires": [
+        "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf"
+      ]
+    }
+  },
+  "bindings": {
+    "prop-a": {
+      "asset_key": "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf",
+      "representation": "portable_glb_v1",
+      "material_policy": {
+        "mode": "preserve",
+        "profile_id": null,
+        "profile_sha256": null
+      },
+      "update_policy": "prompt"
+    },
+    "prop-b": {
+      "asset_key": "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519",
+      "representation": "portable_glb_v1",
+      "update_policy": "prompt",
+      "material_policy": {
+        "mode": "project_mapping",
+        "profile_id": "project-default",
+        "profile_sha256": "3e2e3a28ffa960cb3446ccc1c329ee89de3bfba759c03660366fac097d9f4026"
+      }
+    }
+  },
+  "roots": [
+    {
+      "owner_kind": "scene_binding",
+      "owner_id": "prop-a",
+      "asset_keys": [
+        "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf"
+      ]
+    },
+    {
+      "owner_kind": "scene_binding",
+      "owner_id": "prop-b",
+      "asset_keys": [
+        "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519"
+      ]
+    },
+    {
+      "owner_kind": "world_generation",
+      "owner_id": "world-1",
+      "asset_keys": [
+        "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf",
+        "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519"
+      ]
+    }
+  ]
+}

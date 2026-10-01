@@ -149,7 +149,7 @@ def commit(studio: Studio, ctx: ProjectContext, req: CommitImport) -> dict[str, 
         response = _commit_staged(ctx, d, req)
     studio.journal.record_command(ctx.id, "import_commit", req.idempotency_key, payload, response)
     shutil.rmtree(d, ignore_errors=True)  # deferred, idempotent: only after the receipt is durable
-    studio.events.publish("library", project_id=ctx.id)
+    studio.events.publish("library", project_id=ctx.id, asset_id=response["asset_id"], change="published")
     return response
 
 

@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/static-source-package.schema.json",
+  "title": "SourcePackageManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entry_scene",
+    "source_godot_version",
+    "files",
+    "resource_map",
+    "asset_dependencies",
+    "capabilities",
+    "conversion_report",
+    "placement"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "entry_scene": {
+      "type": "string",
+      "pattern": "\\.tscn$",
+      "maxLength": 255,
+      "allOf": [
+        {
+          "$ref": "asset-ref.schema.json#/$defs/safe_path"
+        }
+      ]
+    },
+    "source_godot_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?(-[0-9A-Za-z.]+)?$"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "size",
+          "media_type"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "asset-ref.schema.json#/$defs/safe_path"
+          },
+          "sha256": {
+            "$ref": "asset-ref.schema.json#/$defs/sha256"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1073741824
+          },
+          "media_type": {
+            "$ref": "asset-ref.schema.json#/$defs/media_type"
+          }
+        }
+      },
+      "minItems": 1,
+      "maxItems": 4096
+    },
+    "resource_map": {
+      "type": "object",
+      "patternProperties": {
+        "^res://(?!(?:.*/)?\\.\\.(?:/|$))[^\\\\\\x00-\\x1f]+$": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "path",
+                "original_uid"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "package_file"
+                },
+                "path": {
+                  "$ref": "asset-ref.schema.json#/$defs/safe_path"
+                },
+                "original_uid": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^uid://[a-z0-9]{1,32}$"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "asset_key",
+                "entrypoint",
+                "original_uid"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "asset_dependency"
+                },
+                "asset_key": {
+                  "$ref": "asset-ref.schema.json#/$defs/asset_key"
+                },
+                "entrypoint": {
+                  "$ref": "asset-ref.schema.json#/$defs/safe_path"
+                },
+                "original_uid": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "type": "string",
+                      "pattern": "^uid://[a-z0-9]{1,32}$"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "asset_dependencies": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9a-f]{64}$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "asset_ref",
+            "descriptor_sha256",
+            "representation",
+            "delivery_id"
+          ],
+          "properties": {
+            "asset_ref": {
+              "$ref": "asset-ref.schema.json#/$defs/asset_ref"
+            },
+            "descriptor_sha256": {
+              "$ref": "asset-ref.schema.json#/$defs/sha256"
+            },
+            "representation": {
+              "enum": [
+                "godot_static_source_v1",
+                "portable_glb_v1"
+              ]
+            },
+            "delivery_id": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "asset-ref.schema.json#/$defs/capability"
+      },
+      "uniqueItems": true
+    },
+    "conversion_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "portable_status",
+        "omissions",
+        "approximations"
+      ],
+      "properties": {
+        "portable_status": {
+          "enum": [
+            "exact",
+            "approximated",
+            "desktop_only"
+          ]
+        },
+        "omissions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "maxItems": 256
+        },
+        "approximations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot_id",
+              "reason"
+            ],
+            "properties": {
+              "slot_id": {
+                "$ref": "asset-ref.schema.json#/$defs/slug"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          },
+          "maxItems": 256
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "placement_anchor",
+        "footprint_radius_m",
+        "scale_range",
+        "height_offset_range_m",
+        "default_grounding",
+        "material_slots"
+      ],
+      "properties": {
+        "placement_anchor": {
+          "$ref": "asset-ref.schema.json#/$defs/decimal3"
+        },
+        "footprint_radius_m": {
+          "$ref": "asset-ref.schema.json#/$defs/positive_decimal"
+        },
+        "scale_range": {
+          "$ref": "asset-ref.schema.json#/$defs/positive_decimal_range"
+        },
+        "height_offset_range_m": {
+          "$ref": "asset-ref.schema.json#/$defs/decimal_range"
+        },
+        "default_grounding": {
+          "$ref": "asset-ref.schema.json#/$defs/grounding"
+        },
+        "material_slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slot_id",
+              "role",
+              "source_surfaces"
+            ],
+            "properties": {
+              "slot_id": {
+                "$ref": "asset-ref.schema.json#/$defs/slug"
+              },
+              "role": {
+                "$ref": "asset-ref.schema.json#/$defs/slug"
+              },
+              "source_surfaces": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "node_path",
+                    "surface"
+                  ],
+                  "properties": {
+                    "node_path": {
+                      "$ref": "asset-ref.schema.json#/$defs/node_path"
+                    },
+                    "surface": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                },
+                "minItems": 1,
+                "maxItems": 1024
+              }
+            }
+          },
+          "maxItems": 64
+        }
+      }
+    }
+  },
+  "description": "Schema of source_manifest.json inside a GodotStaticSourcePackageV1 zip. Not schema-expressible (checked by assetstudio_core.source_manifest): entry_scene and package_file paths are in files, files does not list source_manifest.json, unique paths incl. case-fold, asset_dependencies keys equal the key recomputed from asset_ref, every asset_dependency resource_map entry names a key in asset_dependencies."
+}

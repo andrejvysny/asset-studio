@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/asset-ref.schema.json",
+  "title": "AssetRef",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "server_id",
+    "library_id",
+    "asset_id",
+    "version_id"
+  ],
+  "properties": {
+    "server_id": {
+      "$ref": "#/$defs/server_id"
+    },
+    "library_id": {
+      "$ref": "#/$defs/library_id"
+    },
+    "asset_id": {
+      "$ref": "#/$defs/asset_id"
+    },
+    "version_id": {
+      "$ref": "#/$defs/version_id"
+    }
+  },
+  "description": "Exact asset reference; $defs hold the primitives shared by every v1 schema.",
+  "$defs": {
+    "server_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "library_id": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-hjkmnp-tv-z]{16}$"
+    },
+    "asset_id": {
+      "type": "string",
+      "pattern": "^ast_[0-9a-hjkmnp-tv-z]{16}$"
+    },
+    "version_id": {
+      "type": "string",
+      "pattern": "^ver_[0-9a-hjkmnp-tv-z]{16}$"
+    },
+    "artifact_id": {
+      "type": "string",
+      "pattern": "^art_[0-9a-hjkmnp-tv-z]{16}$"
+    },
+    "delivery_id": {
+      "type": "string",
+      "pattern": "^dlv_[0-9a-hjkmnp-tv-z]{16}$"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.-]{0,63}$"
+    },
+    "version_text": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "asset_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "media_type": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+/[a-z0-9.+-]+$",
+      "maxLength": 127
+    },
+    "safe_path": {
+      "type": "string",
+      "pattern": "^(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/(?!\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+){0,31}$",
+      "maxLength": 255
+    },
+    "node_path": {
+      "type": "string",
+      "pattern": "^(?:\\.|[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*)$",
+      "maxLength": 1024
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^(?!-0$)-?(0|[1-9][0-9]*)(\\.[0-9]{0,5}[1-9])?$"
+    },
+    "positive_decimal": {
+      "type": "string",
+      "pattern": "^(0\\.[0-9]{0,5}[1-9]|[1-9][0-9]*(\\.[0-9]{0,5}[1-9])?)$"
+    },
+    "decimal3": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/decimal"
+        },
+        {
+          "$ref": "#/$defs/decimal"
+        },
+        {
+          "$ref": "#/$defs/decimal"
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "decimal_range": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/decimal"
+        },
+        {
+          "$ref": "#/$defs/decimal"
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "positive_decimal_range": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        {
+          "$ref": "#/$defs/positive_decimal"
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "representation": {
+      "enum": [
+        "portable_glb_v1",
+        "godot_static_source_v1",
+        "mobile_glb_v1"
+      ]
+    },
+    "grounding": {
+      "enum": [
+        "FOLLOW_TERRAIN",
+        "WORLD_FIXED"
+      ]
+    },
+    "capability": {
+      "enum": [
+        "godot_text_scene_v1",
+        "csg_static",
+        "static_collision",
+        "shader_source",
+        "vertex_colors",
+        "alpha_mask",
+        "alpha_blend",
+        "pbr_textures"
+      ]
+    },
+    "json_value": {
+      "type": [
+        "string",
+        "integer",
+        "boolean",
+        "null",
+        "array",
+        "object"
+      ],
+      "items": {
+        "$ref": "#/$defs/json_value"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/json_value"
+      }
+    },
+    "asset_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_id",
+        "library_id",
+        "asset_id",
+        "version_id"
+      ],
+      "properties": {
+        "server_id": {
+          "$ref": "#/$defs/server_id"
+        },
+        "library_id": {
+          "$ref": "#/$defs/library_id"
+        },
+        "asset_id": {
+          "$ref": "#/$defs/asset_id"
+        },
+        "version_id": {
+          "$ref": "#/$defs/version_id"
+        }
+      }
+    }
+  }
+}

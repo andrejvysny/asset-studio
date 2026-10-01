@@ -1,0 +1,112 @@
+{
+  "codes": [
+    {
+      "code": "unauthorized",
+      "http_status": 401,
+      "retryable": false,
+      "meaning": "Missing, invalid, expired or revoked credential."
+    },
+    {
+      "code": "forbidden",
+      "http_status": 403,
+      "retryable": false,
+      "meaning": "Credential lacks the scope or library for this operation; unauthorized dependency metadata is not disclosed."
+    },
+    {
+      "code": "server_identity_mismatch",
+      "http_status": 409,
+      "retryable": false,
+      "meaning": "The endpoint's server_id differs from the one the client expected; credentials were not sent or content not accepted."
+    },
+    {
+      "code": "unsupported_contract",
+      "http_status": 400,
+      "retryable": false,
+      "meaning": "Client contract/API version is not supported by this server."
+    },
+    {
+      "code": "asset_not_found",
+      "http_status": 404,
+      "retryable": false,
+      "meaning": "No such asset in an authorized library."
+    },
+    {
+      "code": "version_unavailable",
+      "http_status": 404,
+      "retryable": false,
+      "meaning": "The exact version is missing; the current version is never substituted."
+    },
+    {
+      "code": "delivery_preparing",
+      "http_status": 409,
+      "retryable": true,
+      "meaning": "The requested representation is still being prepared; retry later."
+    },
+    {
+      "code": "unsupported_representation",
+      "http_status": 422,
+      "retryable": false,
+      "meaning": "The version offers no delivery of the requested representation."
+    },
+    {
+      "code": "integrity_mismatch",
+      "http_status": 409,
+      "retryable": false,
+      "meaning": "Received or declared bytes/hashes differ from the immutable record (corruption, not an update)."
+    },
+    {
+      "code": "unsafe_package",
+      "http_status": 422,
+      "retryable": false,
+      "meaning": "Package violates the static source package grammar or ZIP safety rules."
+    },
+    {
+      "code": "unsupported_source_dependency",
+      "http_status": 422,
+      "retryable": false,
+      "meaning": "A source dependency is unavailable, unauthorized, or not an exact supported library reference."
+    },
+    {
+      "code": "resource_limit",
+      "http_status": 413,
+      "retryable": false,
+      "meaning": "A size, count, depth, ratio or budget limit was exceeded."
+    },
+    {
+      "code": "stale_pointer",
+      "http_status": 409,
+      "retryable": false,
+      "meaning": "The asset changed after checkout; expected_current_version no longer matches."
+    },
+    {
+      "code": "idempotency_conflict",
+      "http_status": 409,
+      "retryable": false,
+      "meaning": "Idempotency key reused with a different request."
+    },
+    {
+      "code": "cancelled",
+      "http_status": 499,
+      "retryable": false,
+      "meaning": "Client-side only: the user cancelled the operation. Servers never emit it; 499 is a local convention."
+    },
+    {
+      "code": "temporarily_unavailable",
+      "http_status": 503,
+      "retryable": true,
+      "meaning": "Transient server condition; retry with backoff."
+    },
+    {
+      "code": "invalid_request",
+      "http_status": 400,
+      "retryable": false,
+      "meaning": "Malformed or schema-invalid request."
+    },
+    {
+      "code": "preview_expired",
+      "http_status": 410,
+      "retryable": false,
+      "meaning": "The preview receipt expired and staging was cleaned; re-upload."
+    }
+  ]
+}

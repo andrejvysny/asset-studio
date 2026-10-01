@@ -22,7 +22,11 @@ dependencies = [
 assetstudio = "assetstudio_server.cli:main"
 
 [dependency-groups]
-dev = ["pytest==8.4.2", "ruff==0.14.0"]
+dev = [
+    "jsonschema==4.26.0",
+    "pytest==8.4.2",
+    "ruff==0.14.0",
+]
 e2e = ["playwright==1.55.0"]
 
 [build-system]

@@ -242,7 +242,7 @@ def publish_item(env: TaskEnv) -> dict[str, Any]:
         if x.target_asset_id is None:
             x.target_asset_id = res.asset_id
     mutate_item(env.studio, env.ctx, t.job_id, item.id, apply)
-    env.studio.events.publish("library", project_id=env.ctx.id)
+    env.studio.events.publish("library", project_id=env.ctx.id, asset_id=res.asset_id, change="published")
     return {"asset_id": res.asset_id, "version_id": res.version_id, "display_version": res.display_version}
 
 

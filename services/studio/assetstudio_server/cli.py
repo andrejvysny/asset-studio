@@ -5,9 +5,11 @@ import argparse
 import json
 import shutil
 import sys
+from dataclasses import asdict
 from pathlib import Path
 
 from .gpu import nvidia_smi
+from .integration_api.tokens import IntegrationTokenStore
 from .models import HashCache, verify_all
 from .registry import Registry
 from .settings import Settings
@@ -208,6 +210,56 @@ def cmd_mcp_token(s: Settings, a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_integration(s: Settings, a: argparse.Namespace) -> int:
+    from .integration_api import identity as ident
+    from .integration_api.app import token_store as integration_tokens
+
+    path = s.integration_dir / "server.json"
+    try:
+        if a.sub == "identity":
+            if a.action == "adopt":
+                if not a.i_understand_fork:
+                    print("error: adopting another server's identity is only for moving the SAME server to new "
+                          "storage, never for forks or copies (two servers sharing an id break client pinning). "
+                          "Re-run with --i-understand-fork if that is what you are doing.", file=sys.stderr)
+                    return 2
+                _print(asdict(ident.adopt(path, a.server_id, force=True)))
+            else:
+                _print(asdict(ident.load_or_create(path)))
+            return 0
+    except ident.IdentityError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    return _integration_token(s, a, integration_tokens(s))
+
+
+def _integration_token(s: Settings, a: argparse.Namespace, store: IntegrationTokenStore) -> int:
+    if a.action == "create":
+        known = {p["id"] for p in Registry(s).list()}
+        missing = sorted(set(a.library) - known)
+        if missing:
+            print(f"error: unknown library id(s): {', '.join(missing)}", file=sys.stderr)
+            return 2
+        try:
+            token = store.create(a.name, a.scope or ["assets:read"], a.library)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(f"token {a.name!r} created; it is shown only once:\n{token}")
+        host = "127.0.0.1" if s.integration_host in ("0.0.0.0", "::") else s.integration_host
+        print(f"integration API: http://{host}:{s.integration_port}/api/integration/v1  "
+              "(header  Authorization: Bearer <token>)")
+        return 0
+    if a.action == "revoke":
+        if not store.revoke(a.name):
+            print(f"error: no active token named {a.name!r}", file=sys.stderr)
+            return 1
+        print(f"token {a.name!r} revoked")
+        return 0
+    _print(store.list())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="assetstudio")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -267,6 +319,24 @@ def main(argv: list[str] | None = None) -> int:
     tr.add_argument("name")
     for q in (tc, tr, mt.add_parser("list")):
         q.set_defaults(fn=cmd_mcp_token)
+    integ = sub.add_parser("integration", help="Godot-integration API: client tokens and server identity")
+    ig = integ.add_subparsers(dest="sub", required=True)
+    it = ig.add_parser("token").add_subparsers(dest="action", required=True)
+    itc = it.add_parser("create", help="new library-scoped token; printed once")
+    itc.add_argument("name")
+    itc.add_argument("--library", action="append", required=True, help="library (project) id; repeatable")
+    itc.add_argument("--scope", action="append", choices=("assets:read", "assets:publish"),
+                     help="repeatable; default assets:read (publish does not imply read)")
+    itr = it.add_parser("revoke")
+    itr.add_argument("name")
+    for q in (itc, itr, it.add_parser("list")):
+        q.set_defaults(fn=cmd_integration)
+    ii = ig.add_parser("identity").add_subparsers(dest="action", required=True)
+    ii.add_parser("show").set_defaults(fn=cmd_integration)
+    ia = ii.add_parser("adopt")
+    ia.add_argument("server_id")
+    ia.add_argument("--i-understand-fork", action="store_true")
+    ia.set_defaults(fn=cmd_integration)
     args = p.parse_args(argv)
     if args.cmd == "serve":
         from .main import run

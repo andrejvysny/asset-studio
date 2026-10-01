@@ -1,0 +1,3 @@
+- [Repo gotchas](repo_gotchas.md) — lint/regex/fixture facts for asset-studio
+- [Source validator](repo_source_validator.md) — zip/GLB/text validator gotchas, INDEX detail slugs
+- [Integration publication](repo_integration_publication.md) — preview/commit modules, test helpers, schema-count gotcha

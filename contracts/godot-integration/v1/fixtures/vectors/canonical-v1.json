@@ -1,0 +1,176 @@
+{
+  "schema": "godot-integration/v1/vectors",
+  "asset_keys": [
+    {
+      "name": "basic",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "prj_0000000000000001",
+      "asset_id": "ast_00000000000000aa",
+      "version_id": "ver_00000000000000v1",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d3062366636663063316432651400000070726a5f30303030303030303030303030303031140000006173745f30303030303030303030303030306161140000007665725f30303030303030303030303030307631",
+      "asset_key": "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf"
+    },
+    {
+      "name": "second version",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "prj_0000000000000001",
+      "asset_id": "ast_00000000000000aa",
+      "version_id": "ver_00000000000000v2",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d3062366636663063316432651400000070726a5f30303030303030303030303030303031140000006173745f30303030303030303030303030306161140000007665725f30303030303030303030303030307632",
+      "asset_key": "19c1fc59f561838a6064f3903b12ec283f1b1ee69a48ff14440c85dab6280519"
+    },
+    {
+      "name": "same ids other library",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "prj_0000000000000002",
+      "asset_id": "ast_00000000000000aa",
+      "version_id": "ver_00000000000000v1",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d3062366636663063316432651400000070726a5f30303030303030303030303030303032140000006173745f30303030303030303030303030306161140000007665725f30303030303030303030303030307631",
+      "asset_key": "5309805893546439af27511af75f9c486d1cccbd5979180e77fd736ce1e716f3"
+    },
+    {
+      "name": "other server",
+      "server_id": "00000000-0000-4000-8000-000000000000",
+      "library_id": "prj_0000000000000001",
+      "asset_id": "ast_00000000000000aa",
+      "version_id": "ver_00000000000000v1",
+      "length_prefixed_hex": "2400000030303030303030302d303030302d343030302d383030302d3030303030303030303030301400000070726a5f30303030303030303030303030303031140000006173745f30303030303030303030303030306161140000007665725f30303030303030303030303030307631",
+      "asset_key": "6a5f9dbdac78d21d8704298f02c6cebe6743e71ea0b913a2c1406fd2797232cc"
+    },
+    {
+      "name": "non-ascii",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "knižnica-č",
+      "asset_id": "strom_🌲",
+      "version_id": "verzia-1",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d3062366636663063316432650c0000006b6e69c5be6e6963612dc48d0a0000007374726f6d5ff09f8cb2080000007665727a69612d31",
+      "asset_key": "be0b0e97e788a78188858d873057d6e571fba708c597d21fea2bbf8fbddcc607"
+    },
+    {
+      "name": "boundary shift a",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "ab",
+      "asset_id": "c",
+      "version_id": "d",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d30623666366630633164326502000000616201000000630100000064",
+      "asset_key": "d022f066f7c59791ba8dcc688fcdc8730041e8d772e206884841e0265217fd6f"
+    },
+    {
+      "name": "boundary shift b",
+      "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+      "library_id": "a",
+      "asset_id": "bc",
+      "version_id": "d",
+      "length_prefixed_hex": "2400000036663163326135322d336332652d346434622d396135372d30623666366630633164326501000000610200000062630100000064",
+      "asset_key": "3edad68e36be883661d43b5c5510ddedc57089f4f1134e7d2a8dba4586ea2ee8"
+    },
+    {
+      "name": "empty parts",
+      "server_id": "",
+      "library_id": "",
+      "asset_id": "",
+      "version_id": "",
+      "length_prefixed_hex": "00000000000000000000000000000000",
+      "asset_key": "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb"
+    }
+  ],
+  "decimals": [
+    {
+      "input_repr": "0.0",
+      "rounding": "nearest",
+      "expected": "0"
+    },
+    {
+      "input_repr": "-0.0",
+      "rounding": "nearest",
+      "expected": "0"
+    },
+    {
+      "input_repr": "1.0",
+      "rounding": "nearest",
+      "expected": "1"
+    },
+    {
+      "input_repr": "-2.5",
+      "rounding": "nearest",
+      "expected": "-2.5"
+    },
+    {
+      "input_repr": "0.1",
+      "rounding": "nearest",
+      "expected": "0.1"
+    },
+    {
+      "input_repr": "1e-07",
+      "rounding": "nearest",
+      "expected": "0"
+    },
+    {
+      "input_repr": "-1e-07",
+      "rounding": "nearest",
+      "expected": "0"
+    },
+    {
+      "input_repr": "123456.0000004",
+      "rounding": "nearest",
+      "expected": "123456"
+    },
+    {
+      "input_repr": "5e-07",
+      "rounding": "nearest",
+      "expected": "0"
+    },
+    {
+      "input_repr": "1.5e-06",
+      "rounding": "nearest",
+      "expected": "0.000002"
+    },
+    {
+      "input_repr": "0.1234567",
+      "rounding": "floor",
+      "expected": "0.123456"
+    },
+    {
+      "input_repr": "0.1234561",
+      "rounding": "ceil",
+      "expected": "0.123457"
+    },
+    {
+      "input_repr": "-0.1234567",
+      "rounding": "floor",
+      "expected": "-0.123457"
+    },
+    {
+      "input_repr": "-0.1234561",
+      "rounding": "ceil",
+      "expected": "-0.123456"
+    },
+    {
+      "input_repr": "100.0",
+      "rounding": "nearest",
+      "expected": "100"
+    }
+  ],
+  "canonical": [
+    {
+      "name": "empty object",
+      "utf8": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "sorted keys and nesting",
+      "utf8": "{\"a\":\"x\",\"b\":[3,{\"a\":null,\"z\":true}]}",
+      "sha256": "526f75e7e245c53e37ab9bcbea5e32549d6c65dc2159db327fbbf6908f964585"
+    },
+    {
+      "name": "unicode raw utf-8",
+      "utf8": "{\"name\":\"Smrek čierny 🌲\",\"q\":\"\\\"quote\\\" \\\\ /\"}",
+      "sha256": "14a30c148d32005d49d9698791bd4361fcc5de869974bf8144bab9cbcc277546"
+    },
+    {
+      "name": "decimal strings",
+      "utf8": "{\"bounds_max\":[\"0.5\",\"2\",\"0.25\"],\"bounds_min\":[\"-0.5\",\"0\",\"-0.25\"]}",
+      "sha256": "954e6176f87e3ab5736e7270ad5ef91e4e0d143b910f104effc9966abcc133eb"
+    }
+  ]
+}

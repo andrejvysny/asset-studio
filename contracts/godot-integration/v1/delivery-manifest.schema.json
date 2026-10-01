@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/delivery-manifest.schema.json",
+  "title": "DeliveryManifestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "delivery_id",
+    "asset_ref",
+    "descriptor_sha256",
+    "representation",
+    "profile_id",
+    "profile_version",
+    "preparer",
+    "entrypoint",
+    "files",
+    "dependencies",
+    "required_capabilities"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "delivery_id": {
+      "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+    },
+    "asset_ref": {
+      "$ref": "asset-ref.schema.json#/$defs/asset_ref"
+    },
+    "descriptor_sha256": {
+      "$ref": "asset-ref.schema.json#/$defs/sha256"
+    },
+    "representation": {
+      "$ref": "asset-ref.schema.json#/$defs/representation"
+    },
+    "profile_id": {
+      "$ref": "asset-ref.schema.json#/$defs/slug"
+    },
+    "profile_version": {
+      "$ref": "asset-ref.schema.json#/$defs/slug"
+    },
+    "preparer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "asset-ref.schema.json#/$defs/slug"
+        },
+        "version": {
+          "$ref": "asset-ref.schema.json#/$defs/version_text"
+        }
+      }
+    },
+    "entrypoint": {
+      "$ref": "asset-ref.schema.json#/$defs/safe_path"
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/file"
+      },
+      "minItems": 1,
+      "maxItems": 4096
+    },
+    "dependencies": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      },
+      "maxItems": 4096
+    },
+    "required_capabilities": {
+      "type": "array",
+      "items": {
+        "$ref": "asset-ref.schema.json#/$defs/capability"
+      },
+      "uniqueItems": true
+    }
+  },
+  "description": "Not schema-expressible (checked by assetstudio_core.delivery): entrypoint is one of files[].path, unique paths including case-fold collisions, dependencies[].asset_key equals the key recomputed from asset_ref.",
+  "$defs": {
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "size",
+        "media_type",
+        "artifact_id"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "asset-ref.schema.json#/$defs/safe_path"
+        },
+        "sha256": {
+          "$ref": "asset-ref.schema.json#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1073741824
+        },
+        "media_type": {
+          "$ref": "asset-ref.schema.json#/$defs/media_type"
+        },
+        "artifact_id": {
+          "$ref": "asset-ref.schema.json#/$defs/artifact_id"
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asset_key",
+        "asset_ref",
+        "descriptor_sha256",
+        "representation",
+        "delivery_id",
+        "manifest_sha256"
+      ],
+      "properties": {
+        "asset_key": {
+          "$ref": "asset-ref.schema.json#/$defs/asset_key"
+        },
+        "asset_ref": {
+          "$ref": "asset-ref.schema.json#/$defs/asset_ref"
+        },
+        "descriptor_sha256": {
+          "$ref": "asset-ref.schema.json#/$defs/sha256"
+        },
+        "representation": {
+          "$ref": "asset-ref.schema.json#/$defs/representation"
+        },
+        "delivery_id": {
+          "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+        },
+        "manifest_sha256": {
+          "$ref": "asset-ref.schema.json#/$defs/sha256"
+        }
+      }
+    }
+  }
+}
