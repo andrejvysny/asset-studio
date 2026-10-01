@@ -74,3 +74,11 @@ def test_cli_backup_and_verify(tmp_path: Path, monkeypatch, capsys) -> None:
     assert main(["instance", "backup", "--out", str(tmp_path / "o")]) == 0
     archive = json.loads(capsys.readouterr().out)["backup"]
     assert main(["instance", "restore-verify", archive]) == 0
+
+
+def test_master_backup_without_auth_store_still_verifies() -> None:
+    """Backups made before auth.sqlite existed (master@90071ad) stay valid restore points."""
+    path = Path(__file__).resolve().parents[1] / "fixtures" / "journal_v3_master" / "instance-backup-master.tar.gz"
+    rep = verify_instance_backup(path)
+    assert rep.ok, rep.problems
+    assert "auth.sqlite" not in rep.members and "journal/operations.sqlite" in rep.members

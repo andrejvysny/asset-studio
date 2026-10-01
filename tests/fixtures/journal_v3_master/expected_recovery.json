@@ -1,0 +1,86 @@
+{
+ "orphans": [],
+ "result": {
+  "cancelled": 0,
+  "requeued": 1
+ },
+ "tasks": [
+  [
+   "stk_5gf432r6tmbb195g",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_7c89s1t2kq4b46y2",
+   "queued",
+   "run",
+   null,
+   "{\"done\":0,\"total\":2,\"engine\":{\"0\":{\"prompt_id\":\"2da0f17d-f616-50c9-b9e6-d78d7064c8bf\",\"seed\":4254038828688088,\"submitted\":true}},\"reconciled_after_restart\":1}"
+  ],
+  [
+   "stk_bm6e88b8m3brq9k3",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_c3wec06vqnfkv8g3",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_gknt1686g18qadcj",
+   "queued",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_gnkk91fr354chjsv",
+   "queued",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_kr1440gt4x6y3snd",
+   "queued",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_rgmgb6cysa0evax2",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_x4x9vd8hyak8na26",
+   "queued",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_z5a0whfcgvsteh85",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ],
+  [
+   "stk_zkfqmejb9r4fmb5q",
+   "succeeded",
+   "run",
+   null,
+   "{}"
+  ]
+ ]
+}

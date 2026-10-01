@@ -1,6 +1,7 @@
 """AuthStore: 0600 file, hashed secrets, registration, nonces, access tokens, audit."""
 from __future__ import annotations
 
+import os
 import sqlite3
 import stat
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,20 @@ def test_file_mode_and_too_new(tmp_path: Path) -> None:
     c.close()
     with pytest.raises(AuthStoreTooNew):
         AuthStore(path)
+
+
+def test_sidecars_private_while_open(tmp_path: Path) -> None:
+    path = tmp_path / "auth.sqlite"
+    files = [path, path.with_name("auth.sqlite-wal"), path.with_name("auth.sqlite-shm")]
+    old = os.umask(0o022)
+    try:
+        for n in range(2):  # fresh, then reopened
+            s = AuthStore(path)
+            s.add_studio_key(f"k{n}", b"private", "pub", "current")
+            assert [stat.S_IMODE(f.stat().st_mode) for f in files] == [0o600] * 3
+            s.close()
+    finally:
+        os.umask(old)
 
 
 def test_groups(store: AuthStore) -> None:

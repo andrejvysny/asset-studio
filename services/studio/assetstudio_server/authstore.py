@@ -106,12 +106,22 @@ def _group(row: sqlite3.Row) -> dict[str, Any]:
     return d
 
 
+def _private(path: Path) -> None:
+    """0600 before SQLite opens it: SQLite creates -wal/-shm with the database's mode, and the WAL holds key rows."""
+    if not path.exists():
+        os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+    for f in (path, path.with_name(path.name + "-wal"), path.with_name(path.name + "-shm")):
+        if f.exists():
+            os.chmod(f, 0o600)
+
+
 class AuthStore:
     def __init__(self, path: Path, now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._now = now
         self._lock = threading.RLock()
         self._agg: OrderedDict[tuple[str, str], tuple[datetime, int]] = OrderedDict()  # (event, ip) -> (start, seq)
+        _private(path)
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
@@ -122,7 +132,6 @@ class AuthStore:
             raise AuthStoreTooNew(f"auth schema v{found} is newer than this Studio (v{SCHEMA_VERSION})")
         self._db.executescript(_DDL)
         self._db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-        os.chmod(path, 0o600)
 
     def close(self) -> None:
         self._db.close()
