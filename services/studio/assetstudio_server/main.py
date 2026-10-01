@@ -178,6 +178,18 @@ def run() -> None:
         mcp_app = build_mcp_app(app, app.state.studio, settings)
         companions.append(_CompanionServer(uvicorn.Config(
             mcp_app, host=settings.mcp_host, port=settings.mcp_port, log_level="info", timeout_graceful_shutdown=3)))
+    if settings.integration_enabled:
+        from .integration_api.app import bind_problem, build_integration_app, log_bind
+
+        problem = bind_problem(settings)
+        if problem:
+            logging.getLogger("assetstudio.integration").error(problem)
+            raise SystemExit(2)
+        log_bind(settings)
+        companions.append(_CompanionServer(uvicorn.Config(
+            build_integration_app(app.state.studio, settings), host=settings.integration_host,
+            port=settings.integration_port, log_level="info", timeout_graceful_shutdown=3,
+            ssl_certfile=settings.integration_tls_cert or None, ssl_keyfile=settings.integration_tls_key or None)))
     main = _MainServer(uvicorn.Config(app, host=os.environ.get("STUDIO_HOST", "127.0.0.1"),
                                       port=int(os.environ.get("STUDIO_PORT", "8190")), log_level="info",
                                       timeout_graceful_shutdown=3),  # open SSE streams must not block shutdown

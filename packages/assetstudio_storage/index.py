@@ -45,7 +45,7 @@ def _out(r: sqlite3.Row) -> dict[str, Any]:
 
 
 def _filter(categories: set[str] | None, kind: str | None, origin: str | None, q: str | None,
-            family_id: str | None) -> tuple[str, list[Any]]:
+            family_id: str | None, tags: list[str] | None = None) -> tuple[str, list[Any]]:
     where: list[str] = ["current_version_id IS NOT NULL"]
     args: list[Any] = []
     if categories is not None:
@@ -58,6 +58,9 @@ def _filter(categories: set[str] | None, kind: str | None, origin: str | None, q
     if q:
         where.append("search LIKE ? ESCAPE '\\'")
         args.append("%" + q.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+    for tag in tags or []:  # AND semantics
+        where.append("EXISTS (SELECT 1 FROM json_each(assets.tags) WHERE value = ?)")
+        args.append(tag)
     return " AND ".join(where), args
 
 
@@ -184,10 +187,10 @@ class AssetIndex:
 
     def query(self, *, categories: set[str] | None = None, kind: str | None = None, origin: str | None = None,
               q: str | None = None, family_id: str | None = None, limit: int = 60,
-              offset: int = 0) -> tuple[list[dict[str, Any]], int]:
+              offset: int = 0, tags: list[str] | None = None) -> tuple[list[dict[str, Any]], int]:
         if categories is not None and not categories:
             return [], 0
-        clause, args = _filter(categories, kind, origin, q, family_id)
+        clause, args = _filter(categories, kind, origin, q, family_id, tags)
         with self._lock:
             total = int(self._db.execute(f"SELECT COUNT(*) FROM assets WHERE {clause}", args).fetchone()[0])
             rows = self._db.execute(

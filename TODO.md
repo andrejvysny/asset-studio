@@ -38,6 +38,46 @@ Open:
 - [ ] tests/unit/test_runner_agent.py and test_runner_services.py exceed 500 lines — split
 - [ ] P3–P7 detailed planning (source lifecycle, companion, providers, delivery, scale)
 
+# TODO — Merge master@fffe1cd (Godot integration) into feat/modular-arch (2026-10-01)
+
+Conflicts (ids.py, settings.py, cli.py imports, TODO.md) were additive; resolved by keeping both sides.
+Result: lint clean; 959/960 backend (grouped-3D flake, passes 6/6 on rerun) + 4/4 process. GDScript, web, e2e NOT RUN.
+Open:
+- [ ] execution switch: clears admission_paused while the old process still runs in the old mode (it can claim queued
+      work before restart); pause read is cached 1 s, not checked at claim. Needs a durable switch/activation handshake
+- [ ] integration publication commits ignore admission_paused: freeze the integration listener during a mode switch
+- [ ] instance backup: include integration/ (server.json identity, client tokens) with auth, MCP and runner state
+- [ ] public profile (compose.public.yml) resets studio ports: integration API (and MCP) unreachable, no Traefik route
+- [ ] compose.public.yml layers on compose.nodes.yml without removing engines/runner: not a Studio-only VPS profile
+- [ ] runner host.lock lives in the per-project runner-state volume: not host-wide across compose projects
+- [ ] gpu_nodes chaos kills the container named `runner`, not the runner bound to the observed attempt
+
+# TODO — Godot integration backend, AS-00 → AS-05 (2026-10-01)
+
+Plan: ~/.claude/plans/act-as-senior-software-humble-curry.md. Specs: ../00_SHARED_INTEGRATION_SPEC.md (INT-SPEC-1.0),
+../01_ASSET_STUDIO_IMPLEMENTATION_SPEC.md (AS-SPEC-1.0). Baseline master@a2a657b. Scope: backend + frozen contracts;
+GDScript client/dock/publisher (AS-06+) next session. Descriptor forward axis +Z (ADR 0001).
+
+- [x] T0  AS-00 baseline record, port audit, Godot harness + headless import spike (GUI drag NOT RUN, AS-08)
+- [x] T1a canonical_v1: canonical JSON bytes, decimal strings, asset key, golden vectors
+- [x] T1b AS-01 schemas, typed models, error codes, capabilities, source grammar, fixtures
+- [x] T1c GDScript canonical agreement test (headless)
+- [x] T2  AS-02 integration listener, tokens, server identity, CLI, settings, compose
+- [x] T3  AS-03 descriptor/delivery store, legacy projection, read/resolve/content routes
+- [x] T4a AS-04 source package + Godot text validators
+- [x] T5  AS-05 change feed (epoch, emitters, long poll)
+- [x] T4b AS-04 preview/commit/operation transaction + crash tests
+- [x] T6  ADR, API docs, OpenAPI export, handoff
+
+Result: lint clean; 653 pass, 3 pre-existing failures (dinov3 weights absent; GPU backoff test; grouped-3D flake,
+3/8 on clean baseline). GDScript vectors 4/4. Real-server smoke PASS. Handoff: docs/integration/handoff.md.
+Follow-ups:
+- [ ] AS-06 GDScript runtime client/cache (next dependency-ready task); AS-07..AS-10 after
+- [ ] GUI dock->viewport drag spike (NOT RUN, AS-08); Docker image build with contracts/ COPY (NOT RUN)
+- [ ] preview reads portable GLB fully into memory (<=512 MiB); dependency check prepares deliveries in dep library
+- [ ] trimesh GLB fixture bytes still depend on pinned trimesh/numpy (not verified on Linux)
+- [ ] INT-SPEC §4.2 amendment for forward axis +Z (ADR 0001) to be applied in the shared spec
+
 # TODO — Build profiles + GPU check (2026-09-30)
 
 Plan: ~/.claude/plans/ultra-snappy-castle.md (spec Phase 2 slice). Owner: typed build_profiles (material CPU stage with

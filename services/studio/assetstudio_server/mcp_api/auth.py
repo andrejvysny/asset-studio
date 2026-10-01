@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
 import secrets
 import threading
@@ -21,9 +20,12 @@ from typing import Literal
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ..secure_files import write_private
+
 Scope_ = Literal["read", "full"]
 TOKEN_PREFIX = "ast_"
 NAME = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}")
+_write_private = write_private  # kept for importers of the old private helper
 STATE_KEY = "mcp_token"
 LAST_USED_WRITE_S = 300  # last_used is informational; persisting it at most every 5 min keeps verify cheap
 
@@ -126,17 +128,6 @@ class TokenStore:
         if now - self._used_written >= LAST_USED_WRITE_S:
             self._used_written = now
             _write_private(self._used_path, self._used)
-
-
-def _write_private(path: Path, obj: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(obj, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
 
 
 class BearerAuth:

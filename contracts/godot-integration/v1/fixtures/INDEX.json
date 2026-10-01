@@ -1,0 +1,485 @@
+{
+  "schema": "godot-integration/v1/fixture-index",
+  "fixtures": [
+    {
+      "path": "descriptor_drafts/invalid/duplicate_slot_id.json",
+      "sha256": "527dba58d5a93faf61d3dd26a285c9775d19af2aa8c521eb972785f2e87c00d0",
+      "kind": "descriptor_draft",
+      "expected": "semantic_invalid",
+      "description": "slot_id repeated"
+    },
+    {
+      "path": "descriptor_drafts/invalid/missing_portable_surfaces.json",
+      "sha256": "bbca63c68867e4399b8a343d3d746b09ee92b4812f4084f7d2fe63d349db25cc",
+      "kind": "descriptor_draft",
+      "expected": "schema_invalid",
+      "description": "slot has no portable_glb_v1 surfaces"
+    },
+    {
+      "path": "descriptor_drafts/valid/primitive_prop.json",
+      "sha256": "ff5e447ea1eb0c12cd1939982550a3468071b92bdaeb1c555863b3508a3b00aa",
+      "kind": "descriptor_draft",
+      "expected": "schema_valid",
+      "description": "valid descriptor draft: primitive_prop"
+    },
+    {
+      "path": "descriptors/invalid/bounds_inverted.json",
+      "sha256": "fad4aec9f7e95abbfa7daf2878518c13f7c92f64221f826f28efacbc3d0345d7",
+      "kind": "descriptor",
+      "expected": "semantic_invalid",
+      "description": "bounds_min.x > bounds_max.x"
+    },
+    {
+      "path": "descriptors/invalid/duplicate_slot_id.json",
+      "sha256": "4945322766ad14efc118103214f66d7a87d74e7376ed8850f54688b2f8cc5120",
+      "kind": "descriptor",
+      "expected": "semantic_invalid",
+      "description": "slot_id repeated"
+    },
+    {
+      "path": "descriptors/invalid/float_literal.json",
+      "sha256": "862df6e2a571da87e26bcd3f71b6adfa56e58909e31420e220b688159fe187a8",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "footprint_radius_m is the JSON number 1.1, not a decimal string"
+    },
+    {
+      "path": "descriptors/invalid/forward_axis_minus_z.json",
+      "sha256": "de2cb3d709da9c78c6031807eb82be21c8921227bcb1b418ab4bf439e6abb8b2",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "forward_axis must be +Z (docs/adr/0001)"
+    },
+    {
+      "path": "descriptors/invalid/negative_zero.json",
+      "sha256": "e04a350e7fd5da89e2c38c0f5bba09501fae53eb5d034d0ec480d6751d32cb4c",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "\"-0\" must be written as \"0\""
+    },
+    {
+      "path": "descriptors/invalid/non_canonical_decimal.json",
+      "sha256": "56785f12614ba2d2d018219d84239673606868ab31dc07051184bc0f662ff580",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "trailing zero in decimal string"
+    },
+    {
+      "path": "descriptors/invalid/scale_min_zero.json",
+      "sha256": "4b3eebcf7bd5d25b863d29d9d6e8c6fbec1606dc1fb4a0dea681bc907ee911de",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "scale_range min must be > 0"
+    },
+    {
+      "path": "descriptors/invalid/unknown_field.json",
+      "sha256": "5bb460f39ba07c341f7b2f249db8a772094a6348bf3ba020aed71d2ee8fa7ca0",
+      "kind": "descriptor",
+      "expected": "schema_invalid",
+      "description": "additional property"
+    },
+    {
+      "path": "descriptors/invalid/zero_extent_all_axes.json",
+      "sha256": "7467199975c058baff31e0db883d75dda113170428a33458de0ca21d4dc0a707",
+      "kind": "descriptor",
+      "expected": "semantic_invalid",
+      "description": "no positive extent on any axis"
+    },
+    {
+      "path": "descriptors/valid/csg_hut.json",
+      "sha256": "682d538f5d39b4eb7081acb22d0f0f7b7b83468b0a08c4537b1f9d8b7ff1e2af",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: csg_hut"
+    },
+    {
+      "path": "descriptors/valid/custom_shader_crystal.json",
+      "sha256": "392a41335eb0d90198b4c30922b35a4d80c3957a414826068f247d335cd76e99",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: custom_shader_crystal"
+    },
+    {
+      "path": "descriptors/valid/primitive_prop.json",
+      "sha256": "5b8517a39e3892184c5df6b733884265adae4289345cca8bd6172ffab15fb49b",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: primitive_prop"
+    },
+    {
+      "path": "descriptors/valid/primitive_prop_library_b.json",
+      "sha256": "718d468976aaa14760dc596471a873e7897bd33ec50d4830af4211398b063035",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: primitive_prop_library_b"
+    },
+    {
+      "path": "descriptors/valid/primitive_prop_v2.json",
+      "sha256": "cddb2fdecc889f788d6f2965e15fde4c04c67574e63fe1d981543c9715dbd861",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: primitive_prop_v2"
+    },
+    {
+      "path": "descriptors/valid/prop_cluster.json",
+      "sha256": "1a588f1ae32858b0cd1cd3a5cdf2b7f041f89ef081d5785298191dba79a6332a",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: prop_cluster"
+    },
+    {
+      "path": "descriptors/valid/textured_tree.json",
+      "sha256": "f0ca92fcdbc3b73ec52368acfa4bfe8efbca20af55067e9c86fcda4b3a4e462b",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: textured_tree"
+    },
+    {
+      "path": "descriptors/valid/vertex_color_rock_with_collision.json",
+      "sha256": "55c5804ba7c99e464f1a987a3980bd5ad1a873c58ea1e4b030d38e0cd7b394ad",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: vertex_color_rock_with_collision"
+    },
+    {
+      "path": "glb/primitive_prop.portable.glb",
+      "sha256": "60b9ec7183bde3f53b6818bfb9771d90c2ba06f6ff6b47bd45ddd61214a056f4",
+      "kind": "glb",
+      "expected": "valid",
+      "description": "portable GLB of the primitive_prop delivery manifest"
+    },
+    {
+      "path": "glb/primitive_prop_v2.portable.glb",
+      "sha256": "02c2bea5a4f6e2e9182b5240d40d0ebcfd11888aa7b9c041c927601b281d5a86",
+      "kind": "glb",
+      "expected": "valid",
+      "description": "portable GLB of the primitive_prop_v2 delivery manifest"
+    },
+    {
+      "path": "locks/invalid/cycle.json",
+      "sha256": "0ff1bd8fc75efd77f72a250c3bc73153ed453303d1dfc5f92c4ffa87245ae56b",
+      "kind": "lock",
+      "expected": "semantic_invalid",
+      "description": "two dependencies require each other"
+    },
+    {
+      "path": "locks/invalid/key_mismatch.json",
+      "sha256": "810279d21e6dedd1bbaf6b7865ccefc9426c5d0c7953cc544ec9423894b54851",
+      "kind": "lock",
+      "expected": "semantic_invalid",
+      "description": "dependency key differs from the key recomputed from asset_ref"
+    },
+    {
+      "path": "locks/invalid/missing_closure.json",
+      "sha256": "f18a4cf1acc21224814450df42a999b807dd2e7db16f4822e2362bce4f4bb394",
+      "kind": "lock",
+      "expected": "semantic_invalid",
+      "description": "requires a key that is not in the lock"
+    },
+    {
+      "path": "locks/invalid/update_policy_auto.json",
+      "sha256": "092653bf52e9b06b5946031f79d0d154bcb3aac904eb3d8768fe6b7401a16fcf",
+      "kind": "lock",
+      "expected": "schema_invalid",
+      "description": "update_policy must be 'prompt'"
+    },
+    {
+      "path": "locks/valid/cluster_requires.json",
+      "sha256": "0fe1041ef75b222231602890b4b133c75deef8d612dede79085e780898eb27f7",
+      "kind": "lock",
+      "expected": "schema_valid",
+      "description": "source delivery whose closure requires another dependency"
+    },
+    {
+      "path": "locks/valid/two_versions.json",
+      "sha256": "78484715ba0743a186eb84c42602857c4bbd36f1b0429d5ae1ef5b11fc3b362c",
+      "kind": "lock",
+      "expected": "schema_valid",
+      "description": "two versions of one asset, two bindings, three roots"
+    },
+    {
+      "path": "manifests/invalid/absolute_path.json",
+      "sha256": "4c588a6038ea72ef7a3ee51af647092c334051fb1ee0e7f17200ecdb0568f9bc",
+      "kind": "manifest",
+      "expected": "schema_invalid",
+      "description": "absolute file path"
+    },
+    {
+      "path": "manifests/invalid/casefold_duplicate_paths.json",
+      "sha256": "6f3808f321644c2aadd6352438659416dca49b0b583d8c0e9281c34bc04619e7",
+      "kind": "manifest",
+      "expected": "semantic_invalid",
+      "description": "paths differ only by case"
+    },
+    {
+      "path": "manifests/invalid/entrypoint_not_in_files.json",
+      "sha256": "7630655e317ad0435245c228dd849f81e2f18ca25767b496574eac9e941615b9",
+      "kind": "manifest",
+      "expected": "semantic_invalid",
+      "description": "entrypoint is not a files[].path"
+    },
+    {
+      "path": "manifests/invalid/parent_path.json",
+      "sha256": "7ebd35cc1015bcb451650ccdfa520a5ee2ee41f5405281ec8ad37bb76afcb9c5",
+      "kind": "manifest",
+      "expected": "schema_invalid",
+      "description": "'..' segment"
+    },
+    {
+      "path": "manifests/invalid/unknown_capability.json",
+      "sha256": "5797f59168463bff39b85c6a4decc998986f07de8f2d8e1654431634e0dd3e79",
+      "kind": "manifest",
+      "expected": "schema_invalid",
+      "description": "capability not in capabilities.json"
+    },
+    {
+      "path": "manifests/invalid/url_field.json",
+      "sha256": "6f4c38cedd88230d03b8da4b9204c53171d0179c64ad2aa19668d09ac91bc1cc",
+      "kind": "manifest",
+      "expected": "schema_invalid",
+      "description": "manifests carry no fetch URL"
+    },
+    {
+      "path": "manifests/valid/portable_primitive_prop.json",
+      "sha256": "3af631546729db64d1b19e56406e7c5f1787f2801e1fa953c86e467714c4f011",
+      "kind": "manifest",
+      "expected": "schema_valid",
+      "description": "portable delivery of primitive_prop"
+    },
+    {
+      "path": "manifests/valid/portable_primitive_prop_v2.json",
+      "sha256": "f20aafafe4966cf1bc6501330412e87214a92e032c2d6fa998e1f628e625e1d7",
+      "kind": "manifest",
+      "expected": "schema_valid",
+      "description": "portable delivery of primitive_prop_v2"
+    },
+    {
+      "path": "manifests/valid/source_prop_cluster.json",
+      "sha256": "409ffbab1456db2fd1ace71d5123036ebbec0e444a9d86e98532bcba86c8bb7d",
+      "kind": "manifest",
+      "expected": "schema_valid",
+      "description": "static source delivery of prop_cluster with an exact portable dependency"
+    },
+    {
+      "path": "manifests/valid/source_textured_tree.json",
+      "sha256": "9212d9e150d3e1ccb3c0db4394a284ef01bbe643ed7d076379b0ba053fbd5ce4",
+      "kind": "manifest",
+      "expected": "schema_valid",
+      "description": "static source delivery of textured_tree"
+    },
+    {
+      "path": "source_manifests/invalid/resource_map_key_not_res.json",
+      "sha256": "58c71e9ca8abeff201346718a027b794cc9c73fe653bb8792d96cfcd933dfc12",
+      "kind": "source_manifest",
+      "expected": "schema_invalid",
+      "description": "resource_map key does not start with res://"
+    },
+    {
+      "path": "source_manifests/invalid/undeclared_asset_dependency.json",
+      "sha256": "0e7dd7e03f3ec2680a4fc71862ab66c06ca9e5edddd0dd0abf0fc4ae3913d848",
+      "kind": "source_manifest",
+      "expected": "semantic_invalid",
+      "description": "resource_map asset_dependency 3e4cecab.. missing from asset_dependencies"
+    },
+    {
+      "path": "source_packages/hostile/absolute_path.zip",
+      "sha256": "eed14fc3bab02c7d9418ac26cfbc9c1e59a30bc1e8090b207ed26ef83e988049",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "member path '/etc/x.tscn' is absolute",
+      "detail": "absolute_path"
+    },
+    {
+      "path": "source_packages/hostile/backslash_path.zip",
+      "sha256": "bd73551c4a0ca1f70ff7fe2d8eb22d20a56af90bbfd781aa656bef90b140b10a",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "member name contains a backslash",
+      "detail": "backslash_path"
+    },
+    {
+      "path": "source_packages/hostile/binary_scn.zip",
+      "sha256": "d4d730e02abed12d5a60887a4c6b4f6a3e606af9da70291686ea218f90a6bdd4",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "binary .scn is not Godot text format",
+      "detail": "binary_resource"
+    },
+    {
+      "path": "source_packages/hostile/casefold_duplicate.zip",
+      "sha256": "0ac99ea8acf3385575d1d1d5e9574ffc8686f304632b28a92dec81b189933247",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "scenes/A.tscn and scenes/a.tscn collide on case-insensitive filesystems",
+      "detail": "casefold_collision"
+    },
+    {
+      "path": "source_packages/hostile/connection_in_scene.zip",
+      "sha256": "31681b9ffe79a7dc505572463679efb536183e230ef5847d25da79bff71aa8a1",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "scene declares a [connection] section",
+      "detail": "connection"
+    },
+    {
+      "path": "source_packages/hostile/custom_class_node.zip",
+      "sha256": "7dc396fbcaa36a6b4471cf3b4e222a3433d1284b3a78df308c00b61f86cbccd8",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "node type MyProp is not in the allowlist",
+      "detail": "type_not_allowed"
+    },
+    {
+      "path": "source_packages/hostile/encrypted_flag.zip",
+      "sha256": "5c79bfab0cb4d9ca6213827a4760be69bcc9a057697c52b91d68724c5f388d0d",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "general-purpose flag bit 0 (encryption) set on a member",
+      "detail": "encrypted"
+    },
+    {
+      "path": "source_packages/hostile/glb_external_buffer.zip",
+      "sha256": "cd7edfd7ae73933bb440b88f77ec97ca67d281121874582871f6c644730243f0",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "packaged .glb buffer uri points outside the file",
+      "detail": "glb_external_uri"
+    },
+    {
+      "path": "source_packages/hostile/manifest_hash_mismatch.zip",
+      "sha256": "5f79a0f615883311b01ab7a9295df07c9e94cdd00fd87217de9ab20ba7e7c236",
+      "kind": "source_package",
+      "expected": "integrity_mismatch",
+      "description": "files[0].sha256 does not match the member bytes",
+      "detail": "sha256"
+    },
+    {
+      "path": "source_packages/hostile/path_traversal.zip",
+      "sha256": "4b67d883da0213a3212f4c62fa377a0a15e45060795023980b8ad743322ebac2",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "member path '../x.tscn' escapes the package root",
+      "detail": "path_traversal"
+    },
+    {
+      "path": "source_packages/hostile/project_godot.zip",
+      "sha256": "40eb51447d797a86d16f24aeb44a5e09661f72e5a20d29309d6a9147b1c8a819",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "a project.godot member",
+      "detail": "forbidden_file"
+    },
+    {
+      "path": "source_packages/hostile/script_file.zip",
+      "sha256": "2dc624a7c7acd0ef060f5938f830916a5271833b5d2c909a0535139da1022d2f",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "a .gd script member",
+      "detail": "forbidden_extension"
+    },
+    {
+      "path": "source_packages/hostile/shader_include_escape.zip",
+      "sha256": "789d7d3a21a6b15a0c25349b712c411f621b1fd9125e84575a8c072002a92f68",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "#include leaves the package",
+      "detail": "shader_include_escape"
+    },
+    {
+      "path": "source_packages/hostile/symlink_member.zip",
+      "sha256": "c9f563d6cd2a921ca81f400ced9414b214a75283af8cb7d359596cc49942b2ae",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "member has S_IFLNK in external_attr",
+      "detail": "symlink"
+    },
+    {
+      "path": "source_packages/hostile/tres_script_property.zip",
+      "sha256": "b892f1cfb74e2ff3ee8f483b22c51dcd3682730e2ebf60aa54a41b6d7a84a6f0",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": ".tres with script = ExtResource and a Script ext_resource",
+      "detail": "script_property"
+    },
+    {
+      "path": "source_packages/hostile/unavailable_dependency.zip",
+      "sha256": "e841edb52ca39ad6b6cf1ebb9ad610fa0d2487d7ab401b2b323e549cbd68d4d3",
+      "kind": "source_package",
+      "expected": "unsupported_source_dependency",
+      "description": "resource_map names an asset_key that is not in asset_dependencies",
+      "detail": "unknown_asset_key"
+    },
+    {
+      "path": "source_packages/hostile/undeclared_member.zip",
+      "sha256": "2415ad403ffe29b27e46e1521beb150cae862991965878881103d4bbff6ba3b8",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "member not listed in source_manifest.json files",
+      "detail": "undeclared_member"
+    },
+    {
+      "path": "source_packages/hostile/zip_bomb.zip",
+      "sha256": "fa9ca3d6d2554751fca6fa4c71ce239fdb399c17c255ae9adc4cd5cf68e2ce53",
+      "kind": "source_package",
+      "expected": "resource_limit",
+      "description": "64 MiB of zeros in a tiny deflate stream (ratio > 200)",
+      "detail": "compression_ratio"
+    },
+    {
+      "path": "source_packages/valid/csg_hut.zip",
+      "sha256": "159acee41dbe70bbb6c16eabb2785355235a49a7dcd6c30e3aa6b73b473d98cc",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: csg_hut"
+    },
+    {
+      "path": "source_packages/valid/custom_shader_crystal.zip",
+      "sha256": "b7b7591025ea41ed61b7a8bba1f9abe797387253699b24dd91e2e760bf9fc71e",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: custom_shader_crystal"
+    },
+    {
+      "path": "source_packages/valid/primitive_prop.zip",
+      "sha256": "500ac40197ce1efb95b4c21edb5111baf1fadabf57cfaa80d8a2293e4b4949be",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: primitive_prop"
+    },
+    {
+      "path": "source_packages/valid/primitive_prop_v2.zip",
+      "sha256": "db93ecb42d8217c29485d5dc8da0209f2d3d3b2158c725f52be37006657668b1",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: primitive_prop_v2"
+    },
+    {
+      "path": "source_packages/valid/prop_cluster.zip",
+      "sha256": "73b047ea781a495cbb9a04a423f1cf9083b756f120dae0c249bbb99a4cbb5a7e",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: prop_cluster"
+    },
+    {
+      "path": "source_packages/valid/textured_tree.zip",
+      "sha256": "ad93ae391d379335c1c430690044fa685fbcf9390fce5d4b1c0df5fa0e1d6c88",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: textured_tree"
+    },
+    {
+      "path": "source_packages/valid/vertex_color_rock_with_collision.zip",
+      "sha256": "f88fb302ae137b8849084417f2dde0c915b4e33a4f4b03b52a6dbd8e49055344",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: vertex_color_rock_with_collision"
+    },
+    {
+      "path": "vectors/canonical-v1.json",
+      "sha256": "08fba992e5ee4da1c4041c872d1532147d5a7aabaaf46e59e88507affc0c0cc0",
+      "kind": "vector",
+      "expected": "valid",
+      "description": "golden vectors: asset keys, decimals, canonical bytes"
+    }
+  ]
+}

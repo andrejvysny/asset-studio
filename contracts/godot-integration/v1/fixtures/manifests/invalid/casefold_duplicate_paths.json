@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "delivery_id": "dlv_00000000000000d1",
+  "asset_ref": {
+    "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+    "library_id": "prj_0000000000000001",
+    "asset_id": "ast_00000000000000aa",
+    "version_id": "ver_00000000000000v1"
+  },
+  "descriptor_sha256": "5b8517a39e3892184c5df6b733884265adae4289345cca8bd6172ffab15fb49b",
+  "representation": "portable_glb_v1",
+  "profile_id": "portable-default",
+  "profile_version": "1.0.0",
+  "preparer": {
+    "name": "assetstudio-fixtures",
+    "version": "1.0.0"
+  },
+  "entrypoint": "portable.glb",
+  "files": [
+    {
+      "path": "portable.glb",
+      "sha256": "60b9ec7183bde3f53b6818bfb9771d90c2ba06f6ff6b47bd45ddd61214a056f4",
+      "size": 956,
+      "media_type": "model/gltf-binary",
+      "artifact_id": "art_v3j2qb6aa90np9ta"
+    },
+    {
+      "path": "PORTABLE.GLB",
+      "sha256": "60b9ec7183bde3f53b6818bfb9771d90c2ba06f6ff6b47bd45ddd61214a056f4",
+      "size": 956,
+      "media_type": "model/gltf-binary",
+      "artifact_id": "art_v3j2qb6aa90np9ta"
+    }
+  ],
+  "dependencies": [],
+  "required_capabilities": []
+}

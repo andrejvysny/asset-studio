@@ -15,6 +15,10 @@ PREFIXES = {
     "med",
     # Compute runners.
     "rnr", "rgp", "rse", "atp", "xfr",
+    # Godot integration deliveries.
+    "dlv",
+    # Godot integration publication previews (staged, expiring).
+    "ipv",
 }
 JOB_PREFIXES = ("job", "bat")
 _ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"  # Crockford base32, lowercase

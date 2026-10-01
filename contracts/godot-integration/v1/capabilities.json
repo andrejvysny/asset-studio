@@ -1,0 +1,100 @@
+{
+  "contract_version": 1,
+  "api_version": 1,
+  "source_package_version": 1,
+  "representations": [
+    "portable_glb_v1",
+    "godot_static_source_v1",
+    "mobile_glb_v1"
+  ],
+  "known_capabilities": [
+    "godot_text_scene_v1",
+    "csg_static",
+    "static_collision",
+    "shader_source",
+    "vertex_colors",
+    "alpha_mask",
+    "alpha_blend",
+    "pbr_textures"
+  ],
+  "source_package": {
+    "allowed_extensions": [
+      ".tscn",
+      ".tres",
+      ".gdshader",
+      ".gdshaderinc",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".webp",
+      ".glb"
+    ],
+    "allowed_node_types": [
+      "Node3D",
+      "MeshInstance3D",
+      "CSGBox3D",
+      "CSGCylinder3D",
+      "CSGSphere3D",
+      "CSGTorus3D",
+      "CSGPolygon3D",
+      "CSGMesh3D",
+      "CSGCombiner3D",
+      "StaticBody3D",
+      "CollisionShape3D",
+      "Marker3D"
+    ],
+    "allowed_resource_types": [
+      "StandardMaterial3D",
+      "ORMMaterial3D",
+      "ShaderMaterial",
+      "Shader",
+      "ArrayMesh",
+      "BoxMesh",
+      "CylinderMesh",
+      "SphereMesh",
+      "PlaneMesh",
+      "QuadMesh",
+      "PrismMesh",
+      "CapsuleMesh",
+      "TorusMesh",
+      "BoxShape3D",
+      "SphereShape3D",
+      "CapsuleShape3D",
+      "CylinderShape3D",
+      "ConvexPolygonShape3D",
+      "ConcavePolygonShape3D",
+      "Texture2D",
+      "CompressedTexture2D",
+      "PackedScene"
+    ],
+    "forbidden_extensions": [
+      ".gd",
+      ".cs",
+      ".gdextension",
+      ".pck",
+      ".so",
+      ".dylib",
+      ".dll",
+      ".exe",
+      ".res",
+      ".scn",
+      "project.godot"
+    ]
+  },
+  "limits": {
+    "publication_upload_max_bytes": 536870912,
+    "source_expanded_max_bytes": 1073741824,
+    "source_max_files": 4096,
+    "source_max_depth": 32,
+    "ipad_glb_max_bytes": 134217728,
+    "ipad_max_triangles": 200000,
+    "ipad_max_nodes": 1024,
+    "ipad_max_materials": 64,
+    "ipad_max_texture_px": 4096,
+    "ipad_decoded_texture_budget_bytes": 134217728,
+    "page_default": 60,
+    "page_max": 200,
+    "resolve_max_refs": 200,
+    "long_poll_max_s": 20
+  }
+}

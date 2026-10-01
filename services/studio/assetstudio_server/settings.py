@@ -107,11 +107,29 @@ class Settings:
     mcp_max_inline_bytes: int = field(
         default_factory=lambda: int(os.environ.get("STUDIO_MCP_MAX_INLINE_BYTES", str(16 * 1024 * 1024))))
 
+    # Godot-integration REST listener (own port; only /api/integration/v1, library-scoped bearer tokens).
+    integration_enabled: bool = field(default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_ENABLED", "0") == "1")
+    integration_host: str = field(default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_HOST", "127.0.0.1"))
+    integration_port: int = field(default_factory=lambda: int(os.environ.get("STUDIO_INTEGRATION_PORT", "8192")))
+    integration_allow_insecure_lan: bool = field(
+        default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_ALLOW_INSECURE_LAN", "0") == "1")
+    integration_tls_cert: str = field(default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_TLS_CERT", ""))
+    integration_tls_key: str = field(default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_TLS_KEY", ""))
+    # Set only by the Dockerfile: inside a container the bind is 0.0.0.0 and exposure is the compose port mapping.
+    integration_container_bind: bool = field(
+        default_factory=lambda: os.environ.get("STUDIO_INTEGRATION_CONTAINER_BIND", "0") == "1")
+    contracts_dir: Path = field(default_factory=lambda: _path(
+        "STUDIO_CONTRACTS_DIR", REPO_ROOT / "contracts" / "godot-integration" / "v1"))
+
     def validate(self) -> None:
         if self.auth_mode not in ("local", "proxy"):
             raise ValueError(f"STUDIO_AUTH_MODE must be 'local' or 'proxy', got {self.auth_mode!r}")
         if self.auth_mode == "proxy" and not self.proxy_secret:
             raise ValueError("STUDIO_AUTH_MODE=proxy requires a non-empty STUDIO_PROXY_SECRET (or _FILE)")
+
+    @property
+    def integration_dir(self) -> Path:
+        return self.instance_dir / "integration"
 
     @property
     def mcp_base_url(self) -> str:

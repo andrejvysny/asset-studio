@@ -20,7 +20,7 @@ class RoleContract:
 _MATERIAL_MAPS = ("normal", "roughness", "metallic", "ao", "height")
 
 ROLE_CONTRACTS: dict[Kind, RoleContract] = {
-    Kind.model3d: RoleContract(("model",), ("preview", "meta")),
+    Kind.model3d: RoleContract(("model",), ("preview", "meta", "descriptor", "godot_source", "conversion_report")),
     Kind.concept_art: RoleContract(("image",), ("preview", "meta")),
     Kind.sprite: RoleContract(("image",), ("preview", "meta")),
     Kind.icon: RoleContract(("image",), ("preview", "meta"), (r"icon_\d{1,5}",)),

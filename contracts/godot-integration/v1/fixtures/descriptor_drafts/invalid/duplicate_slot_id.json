@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "placement_anchor": [
+    "0.25",
+    "0",
+    "-0.5"
+  ],
+  "footprint_radius_m": "1.1",
+  "scale_range": [
+    "0.5",
+    "2"
+  ],
+  "height_offset_range_m": [
+    "-0.1",
+    "0.5"
+  ],
+  "default_grounding": "FOLLOW_TERRAIN",
+  "material_slots": [
+    {
+      "slot_id": "body",
+      "role": "surface",
+      "surfaces": {
+        "portable_glb_v1": [
+          {
+            "mesh": 0,
+            "primitive": 0
+          }
+        ],
+        "godot_static_source_v1": [
+          {
+            "node_path": "Body",
+            "surface": 0
+          }
+        ]
+      }
+    },
+    {
+      "slot_id": "body",
+      "role": "surface",
+      "surfaces": {
+        "portable_glb_v1": [
+          {
+            "mesh": 0,
+            "primitive": 0
+          }
+        ],
+        "godot_static_source_v1": [
+          {
+            "node_path": "Body",
+            "surface": 0
+          }
+        ]
+      }
+    }
+  ],
+  "collision": null,
+  "preview_warnings": []
+}

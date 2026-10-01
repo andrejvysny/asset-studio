@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/asset-descriptor.schema.json",
+  "title": "AssetDescriptorV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "asset_ref",
+    "kind",
+    "units",
+    "up_axis",
+    "forward_axis",
+    "bounds_min",
+    "bounds_max",
+    "placement_anchor",
+    "footprint_radius_m",
+    "scale_range",
+    "height_offset_range_m",
+    "default_grounding",
+    "material_slots",
+    "collision",
+    "preview_warnings",
+    "source_provenance",
+    "licence"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "asset_ref": {
+      "$ref": "asset-ref.schema.json#/$defs/asset_ref"
+    },
+    "kind": {
+      "const": "model3d"
+    },
+    "units": {
+      "const": "m"
+    },
+    "up_axis": {
+      "const": "+Y"
+    },
+    "forward_axis": {
+      "const": "+Z"
+    },
+    "bounds_min": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal3"
+    },
+    "bounds_max": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal3"
+    },
+    "placement_anchor": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal3"
+    },
+    "footprint_radius_m": {
+      "$ref": "asset-ref.schema.json#/$defs/positive_decimal"
+    },
+    "scale_range": {
+      "$ref": "asset-ref.schema.json#/$defs/positive_decimal_range"
+    },
+    "height_offset_range_m": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal_range"
+    },
+    "default_grounding": {
+      "$ref": "asset-ref.schema.json#/$defs/grounding"
+    },
+    "material_slots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/material_slot"
+      },
+      "maxItems": 64
+    },
+    "collision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/collision"
+        }
+      ]
+    },
+    "preview_warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "asset-ref.schema.json#/$defs/slug"
+      },
+      "maxItems": 64
+    },
+    "source_provenance": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "asset-ref.schema.json#/$defs/json_value"
+      },
+      "required": [],
+      "properties": {}
+    },
+    "licence": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "asset-ref.schema.json#/$defs/json_value"
+      },
+      "required": [],
+      "properties": {}
+    }
+  },
+  "description": "Immutable placement descriptor. forward_axis is +Z (glTF/Godot MODEL_FRONT); see docs/adr/0001. Not schema-expressible (checked by assetstudio_core.delivery): bounds ordering and positive extent, scale min <= max, height min <= max, unique slot_id, no float values inside provenance/licence.",
+  "$defs": {
+    "material_slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "role",
+        "surfaces"
+      ],
+      "properties": {
+        "slot_id": {
+          "$ref": "asset-ref.schema.json#/$defs/slug"
+        },
+        "role": {
+          "$ref": "asset-ref.schema.json#/$defs/slug"
+        },
+        "surfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "portable_glb_v1": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "mesh",
+                  "primitive"
+                ],
+                "properties": {
+                  "mesh": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "primitive": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 1024
+            },
+            "mobile_glb_v1": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "mesh",
+                  "primitive"
+                ],
+                "properties": {
+                  "mesh": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "primitive": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 1024
+            },
+            "godot_static_source_v1": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "node_path",
+                  "surface"
+                ],
+                "properties": {
+                  "node_path": {
+                    "$ref": "asset-ref.schema.json#/$defs/node_path"
+                  },
+                  "surface": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 1024
+            }
+          },
+          "minProperties": 1
+        }
+      }
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "shape_count",
+        "shape_types"
+      ],
+      "properties": {
+        "source": {
+          "const": "godot_static_source_v1"
+        },
+        "shape_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "shape_types": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "box",
+              "sphere",
+              "capsule",
+              "cylinder",
+              "convex",
+              "concave"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "entry_scene": "scenes/cluster.tscn",
+  "source_godot_version": "4.4.1-stable",
+  "files": [
+    {
+      "path": "scenes/cluster.tscn",
+      "sha256": "ea8ea05b7a28a5271050a387199f6f409e85b179e49b5da51bc12cd1b8043a67",
+      "size": 744,
+      "media_type": "text/x-godot-scene"
+    }
+  ],
+  "resource_map": {
+    "res://deps/primitive_prop.glb": {
+      "kind": "asset_dependency",
+      "asset_key": "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf",
+      "entrypoint": "portable.glb",
+      "original_uid": "uid://c8w2q1prop001"
+    },
+    "assets/x.glb": {
+      "kind": "package_file",
+      "path": "a",
+      "original_uid": null
+    }
+  },
+  "asset_dependencies": {
+    "3e4cecabdb6c9bac29d5f9c655852e10f1d96abdb437cee386bfecf3974b1cbf": {
+      "asset_ref": {
+        "server_id": "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e",
+        "library_id": "prj_0000000000000001",
+        "asset_id": "ast_00000000000000aa",
+        "version_id": "ver_00000000000000v1"
+      },
+      "descriptor_sha256": "5b8517a39e3892184c5df6b733884265adae4289345cca8bd6172ffab15fb49b",
+      "representation": "portable_glb_v1",
+      "delivery_id": "dlv_00000000000000d1"
+    }
+  },
+  "capabilities": [
+    "godot_text_scene_v1"
+  ],
+  "conversion_report": {
+    "portable_status": "exact",
+    "omissions": [],
+    "approximations": []
+  },
+  "placement": {
+    "placement_anchor": [
+      "0",
+      "0",
+      "0"
+    ],
+    "footprint_radius_m": "2.3",
+    "scale_range": [
+      "0.5",
+      "1"
+    ],
+    "height_offset_range_m": [
+      "-0.1",
+      "0.5"
+    ],
+    "default_grounding": "FOLLOW_TERRAIN",
+    "material_slots": [
+      {
+        "slot_id": "base",
+        "role": "surface",
+        "source_surfaces": [
+          {
+            "node_path": "Base",
+            "surface": 0
+          }
+        ]
+      }
+    ]
+  }
+}

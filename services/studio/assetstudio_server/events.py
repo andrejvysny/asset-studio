@@ -1,6 +1,7 @@
 """In-process change events with a resumable cursor. Invalidation hints only: clients re-read state via the API."""
 from __future__ import annotations
 
+import secrets
 import threading
 import time
 from collections import deque
@@ -14,7 +15,8 @@ class EventBus:
         self._events: deque[dict[str, Any]] = deque(maxlen=maxlen)
         self._seq = 0
         self._cond = threading.Condition()
-        self.epoch = f"{int(time.time())}"  # a restarted server invalidates old cursors
+        # Unique per start (a restarted server invalidates old cursors); no ":" so "epoch:seq" SSE ids still parse.
+        self.epoch = f"{time.time_ns():x}-{secrets.token_hex(4)}"
 
     def publish(self, type_: str, **fields: Any) -> None:
         with self._cond:

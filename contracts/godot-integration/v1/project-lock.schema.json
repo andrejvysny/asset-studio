@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/project-lock.schema.json",
+  "title": "ProjectAssetLockV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator",
+    "dependencies",
+    "bindings",
+    "roots"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "generator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "addon_version",
+        "installer_version"
+      ],
+      "properties": {
+        "addon_version": {
+          "$ref": "asset-ref.schema.json#/$defs/version_text"
+        },
+        "installer_version": {
+          "$ref": "asset-ref.schema.json#/$defs/version_text"
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "patternProperties": {
+        "^[0-9a-f]{64}$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "asset_ref",
+            "descriptor_sha256",
+            "deliveries",
+            "requires"
+          ],
+          "properties": {
+            "asset_ref": {
+              "$ref": "asset-ref.schema.json#/$defs/asset_ref"
+            },
+            "descriptor_sha256": {
+              "$ref": "asset-ref.schema.json#/$defs/sha256"
+            },
+            "deliveries": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [],
+              "properties": {
+                "portable_glb_v1": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "delivery_id",
+                    "manifest_sha256",
+                    "profile_id",
+                    "profile_version"
+                  ],
+                  "properties": {
+                    "delivery_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+                    },
+                    "manifest_sha256": {
+                      "$ref": "asset-ref.schema.json#/$defs/sha256"
+                    },
+                    "profile_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    },
+                    "profile_version": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    }
+                  }
+                },
+                "godot_static_source_v1": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "delivery_id",
+                    "manifest_sha256",
+                    "profile_id",
+                    "profile_version"
+                  ],
+                  "properties": {
+                    "delivery_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+                    },
+                    "manifest_sha256": {
+                      "$ref": "asset-ref.schema.json#/$defs/sha256"
+                    },
+                    "profile_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    },
+                    "profile_version": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    }
+                  }
+                },
+                "mobile_glb_v1": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "delivery_id",
+                    "manifest_sha256",
+                    "profile_id",
+                    "profile_version"
+                  ],
+                  "properties": {
+                    "delivery_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/delivery_id"
+                    },
+                    "manifest_sha256": {
+                      "$ref": "asset-ref.schema.json#/$defs/sha256"
+                    },
+                    "profile_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    },
+                    "profile_version": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    }
+                  }
+                }
+              },
+              "minProperties": 1
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "$ref": "asset-ref.schema.json#/$defs/asset_key"
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "bindings": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9_.-]{0,63}$": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "asset_key",
+            "representation",
+            "material_policy",
+            "update_policy"
+          ],
+          "properties": {
+            "asset_key": {
+              "$ref": "asset-ref.schema.json#/$defs/asset_key"
+            },
+            "representation": {
+              "$ref": "asset-ref.schema.json#/$defs/representation"
+            },
+            "material_policy": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode",
+                    "profile_id",
+                    "profile_sha256"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "preserve"
+                    },
+                    "profile_id": {
+                      "type": "null"
+                    },
+                    "profile_sha256": {
+                      "type": "null"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode",
+                    "profile_id",
+                    "profile_sha256"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "project_mapping"
+                    },
+                    "profile_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    },
+                    "profile_sha256": {
+                      "$ref": "asset-ref.schema.json#/$defs/sha256"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode",
+                    "profile_id",
+                    "profile_sha256"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "override"
+                    },
+                    "profile_id": {
+                      "$ref": "asset-ref.schema.json#/$defs/slug"
+                    },
+                    "profile_sha256": {
+                      "$ref": "asset-ref.schema.json#/$defs/sha256"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode",
+                    "profile_id",
+                    "profile_sha256"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "override"
+                    },
+                    "profile_id": {
+                      "type": "null"
+                    },
+                    "profile_sha256": {
+                      "type": "null"
+                    }
+                  }
+                }
+              ]
+            },
+            "update_policy": {
+              "const": "prompt"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner_kind",
+          "owner_id",
+          "asset_keys"
+        ],
+        "properties": {
+          "owner_kind": {
+            "enum": [
+              "scene_binding",
+              "world_generation"
+            ]
+          },
+          "owner_id": {
+            "$ref": "asset-ref.schema.json#/$defs/slug"
+          },
+          "asset_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "asset-ref.schema.json#/$defs/asset_key"
+            },
+            "minItems": 1,
+            "maxItems": 4096,
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  },
+  "description": "Not schema-expressible (checked by assetstudio_core.project_lock): dependency key equals the key recomputed from asset_ref, requires/bindings/roots reference existing keys (and binding representation exists), no dependency cycles."
+}

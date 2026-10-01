@@ -101,7 +101,7 @@ def patch_asset(asset_id: str, req: PatchAsset, ctx: ProjectContext = Depends(pr
     m = update_metadata(ctx.store, asset_id, req.expected_revision, display_name=req.display_name,
                         category_id=req.category_id, tags=req.tags, set_category=req.set_category)
     ctx.index.upsert(m)
-    s.events.publish("library", project_id=ctx.id)
+    s.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="metadata")
     return m.model_dump(mode="json")
 
 
@@ -120,7 +120,7 @@ def set_current_version(asset_id: str, req: SetCurrent, ctx: ProjectContext = De
     m = set_current(ctx.store, asset_id, req.version_id, req.expected_current_version,
                     derived_id("op", req.idempotency_key), req.reason)
     ctx.index.upsert(m)
-    s.events.publish("library", project_id=ctx.id)
+    s.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="current")
     return m.model_dump(mode="json")
 
 

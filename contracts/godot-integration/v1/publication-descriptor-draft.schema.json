@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.assetstudio.invalid/godot-integration/v1/publication-descriptor-draft.schema.json",
+  "title": "DescriptorDraftV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "placement_anchor",
+    "footprint_radius_m",
+    "scale_range",
+    "height_offset_range_m",
+    "default_grounding",
+    "material_slots",
+    "collision",
+    "preview_warnings"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "placement_anchor": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal3"
+    },
+    "footprint_radius_m": {
+      "$ref": "asset-ref.schema.json#/$defs/positive_decimal"
+    },
+    "scale_range": {
+      "$ref": "asset-ref.schema.json#/$defs/positive_decimal_range"
+    },
+    "height_offset_range_m": {
+      "$ref": "asset-ref.schema.json#/$defs/decimal_range"
+    },
+    "default_grounding": {
+      "$ref": "asset-ref.schema.json#/$defs/grounding"
+    },
+    "material_slots": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/material_slot"
+      },
+      "maxItems": 64
+    },
+    "collision": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/collision"
+        }
+      ]
+    },
+    "preview_warnings": {
+      "type": "array",
+      "items": {
+        "$ref": "asset-ref.schema.json#/$defs/slug"
+      },
+      "maxItems": 64
+    }
+  },
+  "description": "Placement fields a publisher declares in the `descriptor` part of publications:preview. The server computes bounds, asset_ref, provenance and licence itself and checks the draft against the GLB (portable surfaces exist, anchor within bounds expanded by footprint_radius_m) and the source manifest (slot ids, source surfaces, placement values). Not schema-expressible (checked by assetstudio_core.publication_draft): scale min <= max, height min <= max, unique slot_id.",
+  "$defs": {
+    "material_slot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slot_id",
+        "role",
+        "surfaces"
+      ],
+      "properties": {
+        "slot_id": {
+          "$ref": "asset-ref.schema.json#/$defs/slug"
+        },
+        "role": {
+          "$ref": "asset-ref.schema.json#/$defs/slug"
+        },
+        "surfaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "portable_glb_v1"
+          ],
+          "properties": {
+            "portable_glb_v1": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "mesh",
+                  "primitive"
+                ],
+                "properties": {
+                  "mesh": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "primitive": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 1024
+            },
+            "godot_static_source_v1": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "node_path",
+                  "surface"
+                ],
+                "properties": {
+                  "node_path": {
+                    "$ref": "asset-ref.schema.json#/$defs/node_path"
+                  },
+                  "surface": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "minItems": 1,
+              "maxItems": 1024
+            }
+          }
+        }
+      }
+    },
+    "collision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "shape_count",
+        "shape_types"
+      ],
+      "properties": {
+        "source": {
+          "const": "godot_static_source_v1"
+        },
+        "shape_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        },
+        "shape_types": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "box",
+              "sphere",
+              "capsule",
+              "cylinder",
+              "convex",
+              "concave"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

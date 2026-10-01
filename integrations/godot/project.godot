@@ -1,0 +1,7 @@
+; Minimal generic harness for the AssetStudio Godot addon. No World Painter, Terrain3D or game code.
+config_version=5
+
+[application]
+
+config/name="AssetStudio Addon Harness"
+config/features=PackedStringArray("4.7")
