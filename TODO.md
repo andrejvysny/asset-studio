@@ -8,7 +8,7 @@ Evidence: docs/acceptance.md "Merge of feat/modular-arch into master".
 - [x] merged tree: per-test-id parity (0 regressions), process, web, e2e, Godot, compose render, rehearsal, smoke
 - [ ] NOT RUN: GPU acceptance (direct + nodes), Studio image build/container smoke, mixed worker images, Traefik/Authelia
 - [ ] backup-restore.md: restore must re-register projects (projects.json not in instance backup) — pre-existing
-- [ ] push master (only on instruction); then Plane update
+- [x] push master; Plane updated (page + ASSETSTUDI-36..38); merged branches deleted
 
 # TODO — Review hardening 11f5b18 (2026-10-01)
 

@@ -1,0 +1,66 @@
+{
+  "reviewed_commit": "11f5b18b5f58f11281cc5837d155ede91bf9b5f6",
+  "kind": "isolated source-excerpt/microprobes",
+  "not_repository_tests": true,
+  "sources": {
+    "tokens": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/integration_api/tokens.py",
+    "private_files": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/secure_files.py",
+    "events": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/events.py",
+    "changes": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/integration_api/routes_changes.py",
+    "publication": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/services/source_publications.py",
+    "deliveries": "https://github.com/andrejvysny/asset-studio/blob/11f5b18b5f58f11281cc5837d155ede91bf9b5f6/services/studio/assetstudio_server/services/deliveries.py"
+  },
+  "results": [
+    {
+      "finding": "H01",
+      "probe": "independent token-store writers",
+      "reproduced": true,
+      "observation": "beta was revoked, then became valid after alpha's stale writer saved",
+      "scope": "source excerpt; temporary files; controlled interleaving; not a live server test"
+    },
+    {
+      "finding": "H02",
+      "probe": "canonical-receipt replay guard",
+      "reproduced": true,
+      "observation": "changed portable/draft hash, target, expected pointer, name and licence are not compared",
+      "scope": "exact guard with a fake store; not the complete commit route"
+    },
+    {
+      "finding": "H03",
+      "probe": "source-delivery capability expression",
+      "reproduced": true,
+      "observation": {
+        "detected": [
+          "csg_static",
+          "godot_text_scene_v1",
+          "shader_source"
+        ],
+        "emitted": [
+          "godot_text_scene_v1"
+        ],
+        "omitted": [
+          "csg_static",
+          "shader_source"
+        ]
+      },
+      "scope": "source expression, synthetic detected metadata; not actual fixture publication"
+    },
+    {
+      "finding": "H04",
+      "probe": "cross-library nested-lock interleaving",
+      "reproduced": true,
+      "observation": [
+        "A waits for B",
+        "B waits for A"
+      ],
+      "scope": "lock topology microprobe, not full delivery service; timeouts prevent a hanging test"
+    },
+    {
+      "finding": "H08",
+      "probe": "change-feed overflow after initial validation",
+      "reproduced": true,
+      "observation": "cursor advances 0 -> 4; events 1 and 2 are missing; _collect drops expired=True",
+      "scope": "source-excerpt EventBus and _collect; reduced ring capacity; not an HTTP test"
+    }
+  ]
+}
