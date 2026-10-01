@@ -5,6 +5,11 @@ const TESTS_DIR: String = "res://tests"
 
 
 func _initialize() -> void:
+	# Tests may be coroutines (network tests await); frames must keep running, so run from the main loop.
+	_run.call_deferred()
+
+
+func _run() -> void:
 	var filter: String = ""
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--filter="):
@@ -31,7 +36,7 @@ func _initialize() -> void:
 				continue
 			total += 1
 			var inst: RefCounted = script.new()
-			inst.call(method)
+			await inst.call(method)  # await is a no-op for synchronous tests
 			var msgs: PackedStringArray = inst.get("failures")
 			if msgs.is_empty():
 				print("PASS %s" % label)

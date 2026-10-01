@@ -10,3 +10,5 @@ metadata:
 - Integration TestClient has raise_server_exceptions=False: injected crashes appear as 503 retryable responses, not raised.
 - Tests importing scripts/ modules (integration_fixture_*, make_integration_fixtures): sys.path insert is done in tests/integration_publication_support.py; import lazily inside functions.
 - Starlette `request.form(max_fields=0)` rejects non-file parts; uploads need a filename (httpx `files=`).
+- Deliveries (services/deliveries.py): compute lock-free, commit under short lock; source profile is ("published_descriptor","2"). To make versions "cold" in tests, rmtree root/{deliveries,descriptors,delivery_index,delivery_artifacts} (see tests/regression/test_delivery_hardening.py).
+- `pytest tests` needs `--ignore=tests/e2e --ignore=tests/worker3d` locally (playwright/cv2/torch missing); use `tests/contract tests/regression tests/unit -k "integration or deliver"`.

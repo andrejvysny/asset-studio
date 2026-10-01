@@ -1,0 +1,265 @@
+"""Fake AssetStudio integration server for client tests (stdlib only).
+
+Usage: fake_server.py [port] [--token T] [--contracts-dir DIR]   (port 0 or omitted: pick one; prints "PORT <n>")
+Control: POST /__scenario {"name": ...}; GET /__log (request log); POST /__log/clear.
+Scenarios: normal, corrupt_content, ignore_range, wrong_server_id, forbidden, slow, drop_midway.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+PREFIX = "/api/integration/v1"
+SERVER_ID = "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e"
+OTHER_SERVER_ID = "11111111-2222-4333-8444-555555555555"
+LIBRARY = "prj_0000000000000001"
+DEFAULT_CONTRACTS = Path(__file__).resolve().parents[3] / "contracts" / "godot-integration" / "v1"
+# (descriptor fixture, manifest fixture) per exact version served
+PAIRS = {
+    "ver_00000000000000v1": ("descriptors/valid/primitive_prop.json", "manifests/valid/portable_primitive_prop.json"),
+    "ver_00000000000000v2": (
+        "descriptors/valid/primitive_prop_v2.json", "manifests/valid/portable_primitive_prop_v2.json"),
+}
+ASSET_ID = "ast_00000000000000aa"
+SCENARIOS = {"normal", "corrupt_content", "ignore_range", "wrong_server_id", "forbidden", "slow", "drop_midway"}
+
+
+class State:
+    def __init__(self, contracts: Path, token: str) -> None:
+        self.token = token
+        self.scenario = "normal"
+        self.log: list[dict] = []
+        self.lock = threading.Lock()
+        fx = contracts / "fixtures"
+        glbs = {hashlib.sha256(p.read_bytes()).hexdigest(): p.read_bytes() for p in (fx / "glb").glob("*.glb")}
+        self.versions: dict[str, dict] = {}
+        self.artifacts: dict[str, bytes] = {}
+        for ver, (desc_rel, man_rel) in PAIRS.items():
+            desc, man = (fx / desc_rel).read_bytes(), (fx / man_rel).read_bytes()
+            doc = json.loads(man)
+            self.versions[ver] = {"descriptor": desc, "manifest": man, "delivery_id": doc["delivery_id"],
+                                  "total": sum(f["size"] for f in doc["files"])}
+            for f in doc["files"]:
+                self.artifacts[f["artifact_id"]] = glbs[f["sha256"]]
+        self.manifests = {v["delivery_id"]: v["manifest"] for v in self.versions.values()}
+
+
+def envelope(code: str, message: str, retryable: bool = False) -> bytes:
+    return json.dumps({"error": {"code": code, "message": message, "retryable": retryable, "details": {}}}).encode()
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "FakeAssetStudio/1"
+    protocol_version = "HTTP/1.1"
+    state: State
+
+    def log_message(self, *_args: object) -> None:  # keep test output quiet; never log headers
+        pass
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):  # clients cancel and drop on purpose
+            self.close_connection = True
+
+    # --- plumbing -----------------------------------------------------------------------------------------
+    def _send(self, status: int, body: bytes, ctype: str = "application/json", extra: dict | None = None) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _err(self, status: int, code: str, message: str = "", retryable: bool = False) -> None:
+        self._send(status, envelope(code, message or code, retryable))
+
+    def _read_body(self) -> bytes:
+        return self.rfile.read(int(self.headers.get("Content-Length") or 0))
+
+    def _record(self) -> None:
+        with self.state.lock:
+            self.state.log.append({"method": self.command, "path": self.path.split("?")[0],
+                                   "range": self.headers.get("Range"), "scenario": self.state.scenario})
+
+    def _authed(self) -> bool:
+        if self.headers.get("Authorization") != f"Bearer {self.state.token}":
+            self._err(401, "unauthorized", "missing or invalid credential")
+            return False
+        return True
+
+    def do_GET(self) -> None:
+        self._dispatch()
+
+    def do_POST(self) -> None:
+        self._dispatch()
+
+    def _dispatch(self) -> None:
+        path = self.path.split("?")[0]
+        body = self._read_body() if self.command == "POST" else b""
+        if path.startswith("/__"):
+            return self._control(path, body)
+        self._record()
+        if path == f"{PREFIX}/health":
+            health = {"status": "ok", "service": "assetstudio-integration", "api_version": 1}
+            return self._send(200, json.dumps(health).encode())
+        if not path.startswith(PREFIX + "/") or not self._authed():
+            return None if path.startswith(PREFIX + "/") else self._err(404, "asset_not_found")
+        self._route(path[len(PREFIX):], body)
+        return None
+
+    # --- control ------------------------------------------------------------------------------------------
+    def _control(self, path: str, body: bytes) -> None:
+        if path == "/__scenario" and self.command == "POST":
+            name = json.loads(body or b"{}").get("name")
+            if name not in SCENARIOS:
+                return self._err(400, "invalid_request", "unknown scenario")
+            self.state.scenario = name
+            return self._send(200, b'{"ok":true}')
+        if path == "/__log":
+            return self._send(200, json.dumps(self.state.log).encode())
+        if path == "/__log/clear":
+            self.state.log.clear()
+            return self._send(200, b'{"ok":true}')
+        return self._err(404, "invalid_request")
+
+    # --- API ----------------------------------------------------------------------------------------------
+    def _route(self, route: str, body: bytes) -> None:
+        s = self.state
+        if route == "/capabilities":
+            sid = OTHER_SERVER_ID if s.scenario == "wrong_server_id" else SERVER_ID
+            return self._send(200, json.dumps({"server_id": sid, "api_version": 1, "contract_version": 1,
+                                               "representations": ["portable_glb_v1"],
+                                               "granted": {"library_ids": [LIBRARY],
+                                                           "scopes": ["assets:read"]}}).encode())
+        if s.scenario == "forbidden":
+            return self._err(403, "forbidden", "token does not grant this access")
+        parts = route.strip("/").split("/")
+        if route == "/libraries":
+            libs = {"libraries": [{"library_id": LIBRARY, "name": "Fake", "state": "available"}]}
+            return self._send(200, json.dumps(libs).encode())
+        if route == "/changes":
+            return self._send(200, json.dumps({"cursor": "Y3Vyc29y", "events": [], "reset_required": False}).encode())
+        if len(parts) >= 3 and parts[0] == "libraries" and parts[1] == LIBRARY:
+            return self._library_route(parts[2:], body)
+        return self._err(403, "forbidden", "token does not grant this access")
+
+    def _library_route(self, parts: list[str], body: bytes) -> None:
+        s = self.state
+        if parts == ["resolve"] and self.command == "POST":
+            return self._resolve(json.loads(body))
+        if len(parts) == 3 and parts[0] == "deliveries" and parts[2] == "manifest":
+            raw = s.manifests.get(parts[1])
+            if raw is None:
+                return self._err(404, "asset_not_found")
+            return self._send(200, raw, extra={"X-Content-SHA256": hashlib.sha256(raw).hexdigest()})
+        if len(parts) == 3 and parts[0] == "artifacts" and parts[2] == "content":
+            return self._content(parts[1])
+        return self._err(404, "asset_not_found")
+
+    def _resolve(self, req: dict) -> None:
+        entries = []
+        for ref in req["refs"]:
+            ver = self.state.versions.get(ref["version_id"])
+            base = {"asset_ref": ref, "descriptor_sha256": None, "descriptor_json": None, "deliveries": [],
+                    "dependencies": []}
+            key = _asset_key(ref)
+            if ref["server_id"] != SERVER_ID:
+                state, code = "server_identity_mismatch", "server_identity_mismatch"
+            elif ref["asset_id"] != ASSET_ID:
+                state, code = "not_found", "asset_not_found"
+            elif ver is None:
+                state, code = "not_found", "version_unavailable"
+            else:
+                state, code = "ready", None
+                man = json.loads(ver["manifest"])
+                base.update(descriptor_sha256=hashlib.sha256(ver["descriptor"]).hexdigest(),
+                            descriptor_json=ver["descriptor"].decode(),
+                            deliveries=[{"delivery_id": ver["delivery_id"], "representation": "portable_glb_v1",
+                                         "profile_id": man["profile_id"], "profile_version": man["profile_version"],
+                                         "manifest_sha256": hashlib.sha256(ver["manifest"]).hexdigest(),
+                                         "total_bytes": ver["total"], "budget": {}}])
+            base.update(asset_key=key, state=state, error={"code": code, "message": code} if code else None)
+            entries.append(base)
+        self._send(200, json.dumps({"entries": entries}).encode())
+
+    def _content(self, artifact_id: str) -> None:
+        data = self.state.artifacts.get(artifact_id)
+        if data is None:
+            return self._err(404, "asset_not_found")
+        scenario = self.state.scenario
+        if scenario == "corrupt_content":
+            data = bytes([data[0] ^ 0xFF]) + data[1:]
+        total = len(data)
+        rng = self.headers.get("Range")
+        start = 0
+        status, extra = 200, {}
+        if rng and scenario != "ignore_range":
+            start = int(rng.split("=")[1].rstrip("-"))
+            if start >= total:
+                return self._send(416, envelope("invalid_request", "range"),
+                                  extra={"Content-Range": f"bytes */{total}"})
+            status, extra = 206, {"Content-Range": f"bytes {start}-{total - 1}/{total}"}
+        chunk = data[start:]
+        self.send_response(status)
+        self.send_header("Content-Type", "model/gltf-binary")
+        self.send_header("Content-Length", str(len(chunk)))
+        for k, v in extra.items():
+            self.send_header(k, v)
+        self.end_headers()
+        if scenario == "drop_midway" and not rng:
+            self.wfile.write(chunk[: len(chunk) // 2])
+            self.wfile.flush()
+            self.close_connection = True
+            self.connection.shutdown(2)
+            return
+        if scenario == "slow":
+            return self._slow_write(chunk)
+        self.wfile.write(chunk)
+        return None
+
+    def _slow_write(self, chunk: bytes) -> None:
+        self.wfile.write(chunk[: len(chunk) // 4])
+        self.wfile.flush()
+        for _ in range(100):  # up to ~10 s; a closed connection raises and ends the handler
+            time.sleep(0.1)
+            self.wfile.write(b"")
+            self.wfile.flush()
+            if self.connection.fileno() < 0:
+                return
+        self.wfile.write(chunk[len(chunk) // 4:])
+
+
+def _asset_key(ref: dict) -> str:
+    parts = [ref["server_id"], ref["library_id"], ref["asset_id"], ref["version_id"]]
+    out = b"".join(len(p.encode()).to_bytes(4, "little") + p.encode() for p in parts)
+    return hashlib.sha256(out).hexdigest()
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("port", nargs="?", type=int, default=0)
+    ap.add_argument("--token", default=os.environ.get("ASSETSTUDIO_FAKE_TOKEN", "fake-test-token"))
+    ap.add_argument("--contracts-dir", type=Path, default=DEFAULT_CONTRACTS)
+    args = ap.parse_args()
+    Handler.state = State(args.contracts_dir, args.token)
+    httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    httpd.daemon_threads = True
+    print(f"PORT {httpd.server_address[1]}", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

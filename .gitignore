@@ -23,3 +23,4 @@ tests/gpu/artifacts/profiles/
 comfyui/user/
 projects/*
 !projects/.gitkeep
+dist/
