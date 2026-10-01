@@ -6,6 +6,11 @@ const CODE_NETWORK_ERROR: String = "network_error"
 const CODE_TIMEOUT: String = "timeout"
 const CODE_CANCELLED: String = "cancelled"
 const CODE_INVALID_RESPONSE: String = "invalid_response"
+# Project-side codes (consumer project files, not the server contract).
+const CODE_IO_ERROR: String = "io_error"
+const CODE_LOCKED: String = "mutation_locked"
+const CODE_INVALID_PROJECT_FILE: String = "invalid_project_file"
+const CODE_JOURNAL_CORRUPT: String = "journal_corrupt"
 
 const SERVER_CODES: PackedStringArray = [
 	"unauthorized", "forbidden", "server_identity_mismatch", "unsupported_contract", "asset_not_found",

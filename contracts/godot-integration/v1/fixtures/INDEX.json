@@ -475,6 +475,13 @@
       "description": "valid GodotStaticSourcePackageV1: vertex_color_rock_with_collision"
     },
     {
+      "path": "vectors/canonical-json-v1.json",
+      "sha256": "ce6ebf790402589ef8d63628a70b6bbddf56338151d1be198a6ce75c22222655",
+      "kind": "vector",
+      "expected": "valid",
+      "description": "canonical JSON writer vectors (tagged input -> expected UTF-8 hex)"
+    },
+    {
       "path": "vectors/canonical-v1.json",
       "sha256": "08fba992e5ee4da1c4041c872d1532147d5a7aabaaf46e59e88507affc0c0cc0",
       "kind": "vector",

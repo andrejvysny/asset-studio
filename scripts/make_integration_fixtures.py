@@ -357,6 +357,11 @@ def finish(b: Bundle) -> dict[str, bytes]:
         data = vectors.read_bytes()
         b.index.append({"path": "vectors/canonical-v1.json", "sha256": sha(data), "kind": "vector", "expected": "valid",
                         "description": "golden vectors: asset keys, decimals, canonical bytes"})
+    vectors_json = FIXTURES / "vectors/canonical-json-v1.json"
+    if vectors_json.exists():
+        b.index.append({"path": "vectors/canonical-json-v1.json", "sha256": sha(vectors_json.read_bytes()),
+                        "kind": "vector", "expected": "valid",
+                        "description": "canonical JSON writer vectors (tagged input -> expected UTF-8 hex)"})
     b.index.sort(key=lambda e: e["path"])
     b.files["INDEX.json"] = pretty_json({"schema": "godot-integration/v1/fixture-index", "fixtures": b.index})
     return b.files

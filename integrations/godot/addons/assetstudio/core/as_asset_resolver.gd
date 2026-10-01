@@ -35,16 +35,19 @@ func setup(client: Node, cache: RefCounted) -> void:
 
 ## value = {"descriptor": ASAssetDescriptor, "manifest": ASDeliveryManifest, "files": {path: blob path},
 ## "delivery_id": String, "source": "network" | "cache"}.
-func prepare(ref: RefCounted, representation: String = "portable_glb_v1", cancel_token: RefCounted = null) -> RefCounted:
+## `pin_delivery_id` (restore): only that exact delivery is acceptable; a server that does not offer it, or a cache
+## holding another one, is an error and never a silent substitution.
+func prepare(ref: RefCounted, representation: String = "portable_glb_v1", cancel_token: RefCounted = null,
+		pin_delivery_id: String = "") -> RefCounted:
 	var key: String = ref.call("key")
 	if not Schema.REPRESENTATIONS.has(representation):
 		return _finish(key, Result.fail("invalid_request", "unknown representation"))
 	state_changed.emit(key, STATE_REMOTE, 0.0)
 	if offline_only:
-		return _finish(key, _from_cache(ref, representation, true))
-	var r: RefCounted = await _from_network(ref, representation, cancel_token)
+		return _finish(key, _from_cache(ref, representation, true, pin_delivery_id))
+	var r: RefCounted = await _from_network(ref, representation, cancel_token, pin_delivery_id)
 	if not r.ok and r.code in [Result.CODE_NETWORK_ERROR, Result.CODE_TIMEOUT, "temporarily_unavailable"]:
-		var cached: RefCounted = _from_cache(ref, representation, false)
+		var cached: RefCounted = _from_cache(ref, representation, false, pin_delivery_id)
 		r = cached  # a cache miss is reported as temporarily_unavailable, never as another version
 	return _finish(key, r)
 
@@ -61,7 +64,7 @@ func _finish(key: String, r: RefCounted) -> RefCounted:
 
 # --- network path ------------------------------------------------------------------------------------------
 
-func _from_network(ref: RefCounted, representation: String, token: RefCounted) -> RefCounted:
+func _from_network(ref: RefCounted, representation: String, token: RefCounted, pin: String) -> RefCounted:
 	var res: RefCounted = await _client.resolve(ref.get("library_id"), [ref], {"representations": [representation]})
 	if not res.ok:
 		return res
@@ -69,8 +72,10 @@ func _from_network(ref: RefCounted, representation: String, token: RefCounted) -
 	if not entry.ok:
 		return entry
 	var e: Dictionary = entry.value
-	var delivery: Dictionary = _pick_delivery(e, representation)
+	var delivery: Dictionary = _pick_delivery(e, representation, pin)
 	if delivery.is_empty():
+		if pin != "":
+			return Result.fail("integrity_mismatch", "server does not offer the locked delivery %s" % pin)
 		return Result.fail("unsupported_representation", "no delivery for %s" % representation)
 	var desc: RefCounted = await _fetch_descriptor(ref, e)
 	if not desc.ok:
@@ -102,11 +107,11 @@ func _pick_entry(entries: Array, ref: RefCounted) -> RefCounted:
 	return Result.fail(code, str((err as Dictionary).get("message", "")).left(1024), code in Result.RETRYABLE_CODES)
 
 
-## Deterministic choice if several profiles offer the representation: lowest delivery_id.
-func _pick_delivery(entry: Dictionary, representation: String) -> Dictionary:
+## Deterministic choice if several profiles offer the representation: lowest delivery_id, or exactly `pin`.
+func _pick_delivery(entry: Dictionary, representation: String, pin: String = "") -> Dictionary:
 	var best: Dictionary = {}
 	for d: Variant in entry.get("deliveries", []):
-		if d is Dictionary and d.get("representation") == representation:
+		if d is Dictionary and d.get("representation") == representation and (pin == "" or d.get("delivery_id") == pin):
 			if best.is_empty() or str(d.get("delivery_id")) < str(best.get("delivery_id")):
 				best = d
 	return best
@@ -194,12 +199,12 @@ func _remember(ref: RefCounted, representation: String, desc: RefCounted, man: R
 
 # --- cache path --------------------------------------------------------------------------------------------
 
-func _from_cache(ref: RefCounted, representation: String, explicit_offline: bool) -> RefCounted:
+func _from_cache(ref: RefCounted, representation: String, explicit_offline: bool, pin: String = "") -> RefCounted:
 	var miss: RefCounted = Result.fail("temporarily_unavailable",
 			"offline and exact version is not fully cached" if explicit_offline else "server unreachable and exact version is not fully cached",
 			true)
 	var entry: Variant = _cache.read_ref_index(ref.key()).get("entries", {}).get(representation)
-	if not entry is Dictionary:
+	if not entry is Dictionary or (pin != "" and entry.get("delivery_id") != pin):
 		return miss
 	var desc: RefCounted = Descriptor.parse_bytes(_cache.load_document("descriptors", str(entry.get("descriptor_sha256"))))
 	var man: RefCounted = Manifest.parse_bytes(_cache.load_document("manifests", str(entry.get("manifest_sha256"))))
