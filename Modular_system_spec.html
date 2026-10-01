@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="One authoritative AssetStudio backend, capability-based GPU nodes, and a native MacBook Blender companion."><meta name="color-scheme" content="light"><title>Modular System Specification — AssetStudio</title><style>
+:root{--ink:#172936;--muted:#526673;--line:#dce5e9;--paper:#fff;--bg:#edf2f4;--accent:#126b60;--accent-soft:#e6f3ef;--nav:#0d2230;--warn:#7d5317;--warn-bg:#fff4df;--code:#112533;--max:1020px}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.72 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}a:hover{text-decoration-thickness:2px}button,input{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #ba791a;outline-offset:3px}.skip{position:fixed;left:12px;top:-100px;z-index:30;background:white;padding:12px}.skip:focus{top:12px}.progress{position:fixed;top:0;left:0;width:0;height:4px;background:#daac54;z-index:25}
+.sidebar{position:fixed;inset:0 auto 0 0;width:268px;background:var(--nav);color:#e4edf3;padding:28px 22px;display:flex;flex-direction:column;z-index:10}.brand{font-size:12px;letter-spacing:.2em;font-weight:800;color:#92cfc3}.doc-kind{font-size:25px;line-height:1.25;font-weight:760;margin:12px 0 5px}.side-sub{font-size:12px;color:#abc0ce;margin:0 0 18px}.search{width:100%;border:1px solid #38505f;border-radius:9px;background:#193340;color:#fff;padding:9px 11px;font-size:13px}.search::placeholder{color:#bed0d9}.search-status{min-height:24px;font-size:11px;color:#bed0d9;margin-top:5px}.toc{overflow:auto;padding:8px 0;flex:1;scrollbar-width:thin;scrollbar-color:#3d5c6f transparent}.toc a{display:block;color:#c1d1da;text-decoration:none;font-size:12px;line-height:1.5;padding:7px 10px;margin:2px 0;border-radius:7px;border-left:2px solid transparent}.toc a:hover,.toc a.active{background:#213d4b;color:#fff;border-left-color:#8ccbbb}.side-actions{display:flex;gap:8px;margin-top:16px}.side-actions button{flex:1;background:#213b49;color:white;border:1px solid #3f5967;border-radius:7px;padding:6px;font-size:12px}.side-footer{font-size:10px;color:#9db1bd;margin:14px 0 0}
+.main{margin-left:268px;padding:40px 40px 80px}.document{max-width:var(--max);margin:auto;background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:0 12px 45px #1936460a;overflow:hidden}.hero{background:linear-gradient(125deg,#0d2836,#17463f);color:#fff;padding:48px 52px 42px}.eyebrow{font-size:12px;text-transform:uppercase;letter-spacing:.18em;color:#abddd2;font-weight:750}.hero h1{font-size:clamp(32px,4vw,52px);line-height:1.13;letter-spacing:-.035em;margin:15px 0 18px;max-width:780px}.subtitle{font-size:18px;line-height:1.6;color:#d1e1e5;max-width:760px}.hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}.hero-meta span{border:1px solid #5d857f;border-radius:6px;font-size:11px;letter-spacing:.035em;padding:4px 9px;color:#dfeeea}.hero-note{font-size:12px;color:#bfd4d5;margin-top:18px}.content{padding:8px 52px 30px}section{padding:30px 0 18px;border-bottom:1px solid var(--line);scroll-margin-top:25px}section:last-child{border-bottom:0}h2{font-size:27px;line-height:1.3;letter-spacing:-.025em;margin:0 0 20px;color:#143b45}h3{font-size:20px;line-height:1.45;margin:28px 0 10px}h4{font-size:17px;line-height:1.5;margin:20px 0 8px}p{margin:11px 0 17px}strong{font-weight:750}small,.small{font-size:13px;color:var(--muted)}ul,ol{padding-left:24px;margin:12px 0 20px}li{padding-left:3px;margin:7px 0}li>p{margin:5px 0}.lead{font-size:20px;line-height:1.55;color:#264957}.callout{border-left:4px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:17px 21px;margin:20px 0}.callout p:first-child{margin-top:0}.callout p:last-child{margin-bottom:0}.callout.warning{border-color:#a57427;background:var(--warn-bg);color:#624619}.callout.neutral{border-color:#8298a6;background:#f0f4f7}.tag{display:inline-block;font-size:10px;text-transform:uppercase;letter-spacing:.07em;font-weight:800;border-radius:5px;padding:2px 7px;background:var(--accent-soft);color:#075748;vertical-align:middle;margin-right:5px}.tag.open{background:#fff0d3;color:#825515}.tag.proposed{background:#eaf0fa;color:#33577e}.tag.limited{background:#f9ebe8;color:#8a473d}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;margin:20px 0}.card{border:1px solid var(--line);border-radius:10px;padding:18px;background:#fafcfb}.card b{display:block;font-size:17px;margin-bottom:6px}.card p{font-size:14px;line-height:1.6;margin:0}.table-wrap{overflow:auto;margin:18px 0 24px;border:1px solid var(--line);border-radius:10px}table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.65}th{background:#eef5f4;color:#173f48;font-weight:750;text-align:left;padding:12px 14px;border-bottom:1px solid #cddedb;vertical-align:top}td{padding:12px 14px;border-bottom:1px solid #e2e9eb;vertical-align:top}tr:last-child td{border-bottom:0}tbody tr:nth-child(even){background:#fbfcfd}td:first-child{min-width:120px}code{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:.87em;background:#edf2f4;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{position:relative;background:var(--code);color:#e4edf1;padding:21px 23px;border-radius:10px;overflow:auto;line-height:1.6;margin:17px 0 23px;tab-size:2}pre code{background:none;padding:0;color:inherit;font-size:12.5px;overflow-wrap:normal;white-space:pre}.copy-code{position:absolute;right:8px;top:7px;font-size:10px;color:#d9e9ef;background:#294654;border:1px solid #4a6675;border-radius:4px;padding:2px 7px}.diagram{margin:24px 0 10px;padding:15px;border:1px solid var(--line);border-radius:12px;background:#fcfdfd;overflow:auto}.diagram svg{display:block;width:100%;height:auto;min-width:520px;max-height:780px}.diagram figcaption{font-size:12px;color:var(--muted);line-height:1.55;margin-top:12px}.diagram-code{margin:8px 0 25px}details{border:1px solid var(--line);padding:12px 15px;border-radius:9px;margin:14px 0}summary{cursor:pointer;font-size:13px;font-weight:650;color:#365e64}details pre{margin-bottom:3px}blockquote{border-left:3px solid #adc6bf;margin:20px 0;padding:2px 20px;color:#3f6069}.ref-link{font-size:11px;white-space:nowrap;border:1px solid #c6dfd6;border-radius:4px;padding:1px 5px;text-decoration:none;margin-left:2px}.references{list-style:none;padding:0}.references li{font-size:13px;padding:14px 0;border-bottom:1px solid var(--line)}.references a{font-weight:700}.reference-url{display:block;font-size:11px;font-family:ui-monospace,monospace;color:#536b79;word-break:break-all;margin-top:4px}.reference-note{display:block;color:var(--muted);font-size:12px}.foot{background:#f2f6f7;padding:23px 52px;font-size:12px;color:var(--muted)}.no-results{display:none;padding:30px}.hidden-by-search{display:none!important}.mobile-nav{display:none}mark{background:#fce6a6;color:inherit}.checklist li::marker{color:var(--accent)}
+@media(min-width:1700px){.main{padding-left:70px;padding-right:70px}.document{max-width:1120px}.content{padding-left:64px;padding-right:64px}.hero{padding-left:64px;padding-right:64px}}
+@media(max-width:1100px){.sidebar{width:228px;padding:24px 15px}.main{margin-left:228px;padding:25px 22px}.content{padding-left:30px;padding-right:30px}.hero{padding:35px 30px}.cards{grid-template-columns:1fr}.foot{padding-left:30px;padding-right:30px}}
+@media(max-width:760px){body{font-size:15px}.sidebar{position:relative;width:auto;inset:auto;padding:22px;max-height:none}.brand{font-size:11px}.doc-kind{font-size:23px}.side-sub{margin-bottom:12px}.toc{max-height:210px;display:none}.sidebar.nav-open .toc{display:block}.side-actions{margin-top:8px}.side-footer{display:none}.mobile-nav{display:block;background:#24434f;color:#fff;border:1px solid #53707b;border-radius:7px;width:100%;padding:7px;margin-bottom:10px}.main{margin:0;padding:16px 10px 40px}.document{border-radius:12px}.hero{padding:29px 22px}.hero h1{font-size:34px}.subtitle{font-size:16px}.content{padding:0 21px 20px}h2{font-size:24px}h3{font-size:19px}.foot{padding:22px}.table-wrap table{min-width:610px}.diagram svg{min-width:600px}pre{padding:20px 15px}.hero-meta{gap:5px}.hero-meta span{font-size:10px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+@media print{@page{size:A4;margin:15mm}.sidebar,.progress,.skip,.copy-code,.no-results,.diagram-code{display:none!important}.main{margin:0;padding:0}.document{border:0;box-shadow:none;border-radius:0;max-width:none}.hero{padding:15px 0 25px;background:white;color:#102f3b;border-bottom:2px solid #176d61}.hero h1{font-size:32px}.subtitle,.eyebrow,.hero-note{color:#365d64}.hero-meta span{color:#294f53;border-color:#b4c5c8}.content{padding:0}body{background:white;font-size:10pt;line-height:1.5}section{padding:24px 0 8px}.hidden-by-search{display:block!important}h2{font-size:20pt;break-after:avoid}h3{font-size:14pt;break-after:avoid}h4{break-after:avoid}p,li{orphans:3;widows:3}table{font-size:9pt;min-width:0!important}tr{break-inside:avoid}thead{display:table-header-group}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f3f4;color:#18313a;font-size:8pt;break-inside:auto}pre code{white-space:pre-wrap;font-size:8pt}.diagram{break-inside:avoid;padding:5px}.diagram svg{min-width:0}.table-wrap{overflow:visible;border:0}.cards{grid-template-columns:1fr 1fr 1fr;break-inside:avoid}.foot{padding:20px 0}.references li{break-inside:avoid}.callout{break-inside:avoid}}
+</style></head>
+<body><a class="skip" href="#main">Skip to report</a><div class="progress" id="progress" aria-hidden="true"></div>
+<aside class="sidebar"><div class="brand">ASSETSTUDIO / REPORT 02</div><div class="doc-kind">Modular system</div><p class="side-sub">30 September 2026 · Consolidated edition</p><button id="mobile-nav" class="mobile-nav" aria-expanded="false">Show contents</button><label class="small" for="search" style="color:#c3d6df">Find a topic</label><input class="search" id="search" type="search" placeholder="Search this report…" autocomplete="off"><div class="search-status" id="search-status" role="status" aria-live="polite"></div><nav class="toc" aria-label="Report contents"><a href="#1-executive-specification">1. Executive specification</a><a href="#2-confirmed-decisions-and-scope">2. Confirmed decisions and scope</a><a href="#3-current-codebase-reuse-and-change">3. Current codebase: reuse and change</a><a href="#4-deployment-architecture-and-boundaries">4. Deployment architecture and boundaries</a><a href="#5-core-invariants-and-ownership">5. Core invariants and ownership</a><a href="#6-user-journeys-and-workflow-types">6. User journeys and workflow types</a><a href="#7-planning-style-and-media-references">7. Planning, style and media references</a><a href="#8-domain-records-and-identities">8. Domain records and identities</a><a href="#9-first-class-blender-source-support">9. First-class Blender source support</a><a href="#10-coherent-checkpoints-edits-and-human-takeover">10. Coherent checkpoints, edits and human takeover</a><a href="#11-compute-nodes-and-multi-gpu-scheduling">11. Compute nodes and multi-GPU scheduling</a><a href="#12-worker-protocol-transport-and-execution-contracts">12. Worker protocol, transport and execution contracts</a><a href="#13-durable-execution-leases-and-recovery">13. Durable execution, leases and recovery</a><a href="#14-artifact-transfer-caching-and-source-storage">14. Artifact transfer, caching and source storage</a><a href="#15-macbook-companion-and-blender-bridge">15. MacBook companion and Blender bridge</a><a href="#16-claude-code-and-codex-provider-adapters">16. Claude Code and Codex provider adapters</a><a href="#17-security-and-trust-boundaries">17. Security and trust boundaries</a><a href="#18-validation-review-gates-and-provenance">18. Validation, review gates and provenance</a><a href="#19-godot-terrain3d-and-delivery">19. Godot, Terrain3D and delivery</a><a href="#20-backend-persistence-modularity-and-scaling">20. Backend persistence, modularity and scaling</a><a href="#21-ui-requirements-without-freezing-the-planning-interface">21. UI requirements without freezing the planning interface</a><a href="#22-observability-performance-and-operating-limits">22. Observability, performance and operating limits</a><a href="#23-acceptance-test-matrix">23. Acceptance-test matrix</a><a href="#24-migration-and-implementation-plan">24. Migration and implementation plan</a><a href="#25-open-decisions-and-recommended-defaults">25. Open decisions and recommended defaults</a><a href="#26-final-architecture-verdict-and-completion-criteria">26. Final architecture verdict and completion criteria</a><a href="#sources-and-evidence-register">Sources and evidence register</a></nav><div class="side-actions"><button id="print" type="button">Print</button><button id="expand" type="button">Open details</button></div><p class="side-footer">Self-contained HTML · No analytics<br>Diagrams include editable Mermaid source.</p></aside>
+<main class="main" id="main"><article class="document"><header class="hero"><div class="eyebrow">Report 02 / Architecture and implementation</div><h1>Modular System Specification</h1><div class="subtitle">One authoritative AssetStudio backend, capability-based GPU nodes, and a native MacBook Blender companion.</div><div class="hero-meta"><span>THREE DEPLOYABLE ROLES</span><span>FIRST-CLASS .BLEND</span><span>MULTI-NODE EXECUTION</span><span>30 September 2026</span></div><div class="hero-note">User decisions, recommendations, implementation facts and unverified video claims are kept distinct.</div></header><div class="content"><section id="1-executive-specification"><h2>1. Executive specification</h2>
+<p class="lead">Distribute execution across machines. Keep plans, review, source history and publication under one AssetStudio authority.</p>
+<p>The target system has three independently deployable roles: a <strong>Studio backend with web UI</strong>, one or more <strong>Linux compute nodes</strong>, and a <strong>native MacBook companion</strong> that runs Blender authoring sessions using Claude Code or Codex. Keep the main application a modular backend rather than turning every feature into a microservice.</p>
+<div class="cards"><div class="card"><b>Studio</b><p>Owns projects, frozen plans, jobs, review, source revisions, publication and execution assignments. No GPU or model weights required.</p></div><div class="card"><b>Compute nodes</b><p>Own model installations, engine runtimes, local device admission, input caches and durable result spools. Scale independent work across machines.</p></div><div class="card"><b>MacBook companion</b><p>Owns local workspaces, agent adapters, Blender session control, human takeover, coherent checkpoints and result submission.</p></div></div>
+<h3 id="specification-status">Specification status</h3>
+<p>This is a consolidated target specification and implementation guide. It records user decisions, recommended technical choices and unresolved design points separately. It is <strong>not a claim that the described services, APIs or authoring lifecycle are already implemented</strong>.</p>
+<p>The earlier source review examined <code>8de5fe8</code> and the service-design refresh examined <code>65c16ab</code>. For this report, repository head was checked at <strong><code>47c20db4da20c75b4095eb7c899feab266711583</code></strong>, dated <strong>30 September 2026</strong>. A targeted refresh confirmed the domain records, model3d role contract, GLB validation and newer commit metadata. No full test suite, live GPU stack or Blender integration was rerun. <a aria-label="Source R0" class="ref-link" href="#ref-R0">R0</a> <a aria-label="Source R14" class="ref-link" href="#ref-R14">R14</a></p>
+<p>The companion modeling report contains the authoring techniques and a seven-video evidence ledger. <strong>The videos were not visually reviewed</strong>; unverified showcase details do not serve as architecture requirements or performance evidence.</p>
+<h3 id="status-vocabulary">Status vocabulary</h3>
+<p><span class="tag">Confirmed</span> explicitly selected by the user. <span class="tag proposed">Proposed</span> recommended technical design. <span class="tag open">Open</span> must not be silently resolved. Statements using <strong>must</strong> describe requirements of this target design, not present repository behavior.</p>
+</section><section id="2-confirmed-decisions-and-scope"><h2>2. Confirmed decisions and scope</h2>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Status</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>U01</td>
+<td>Confirmed</td>
+<td>Support both manual handoff packages and managed one-click execution.</td>
+</tr>
+<tr>
+<td>U02</td>
+<td>Confirmed</td>
+<td>Run Blender natively on the user's MacBook.</td>
+</tr>
+<tr>
+<td>U03</td>
+<td>Confirmed</td>
+<td>Support Claude Code and Codex for v1.</td>
+</tr>
+<tr>
+<td>U04</td>
+<td>Confirmed</td>
+<td>Support creation from scratch and refinement of imported/TRELLIS-generated geometry.</td>
+</tr>
+<tr>
+<td>U05</td>
+<td>Confirmed</td>
+<td>Start with props and articulated objects; follow with one tested humanoid workflow.</td>
+</tr>
+<tr>
+<td>U06</td>
+<td>Open</td>
+<td>Planning interaction can be structured, conversational or document-based; preserve the choice.</td>
+</tr>
+<tr>
+<td>U07</td>
+<td>Confirmed</td>
+<td>Review gates are configurable.</td>
+</tr>
+<tr>
+<td>U08</td>
+<td>Confirmed</td>
+<td>Explicit human takeover with one active workspace writer.</td>
+</tr>
+<tr>
+<td>U09</td>
+<td>Confirmed</td>
+<td>Local recovery autosaves plus immutable milestone checkpoints.</td>
+</tr>
+<tr>
+<td>U10</td>
+<td>Confirmed</td>
+<td>First-class <code>.blend</code> support, including source before a delivery GLB exists.</td>
+</tr>
+<tr>
+<td>U11</td>
+<td>Confirmed</td>
+<td>Reviewed library versions and an isolated Godot test-project handoff.</td>
+</tr>
+<tr>
+<td>U12</td>
+<td>Confirmed boundary</td>
+<td>No automatic changes to the main game in v1.</td>
+</tr>
+<tr>
+<td>U13</td>
+<td>Carried forward</td>
+<td>Continue unaffected rows/tasks when another asset fails.</td>
+</tr>
+<tr>
+<td>U14</td>
+<td>Carried forward</td>
+<td>Independent variants remain assets grouped into families, not overwritten source versions.</td>
+</tr>
+<tr>
+<td>U15</td>
+<td>Carried forward</td>
+<td>Files plus manifest delivery; support readable folder and package workflows.</td>
+</tr>
+<tr>
+<td>U16</td>
+<td>Carried forward</td>
+<td>AssetStudio is a general asset product, not hard-coded to this fantasy game.</td>
+</tr>
+<tr>
+<td>U17</td>
+<td>Carried forward</td>
+<td>Godot/Terrain3D remain the world and terrain authority.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="proposed-architecture-choices">Proposed architecture choices</h3>
+<p>Use one backend authority initially. Register capability-reporting compute nodes and one MacBook companion. Let nodes connect outward over authenticated HTTPS. Retain separate ComfyUI/aux/TRELLIS runtimes behind a node agent. Use content-addressed immutable artifacts and exact input/review bindings. Keep provider credentials on the MacBook. Start with ordinary APIs and a durable backend journal, not a mandatory broker or cluster orchestrator.</p>
+<h3 id="non-goals-for-v1">Non-goals for v1</h3>
+<p>Do not build a general-purpose 3D editor in the browser, a replacement coding IDE, a full embedded LLM platform, an automatic binary <code>.blend</code> merge engine or a second terrain editor. Do not require S3, Kubernetes, Redis, a workflow engine or multiple active backend replicas simply to support several execution nodes.</p>
+<p>AI-video motion reconstruction, arbitrary creature rigging, cloud Blender desktops, multi-GPU execution of a single model and multi-output kit publication are separate extensions. The architecture should not prevent them, but they are not implicit v1 promises.</p>
+</section><section id="3-current-codebase-reuse-and-change"><h2>3. Current codebase: reuse and change</h2>
+<h3 id="existing-foundations-to-preserve">Existing foundations to preserve</h3>
+<p>The inspected repository already separates domain, storage, processing and server concerns. It has project configuration snapshots, shot-list planning, jobs and batches, candidate/review/build records, immutable asset versions, content-addressed blobs and guarded publication. Reuse those mechanisms instead of creating an unrelated “Blender assets” database. <a aria-label="Source R1" class="ref-link" href="#ref-R1">R1</a> <a aria-label="Source R8" class="ref-link" href="#ref-R8">R8</a></p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Reviewed implementation</th>
+<th>Target action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Domain</td>
+<td>AssetManifest, AssetVersion, Job, JobItem, BuildRun, review records and snapshots</td>
+<td>Extend with typed authoring records; retain existing identities/history. <a aria-label="Source R1" class="ref-link" href="#ref-R1">R1</a></td>
+</tr>
+<tr>
+<td>Publication</td>
+<td>Hash-verified artifacts, allowed roles, derived IDs, expected-current check and receipts</td>
+<td>Reuse as the publication boundary; add source-capable output contracts. <a aria-label="Source R8" class="ref-link" href="#ref-R8">R8</a></td>
+</tr>
+<tr>
+<td>Workflow</td>
+<td>Generation-centric prompts, candidates, QA, approvals and build stages</td>
+<td>Add a separate authoring workflow, not fake image candidates. <a aria-label="Source R12" class="ref-link" href="#ref-R12">R12</a></td>
+</tr>
+<tr>
+<td>Deployment</td>
+<td>Studio, ComfyUI, aux and worker3d are separate containers</td>
+<td>Add cross-machine node control while keeping engine isolation. <a aria-label="Source R4" class="ref-link" href="#ref-R4">R4</a></td>
+</tr>
+<tr>
+<td>Engine references</td>
+<td>One image engine, one aux and one worker3d in Studio</td>
+<td>Introduce registry-based node/capability selection. <a aria-label="Source R5" class="ref-link" href="#ref-R5">R5</a></td>
+</tr>
+<tr>
+<td>Readiness</td>
+<td>Model verification uses Studio's local model root</td>
+<td>Move installation verification to compute nodes. <a aria-label="Source R6" class="ref-link" href="#ref-R6">R6</a></td>
+</tr>
+<tr>
+<td>GPU ownership</td>
+<td>A shared device lane with epochs and acknowledged unload/drain</td>
+<td>Preserve the invariant; move physical resource ownership to its node. <a aria-label="Source R7" class="ref-link" href="#ref-R7">R7</a></td>
+</tr>
+<tr>
+<td>Source contract</td>
+<td><code>model3d</code> requires <code>model</code>, with <code>preview</code>/<code>meta</code> optional</td>
+<td>Add explicit source-package/revision profiles. <code>.blend</code> is not currently first-class. <a aria-label="Source R2" class="ref-link" href="#ref-R2">R2</a></td>
+</tr>
+<tr>
+<td>3D validation</td>
+<td>Container and mesh checks</td>
+<td>Add source, rig, animation and engine-profile validation. <a aria-label="Source R3" class="ref-link" href="#ref-R3">R3</a></td>
+</tr>
+<tr>
+<td>Viewer</td>
+<td>Previously inspected auto-rotating model preview</td>
+<td>Add clip selection, playback/scrub controls and evidence labels. <a aria-label="Source R11" class="ref-link" href="#ref-R11">R11</a></td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Earlier inspected export screen was a future-feature placeholder</td>
+<td>Implement shared package/export contracts before relying on round-trip handoff. <a aria-label="Source R15" class="ref-link" href="#ref-R15">R15</a></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="existing-asset-workflows-stay-supported">Existing asset workflows stay supported</h3>
+<p>The service split must preserve the current product breadth: concept art, 3D models, sprites, icons, materials, sprite sheets and VFX flipbooks. Do not turn the main application into a Blender-only product. In the reviewed recipe/import baseline, frame sequences can build atlases without a verified temporal-generation model, and imported material bundles can provide maps that the generated-material workflow does not create. Keep capability labels honest; adding a compute node must not make an unsupported generation route appear available. <a aria-label="Source R12" class="ref-link" href="#ref-R12">R12</a> <a aria-label="Source R9" class="ref-link" href="#ref-R9">R9</a></p>
+<p>Retain source-conditioned image variants, direct static transforms, model-aware batching, prompt enhancement, advisory QA and explicit publication. Image references and style/LoRA identities must be frozen with the work they influence. A style LoRA affects a supported image-generation route; it is not a substitute for a Blender art specification or an automatic style control for arbitrary geometry.</p>
+<p>Existing legacy records remain readable, including older multi-item Jobs. New authoring work follows the current one-requested-asset-per-Job direction. A Batch groups independent Jobs; it does not own their source files, approvals or shared mutable Blender scene.</p>
+<h3 id="changes-since-the-previous-architecture-answer">Changes since the previous architecture answer</h3>
+<p>Head is two commits beyond <code>65c16ab</code>. The compare metadata describes review/run/provenance hardening and a reusable <strong>Media Library</strong>. The refreshed domain contains <code>MediaItem</code>: image identity/hash, thumbnail, name, notes, tags, rights/source fields and archive metadata. Reuse it for guidance images instead of inventing a competing reference library. <a aria-label="Source R14" class="ref-link" href="#ref-R14">R14</a> <a aria-label="Source R1" class="ref-link" href="#ref-R1">R1</a></p>
+<p>The Media Library is described as image-only, guidance-only and soft-archived. It is not a new repository for editable <code>.blend</code> sources. A guidance image, a production asset and a source package are distinct concepts. <a aria-label="Source R16" class="ref-link" href="#ref-R16">R16</a></p>
+<p>The prior answer's “GPU variant acceptance pending” statement was superseded by <code>65c16ab</code>, which recorded real-stack acceptance and promoted requested-change failure to a major QA concern. These are repository-reported results, not tests rerun for this report. Do not repeat the old pending state as current. <a aria-label="Source R13" class="ref-link" href="#ref-R13">R13</a> <a aria-label="Source R14" class="ref-link" href="#ref-R14">R14</a></p>
+<h3 id="specific-validation-hardening-carried-forward">Specific validation hardening carried forward</h3>
+<p>The refreshed GLB inspector still assumes some decoded JSON field shapes. Values such as <code>asset: [1]</code>, <code>buffers: 1</code> or <code>meshes: 1</code> can reach operations that expect a mapping or collection. The earlier isolated probe reported uncaught <code>AttributeError</code>/<code>TypeError</code>; no new end-to-end probe was run here. Add explicit schema/type checks and ensure malformed containers return controlled rejection, not an internal error. <a aria-label="Source R3" class="ref-link" href="#ref-R3">R3</a></p>
+<p>This finding is not a complete security audit. Keep format validation, process isolation and resource limits as separate protections.</p>
+</section><section id="4-deployment-architecture-and-boundaries"><h2>4. Deployment architecture and boundaries</h2>
+<figure class="diagram"><svg viewbox="0.00 0.00 984.68 574.68" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g class="graph" id="system-graph0" transform="scale(1 1) rotate(0) translate(15.84 558.84)">
+<title>G</title>
+<g class="cluster" id="system-clust1">
+<title>cluster_s</title>
+<path d="M20,-314C20,-314 440,-314 440,-314 446,-314 452,-320 452,-326 452,-326 452,-462 452,-462 452,-468 446,-474 440,-474 440,-474 20,-474 20,-474 14,-474 8,-468 8,-462 8,-462 8,-326 8,-326 8,-320 14,-314 20,-314" fill="transparent" stroke="#bbcad7"></path>
+<text font-family="DejaVu Sans" font-size="14.00" text-anchor="middle" x="230" y="-458.8">Main server — no GPU required</text>
+</g>
+<g class="cluster" id="system-clust2">
+<title>cluster_n</title>
+<path d="M131,-87C131,-87 399,-87 399,-87 405,-87 411,-93 411,-99 411,-99 411,-235 411,-235 411,-241 405,-247 399,-247 399,-247 131,-247 131,-247 125,-247 119,-241 119,-235 119,-235 119,-99 119,-99 119,-93 125,-87 131,-87" fill="transparent" stroke="#bbcad7"></path>
+<text font-family="DejaVu Sans" font-size="14.00" text-anchor="middle" x="265" y="-231.8">Linux compute node A (repeatable role)</text>
+</g>
+<g class="cluster" id="system-clust3">
+<title>cluster_m</title>
+<path d="M431,-8C431,-8 741,-8 741,-8 747,-8 753,-14 753,-20 753,-20 753,-235 753,-235 753,-241 747,-247 741,-247 741,-247 431,-247 431,-247 425,-247 419,-241 419,-235 419,-235 419,-20 419,-20 419,-14 425,-8 431,-8" fill="transparent" stroke="#bbcad7"></path>
+<text font-family="DejaVu Sans" font-size="14.00" text-anchor="middle" x="586" y="-231.8">Your MacBook</text>
+</g>
+<!-- UI -->
+<g class="node" id="system-node1">
+<title>UI</title>
+<path d="M388.5,-543C388.5,-543 243.5,-543 243.5,-543 237.5,-543 231.5,-537 231.5,-531 231.5,-531 231.5,-513 231.5,-513 231.5,-507 237.5,-501 243.5,-501 243.5,-501 388.5,-501 388.5,-501 394.5,-501 400.5,-507 400.5,-513 400.5,-513 400.5,-531 400.5,-531 400.5,-537 394.5,-543 388.5,-543" fill="#fdf0d8" stroke="#d8ba7b"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="316" y="-525.6">Web UI</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="316" y="-511.6">plan · review · publish</text>
+</g>
+<!-- Studio -->
+<g class="node" id="system-node2">
+<title>Studio</title>
+<path d="M432,-443C432,-443 200,-443 200,-443 194,-443 188,-437 188,-431 188,-431 188,-413 188,-413 188,-407 194,-401 200,-401 200,-401 432,-401 432,-401 438,-401 444,-407 444,-413 444,-413 444,-431 444,-431 444,-437 438,-443 432,-443" fill="#e5eef8" stroke="#9ab1cb"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="316" y="-425.6">Studio control plane</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="316" y="-411.6">workflow and assignment authority</text>
+</g>
+<!-- UI&#45;&gt;Studio -->
+<g class="edge" id="system-edge6">
+<title>UI-&gt;Studio</title>
+<path d="M316,-500.69C316,-486.37 316,-467 316,-451.18" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="318.63,-450.78 316,-443.28 313.38,-450.78 318.63,-450.78" stroke="#728592"></polygon>
+</g>
+<!-- Journal -->
+<g class="node" id="system-node3">
+<title>Journal</title>
+<path d="M143.5,-364C143.5,-364 28.5,-364 28.5,-364 22.5,-364 16.5,-358 16.5,-352 16.5,-352 16.5,-334 16.5,-334 16.5,-328 22.5,-322 28.5,-322 28.5,-322 143.5,-322 143.5,-322 149.5,-322 155.5,-328 155.5,-334 155.5,-334 155.5,-352 155.5,-352 155.5,-358 149.5,-364 143.5,-364" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="86" y="-346.6">Execution journal</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="86" y="-332.6">+ project records</text>
+</g>
+<!-- Studio&#45;&gt;Journal -->
+<g class="edge" id="system-edge1">
+<title>Studio-&gt;Journal</title>
+<path d="M256.17,-400.97C224.62,-390.41 185.8,-377.41 153.21,-366.5" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="153.87,-363.96 145.93,-364.06 152.21,-368.93 153.87,-363.96" stroke="#728592"></polygon>
+</g>
+<!-- Store -->
+<g class="node" id="system-node4">
+<title>Store</title>
+<path d="M432,-364C432,-364 190,-364 190,-364 184,-364 178,-358 178,-352 178,-352 178,-334 178,-334 178,-328 184,-322 190,-322 190,-322 432,-322 432,-322 438,-322 444,-328 444,-334 444,-334 444,-352 444,-352 444,-358 438,-364 432,-364" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="311" y="-346.6">Canonical artifact storage</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="311" y="-332.6">source revisions · exports · evidence</text>
+</g>
+<!-- Studio&#45;&gt;Store -->
+<g class="edge" id="system-edge2">
+<title>Studio-&gt;Store</title>
+<path d="M314.69,-400.77C314.11,-391.93 313.43,-381.41 312.81,-371.85" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="315.41,-371.41 312.3,-364.1 310.17,-371.75 315.41,-371.41" stroke="#728592"></polygon>
+</g>
+<!-- ComputeAgent -->
+<g class="node" id="system-node5">
+<title>ComputeAgent</title>
+<path d="M390.5,-216C390.5,-216 139.5,-216 139.5,-216 133.5,-216 127.5,-210 127.5,-204 127.5,-204 127.5,-186 127.5,-186 127.5,-180 133.5,-174 139.5,-174 139.5,-174 390.5,-174 390.5,-174 396.5,-174 402.5,-180 402.5,-186 402.5,-186 402.5,-204 402.5,-204 402.5,-210 396.5,-216 390.5,-216" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="265" y="-198.6">Compute-node agent</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="265" y="-184.6">local admission and device ownership</text>
+</g>
+<!-- Studio&#45;&gt;ComputeAgent -->
+<g class="edge" id="system-edge7">
+<title>Studio-&gt;ComputeAgent</title>
+<path d="M414.93,-397.69C430.76,-389.6 445.15,-378.69 455,-364 467.38,-345.54 465.8,-333.42 455,-314 429.35,-267.87 377.37,-237.46 334.25,-219.08" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="413.69,-395.38 408.07,-400.99 415.97,-400.11 413.69,-395.38" stroke="#728592"></polygon>
+<polygon fill="#728592" points="335.07,-216.58 327.14,-216.12 333.06,-221.43 335.07,-216.58" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="487.5" y="-296">outbound HTTPS</text>
+</g>
+<!-- Mac -->
+<g class="node" id="system-node7">
+<title>Mac</title>
+<path d="M732.5,-216C732.5,-216 439.5,-216 439.5,-216 433.5,-216 427.5,-210 427.5,-204 427.5,-204 427.5,-186 427.5,-186 427.5,-180 433.5,-174 439.5,-174 439.5,-174 732.5,-174 732.5,-174 738.5,-174 744.5,-180 744.5,-186 744.5,-186 744.5,-204 744.5,-204 744.5,-210 738.5,-216 732.5,-216" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-198.6">Native companion</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-184.6">workspace · checkpoints · provider adapters</text>
+</g>
+<!-- Studio&#45;&gt;Mac -->
+<g class="edge" id="system-edge9">
+<title>Studio-&gt;Mac</title>
+<path d="M419.74,-398.5C431.97,-394.15 444,-389.03 455,-383 519.25,-347.81 559,-265.97 576.15,-223.18" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="418.77,-396.05 412.52,-400.97 420.47,-401.02 418.77,-396.05" stroke="#728592"></polygon>
+<polygon fill="#728592" points="578.61,-224.1 578.9,-216.16 573.72,-222.18 578.61,-224.1" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="581.5" y="-296">outbound HTTPS</text>
+</g>
+<!-- Other -->
+<g class="node" id="system-node10">
+<title>Other</title>
+<path d="M941,-216C941,-216 779,-216 779,-216 773,-216 767,-210 767,-204 767,-204 767,-186 767,-186 767,-180 773,-174 779,-174 779,-174 941,-174 941,-174 947,-174 953,-180 953,-186 953,-186 953,-204 953,-204 953,-210 947,-216 941,-216" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="860" y="-198.6">Compute node B … N</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="860" y="-184.6">capability-matched work</text>
+</g>
+<!-- Studio&#45;&gt;Other -->
+<g class="edge" id="system-edge8">
+<title>Studio-&gt;Other</title>
+<path d="M413.83,-399.14C433.23,-394.26 453.35,-388.79 472,-383 605.94,-341.41 751.89,-260.39 820.35,-220.03" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="413.08,-396.63 406.44,-400.99 414.35,-401.72 413.08,-396.63" stroke="#728592"></polygon>
+<polygon fill="#728592" points="822.01,-222.1 827.13,-216.02 819.34,-217.58 822.01,-222.1" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="725.5" y="-296">outbound HTTPS</text>
+</g>
+<!-- Engines -->
+<g class="node" id="system-node6">
+<title>Engines</title>
+<path d="M350,-137C350,-137 180,-137 180,-137 174,-137 168,-131 168,-125 168,-125 168,-107 168,-107 168,-101 174,-95 180,-95 180,-95 350,-95 350,-95 356,-95 362,-101 362,-107 362,-107 362,-125 362,-125 362,-131 356,-137 350,-137" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="265" y="-119.6">ComfyUI / aux / TRELLIS</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="265" y="-105.6">separate engine runtimes</text>
+</g>
+<!-- ComputeAgent&#45;&gt;Engines -->
+<g class="edge" id="system-edge3">
+<title>ComputeAgent-&gt;Engines</title>
+<path d="M265,-173.77C265,-164.93 265,-154.41 265,-144.85" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="267.63,-144.6 265,-137.1 262.38,-144.6 267.63,-144.6" stroke="#728592"></polygon>
+</g>
+<!-- Agent -->
+<g class="node" id="system-node8">
+<title>Agent</title>
+<path d="M661.5,-137C661.5,-137 510.5,-137 510.5,-137 504.5,-137 498.5,-131 498.5,-125 498.5,-125 498.5,-107 498.5,-107 498.5,-101 504.5,-95 510.5,-95 510.5,-95 661.5,-95 661.5,-95 667.5,-95 673.5,-101 673.5,-107 673.5,-107 673.5,-125 673.5,-125 673.5,-131 667.5,-137 661.5,-137" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-119.6">Claude Code or Codex</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-105.6">local agent application</text>
+</g>
+<!-- Mac&#45;&gt;Agent -->
+<g class="edge" id="system-edge4">
+<title>Mac-&gt;Agent</title>
+<path d="M586,-173.77C586,-164.93 586,-154.41 586,-144.85" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="588.63,-144.6 586,-137.1 583.38,-144.6 588.63,-144.6" stroke="#728592"></polygon>
+</g>
+<!-- Blender -->
+<g class="node" id="system-node9">
+<title>Blender</title>
+<path d="M682,-58C682,-58 490,-58 490,-58 484,-58 478,-52 478,-46 478,-46 478,-28 478,-28 478,-22 484,-16 490,-16 490,-16 682,-16 682,-16 688,-16 694,-22 694,-28 694,-28 694,-46 694,-46 694,-52 688,-58 682,-58" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-40.6">Local Blender MCP → Blender</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="586" y="-26.6">asset.blend + dependencies</text>
+</g>
+<!-- Agent&#45;&gt;Blender -->
+<g class="edge" id="system-edge5">
+<title>Agent-&gt;Blender</title>
+<path d="M586,-94.77C586,-85.93 586,-75.41 586,-65.85" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="588.63,-65.6 586,-58.1 583.38,-65.6 588.63,-65.6" stroke="#728592"></polygon>
+</g>
+</g>
+</svg>
+<figcaption><strong>Three deployable roles, one product authority.</strong> Communication is proposed. Model-provider traffic is separately permissioned; it is not shown as local inference.</figcaption></figure><details class="diagram-code"><summary>Mermaid source</summary><pre><code>flowchart TB
+  UI[AssetStudio web UI] &lt;--&gt; S[Studio control plane]
+  S --&gt; J[Execution journal and project records]
+  S --&gt; A[Canonical artifact storage]
+  N[Linux compute-node agent] &lt;--&gt;|Outbound HTTPS| S
+  N --&gt; E[ComfyUI, auxiliary and TRELLIS runtimes]
+  N2[Additional compute nodes] &lt;--&gt;|Outbound HTTPS| S
+  C[Native MacBook companion] &lt;--&gt;|Outbound HTTPS| S
+  C --&gt; P[Claude Code or Codex]
+  P --&gt; M[Local Blender MCP]
+  M --&gt; B[Blender and writable source workspace]</code></pre></details>
+<h3 id="studio-backend-and-ui">Studio backend and UI</h3>
+<p>Studio owns all product decisions: project and category schema, style/reference bindings, plans, job membership, review gates, source records, artifact metadata, current-version pointers and delivery plans. It also owns assignment and accepted execution state.</p>
+<p>The backend must serve planning and the library without a GPU machine or MacBook being online. Expensive previews or validation must not block ordinary API requests. Use a bounded local processing pool initially, with the option to dispatch heavier work to a node later.</p>
+<p>Keep the web UI served with the backend in v1. Logical frontend/API boundaries do not require separate deployments. A reverse proxy can provide TLS and routing without introducing a second product-state authority.</p>
+<h3 id="linux-compute-node-agent">Linux compute-node agent</h3>
+<p>Use one node-control process per physical compute machine. It reports identity, capabilities, model inventory, device inventory, software versions and local health. It accepts assigned attempts, manages local physical-device admission and adapts the existing engine runtimes.</p>
+<p>Retain ComfyUI, auxiliary models and TRELLIS as separate runtimes/containers where appropriate. The node agent need not import all their dependencies. It controls them through explicit adapters and verifies supported protocols.</p>
+<p>The node stores caches, durable execution state and unacknowledged outputs. It does not mutate project manifests, approve QA or publish asset versions directly.</p>
+<h3 id="macbook-companion">MacBook companion</h3>
+<p>The companion is a native execution controller with a CLI first and an optional menu-bar interface later. It materializes workspaces, launches the local agent application, binds it to the right Blender session, collects checkpoints and submits evidence.</p>
+<p>The user can watch Blender and explicitly take over. Managed authoring must not become a hidden background editor of whichever <code>.blend</code> happens to be open. Bind each session to a project, job, workspace, primary file and Blender process identity.</p>
+<h3 id="storage-role">Storage role</h3>
+<p>Canonical artifact storage can initially be local to the main server. It is a logical service boundary, not necessarily a separate deployable process. Worker caches are replaceable; acknowledged canonical artifacts and their metadata are not.</p>
+<p>A future object store can handle large transfers. It does not replace the publication transaction or the source manifest. Keep storage operations behind the existing repository abstraction.</p>
+<h3 id="physical-hosting-remains-open">Physical hosting remains open</h3>
+<p>The recommended deployment is backend/storage on an always-on server, Linux inference on the GPU workstation, and authoring on the MacBook. Hosting the backend and compute node on the same Linux machine is also valid initially. The user has <strong>not selected</strong> the backend's physical placement. Preserve that as a deployment option.</p>
+</section><section id="5-core-invariants-and-ownership"><h2>5. Core invariants and ownership</h2>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Invariant</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>I01</td>
+<td>Studio is the only authority for accepted task state, gates, asset publication and current-version changes.</td>
+</tr>
+<tr>
+<td>I02</td>
+<td>Every accepted artifact is immutable and identified by content hash; every mutable record uses revision/precondition checks.</td>
+</tr>
+<tr>
+<td>I03</td>
+<td>Execution inputs bind exact source/reference/config/profile identities. “Use latest” is resolved before execution, never on result arrival.</td>
+</tr>
+<tr>
+<td>I04</td>
+<td>There is at most one authorized mutation owner for an active Blender workspace.</td>
+</tr>
+<tr>
+<td>I05</td>
+<td>A physical GPU has one local admission authority. Two containers using the same device do not create extra capacity.</td>
+</tr>
+<tr>
+<td>I06</td>
+<td>A lost connection or expired lease does not prove execution stopped. Unknown ownership blocks unsafe reassignment.</td>
+</tr>
+<tr>
+<td>I07</td>
+<td>Worker output is staged, verified and committed before the worker may delete its only durable copy.</td>
+</tr>
+<tr>
+<td>I08</td>
+<td>Duplicate messages or submissions do not create duplicate publication. Exactly-once computation is not promised.</td>
+</tr>
+<tr>
+<td>I09</td>
+<td>Unavailable QA is reported as unavailable. Technical success does not imply artistic acceptance.</td>
+</tr>
+<tr>
+<td>I10</td>
+<td>Source saves/checkpoints do not automatically publish or update the game.</td>
+</tr>
+<tr>
+<td>I11</td>
+<td>A failed asset does not stop unrelated work unless the failure concerns a shared resource.</td>
+</tr>
+<tr>
+<td>I12</td>
+<td>No worker gets direct write access to the canonical project database or manifests.</td>
+</tr>
+<tr>
+<td>I13</td>
+<td>Restoring a source does not require the original machine's absolute paths or an undocumented dependency.</td>
+</tr>
+<tr>
+<td>I14</td>
+<td>Model/provider substitutions, external downloads and outbound data permissions are explicit.</td>
+</tr>
+<tr>
+<td>I15</td>
+<td>Existing immutable records remain historical truth; migration does not rewrite their provenance or hashes.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="ownership-matrix">Ownership matrix</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Resource or action</th>
+<th>Studio</th>
+<th>Compute node</th>
+<th>Mac companion / Blender</th>
+<th>Human</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frozen plan and selected references</td>
+<td>Owns</td>
+<td>Reads scoped inputs</td>
+<td>Reads scoped inputs</td>
+<td>Creates/approves according to policy</td>
+</tr>
+<tr>
+<td>Physical GPU ownership</td>
+<td>Selects eligible assignment</td>
+<td>Owns local admission</td>
+<td>Owns local rendering resource when used</td>
+<td>May reset through explicit recovery</td>
+</tr>
+<tr>
+<td>Writable <code>.blend</code> workspace</td>
+<td>Records session binding</td>
+<td>No access by default</td>
+<td>Owns local materialization and mutation control</td>
+<td>Owns during takeover</td>
+</tr>
+<tr>
+<td>Canonical source revision</td>
+<td>Commits</td>
+<td>May submit eligible outputs</td>
+<td>Submits coherent checkpoints</td>
+<td>May name/review revisions</td>
+</tr>
+<tr>
+<td>Validation result</td>
+<td>Accepts exact-bound report</td>
+<td>Executes when assigned</td>
+<td>Executes source/Blender checks</td>
+<td>Reviews limitations</td>
+</tr>
+<tr>
+<td>Final acceptance/publication</td>
+<td>Enforces authority</td>
+<td>Cannot perform</td>
+<td>Cannot perform</td>
+<td>Authorized reviewer</td>
+</tr>
+<tr>
+<td>Main game files</td>
+<td>No automatic writes in v1</td>
+<td>No access</td>
+<td>No automatic writes in v1</td>
+<td>Explicit later integration</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="6-user-journeys-and-workflow-types"><h2>6. User journeys and workflow types</h2>
+<h3 id="journey-a-plan-manual-blender-handoff">Journey A: plan → manual Blender handoff</h3>
+<p>Create or select a planned asset. Choose from-scratch or an exact starting source/generated artifact. Freeze an authoring plan with its references, requirements and review gates. Export a folder/ZIP handoff containing the plan, source, dependency manifest and instructions.</p>
+<p>The user opens the package on the MacBook with Claude Code or Codex, using the companion/CLI for context and checkpoint submission. Manual mode does not mean manually editing backend JSON. Submitted work follows the same validation, review and publication rules as managed mode.</p>
+<h3 id="journey-b-managed-authoring">Journey B: managed authoring</h3>
+<p>The user selects “Start in Blender” and a provider. Studio records a durable assignment for the paired MacBook. The companion receives it over its outbound connection, checks compatibility and permissions, materializes a workspace, then launches the local provider and Blender session.</p>
+<p>The browser does not execute shell commands or need a direct incoming connection to the MacBook. Progress and review requests return through Studio. If the companion is unavailable, the UI shows the reason and retains the queued intent; it does not silently launch elsewhere.</p>
+<h3 id="journey-c-generated-geometry-blender-refinement">Journey C: generated geometry → Blender refinement</h3>
+<p>Existing generation remains available: approved reference/candidate → segmentation → TRELLIS sampling → raw intermediate → export/validation. Create an authoring job bound to a selected output or source revision. Preserve its generated origin and exact upstream model/workflow receipts.</p>
+<p>Blender may then remodel, retopologize, paint, rig or animate. A refine job does not overwrite the generated artifact and does not pretend the output is still a pure inference result.</p>
+<h3 id="journey-d-revise-an-existing-asset">Journey D: revise an existing asset</h3>
+<p>Choose exact asset/version/source revision, create a new authoring plan and workspace, then submit a child source revision. A concurrent new publication causes an explicit conflict at promotion. Retain both histories; no silent “last writer wins.”</p>
+<h3 id="journey-e-variants-and-families">Journey E: variants and families</h3>
+<p>A new visual/structural variant is a new asset in the family, bound to its source version and requested changes. A repair to the same intended asset is a new version. Both paths may use Blender, but they must not be confused by the agent.</p>
+<h3 id="workflow-model">Workflow model</h3>
+<p>Introduce a discriminated workflow kind, conceptually <code>generation</code>, <code>blender_authoring</code>, <code>deterministic_transform</code> and the existing reviewed-import path. Do not keep adding boolean exceptions beside <code>Job.direct</code>. Preserve existing generation history and compatibility readers.</p>
+<p>New UI jobs should continue the selected one-job/one-asset direction. Existing records that support several items must remain readable; do not silently split historical IDs and break their receipts. Separate workflow stages from the transport used to execute them. <a aria-label="Source R1" class="ref-link" href="#ref-R1">R1</a> <a aria-label="Source R12" class="ref-link" href="#ref-R12">R12</a></p>
+</section><section id="7-planning-style-and-media-references"><h2>7. Planning, style and media references</h2>
+<p>The domain must support an immutable plan regardless of whether the user writes it through a form, chat assistant or Markdown/YAML editor. Keep the planning UI open. The initial implementation can use a simple form and a readable plan preview without making that the permanent product decision.</p>
+<h3 id="authoring-plan-content">Authoring-plan content</h3>
+<p>Record intended asset/variant, workflow, source revision, technical requirements, advisory budgets, material/rig profiles, animation requests, outputs, references, style snapshot, gate policy and external-data permissions. Each requirement needs an identity and a declared enforcement level: machine-checked, advisory, human-reviewed or unsupported.</p>
+<p>AI planning suggestions must never overwrite manual requirements silently. Freeze only after the chosen authorization step. Editing a frozen plan creates a new revision and invalidates incompatible downstream approvals.</p>
+<h3 id="reference-semantics">Reference semantics</h3>
+<p>Reuse existing Media Library guidance images. Bind their artifact IDs and hashes, not only mutable display metadata. A soft-archived reference may be ineligible for new plans while remaining available as immutable evidence for an already frozen plan, subject to the retention policy.</p>
+<p>A reference set should label shape, proportion, palette, material, motion or detail roles and identify which references are authoritative. Prompt enhancement must preserve those constraints or surface a conflict. Conservative/creative enhancement choices can remain part of the plan without granting broader execution permissions.</p>
+<p>The current Media Library's image-only boundary is separate from a future motion-reference store. Do not accept arbitrary video or <code>.blend</code> uploads through an image endpoint merely to reuse its UI. <a aria-label="Source R1" class="ref-link" href="#ref-R1">R1</a> <a aria-label="Source R16" class="ref-link" href="#ref-R16">R16</a></p>
+<h3 id="project-specific-versus-reusable-profiles">Project-specific versus reusable profiles</h3>
+<p>The product stays general. A medieval style, humanoid skeleton and Terrain3D export profile are selected project resources—not hard-coded branches in the backend. Store profile revisions and dependency hashes so an agent cannot accidentally use a new rig/material definition mid-job.</p>
+</section><section id="8-domain-records-and-identities"><h2>8. Domain records and identities</h2>
+<p>The following are <strong>proposed target records</strong>. Names can change during implementation, but each responsibility and binding must remain explicit.</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Record</th>
+<th>Purpose and important fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>AuthoringPlan</code></td>
+<td>Immutable revision; job/asset target, source binding, requirements, references, style, output profiles, gate and permission policy.</td>
+</tr>
+<tr>
+<td><code>AuthoringSession</code></td>
+<td>Attempt-level product record; plan digest, node/provider binding, workspace ID, status, ownership generation and last acknowledged checkpoint.</td>
+</tr>
+<tr>
+<td><code>WorkspaceBinding</code></td>
+<td>Session-to-local-workspace identity. Absolute path remains companion-local; backend stores portable logical identity.</td>
+</tr>
+<tr>
+<td><code>SourceRevision</code></td>
+<td>Immutable file manifest, primary <code>.blend</code> entry point, parent revision(s), dependency map, provenance, capture metadata and restoration status.</td>
+</tr>
+<tr>
+<td><code>Checkpoint</code></td>
+<td>Named or automatic milestone pointing to an immutable source revision, with purpose and retention class. Do not confuse with existing build-stage checkpoints.</td>
+</tr>
+<tr>
+<td><code>Submission</code></td>
+<td>Frozen source revision plus exports, evidence, validation, input digest and proposed publication target.</td>
+</tr>
+<tr>
+<td><code>ReviewDecision</code></td>
+<td>Exact submission/source/export/report/profile binding, actor, gate, outcome, rationale and explicit override where permitted.</td>
+</tr>
+<tr>
+<td><code>NodeRegistration</code></td>
+<td>Stable node identity, public capabilities, registration authorization and revocation state.</td>
+</tr>
+<tr>
+<td><code>NodeSession</code></td>
+<td>New boot/session identity, heartbeat, protocol versions and current inventory revision.</td>
+</tr>
+<tr>
+<td><code>ExecutionAttempt</code></td>
+<td>Logical task ID, unique attempt ID, assigned node/device reservation, generation, exact input digest and outcome.</td>
+</tr>
+<tr>
+<td><code>ArtifactTransfer</code></td>
+<td>Scoped upload session, expected hash/size, staging progress and final verification receipt.</td>
+</tr>
+<tr>
+<td><code>DeliveryPlan</code> / <code>DeliveryReceipt</code></td>
+<td>Frozen target paths and file hashes, collision checks, applied changes, source/export identities and retry receipt.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="identity-rules">Identity rules</h3>
+<p>A logical task describes the requested operation on exact inputs. A retry creates a new attempt when the previous computation was lost or explicitly restarted. A repeated delivery of the same attempt must be recognized rather than treated as a new computation.</p>
+<p>Do not use filenames or provider conversation IDs as asset identities. Provider session IDs are adapter metadata. Local paths are locations, not revision identities. A source revision is identified by an immutable manifest digest or an immutable ID bound to that digest.</p>
+<p>Keep project/job/item identities compatible with the existing library. A new authoring record must reference existing objects rather than creating an unrelated shadow asset universe.</p>
+<h3 id="proposed-source-manifest-example">Proposed source manifest example</h3>
+<p>Values in angle brackets are placeholders. This is a schema sketch, not runnable configuration or a currently implemented API.</p>
+<pre><code class="language-json">{
+  "schema": "assetstudio.source.v1",
+  "source_revision_id": "&lt;immutable source revision&gt;",
+  "project_id": "&lt;project&gt;",
+  "asset_id": "&lt;asset or reserved target&gt;",
+  "entrypoint": "asset.blend",
+  "parent_source_revision": "&lt;previous revision or null&gt;",
+  "authoring_plan_sha256": "&lt;plan hash&gt;",
+  "files": [
+    {
+      "path": "asset.blend",
+      "role": "blender_source",
+      "artifact_id": "&lt;artifact&gt;",
+      "sha256": "&lt;64 hex characters&gt;",
+      "size": 123456
+    },
+    {
+      "path": "textures/wood_basecolor.png",
+      "role": "texture",
+      "artifact_id": "&lt;artifact&gt;",
+      "sha256": "&lt;64 hex characters&gt;",
+      "size": 23456
+    }
+  ],
+  "toolchain": {
+    "blender_build": "&lt;tested build&gt;",
+    "integration_revision": "&lt;revision&gt;",
+    "export_profile_sha256": "&lt;profile hash&gt;"
+  },
+  "capture": {
+    "workspace_generation": 8,
+    "coherent_snapshot": true,
+    "dependencies_checked": true
+  }
+}
+</code></pre>
+</section><section id="9-first-class-blender-source-support"><h2>9. First-class Blender source support</h2>
+<h3 id="source-support-is-broader-than-a-blend-upload">Source support is broader than a <code>.blend</code> upload</h3>
+<p>AssetStudio must recognize, store, version, restore, inspect and hand off <code>.blend</code> sources. It must show source state even when an export is unavailable. It must preserve the dependencies needed for meaningful reopening and warn about unresolved or unsupported dependencies.</p>
+<p>A valid stored source does not need to be a game-ready asset. Import inspection may be pending or limited while raw source preservation succeeds. Display these states separately and never equate “stored” with “safe to execute” or “fully validated.”</p>
+<h3 id="source-and-delivery-contracts">Source and delivery contracts</h3>
+<p>Extend artifact contracts intentionally. The current model3d role set cannot express editable source packages. Avoid bypassing the contract by putting arbitrary file maps into an untyped <code>meta</code> field. <a aria-label="Source R2" class="ref-link" href="#ref-R2">R2</a></p>
+<p>Recommended design: separate <strong>source acceptance</strong> and <strong>delivery profiles</strong>. A Blender-authored asset version may point to an accepted source revision and optionally one or more validated exports. A delivery profile requiring GLB cannot be satisfied by source alone. Existing model-only imported/generated versions remain valid legacy/delivery records.</p>
+<p>A new source may be checkpointed without publication. An accepted source-only milestone may become an asset version with explicit “export pending” readiness; it must not displace the game's last delivered artifact automatically. Keep accepted-library state and delivery receipts separate.</p>
+<h3 id="package-policy">Package policy</h3>
+<p>Use one primary <code>.blend</code> entry point per source revision. A package can include multiple objects, rigs, actions and linked dependencies. Whether one kit publishes into several independent assets is still open and must be modeled explicitly later.</p>
+<p>Allow packed or externally stored resources when supported by the selected profile. Do not assume packing captures every possible dependency. Inspection must find textures, linked libraries and any required cache/resource paths. Record approved add-ons by version; never silently install code because a source requests it. <a aria-label="Source B2" class="ref-link" href="#ref-B2">B2</a></p>
+<h3 id="dependency-closure">Dependency closure</h3>
+<p>A source manifest must list the required files and their relative paths. Resolve dependencies only within explicitly allowed roots. Detect missing paths, out-of-package references and collisions caused by case-insensitive filesystems. Reject path traversal, absolute-path archive entries, unsafe links and Unicode/case collisions that would materialize ambiguously.</p>
+<p>A user can explicitly add a required file to the package. The runner must not search the whole MacBook and upload unrelated directories while trying to repair a dependency.</p>
+<h3 id="clean-restore-test">Clean restore test</h3>
+<p>Materialize the package into an empty directory, using verified bytes. Open it with the supported Blender build and declared add-ons under the chosen execution policy. Inspect expected scene objects/resources and produce a preview/export where required. Report missing dependencies and compatibility limits explicitly.</p>
+<p>A successful clean restore demonstrates portability under that tested toolchain. It does not prove the file is safe in every Blender version or that a future exporter will produce identical bytes.</p>
+</section><section id="10-coherent-checkpoints-edits-and-human-takeover"><h2>10. Coherent checkpoints, edits and human takeover</h2>
+<figure class="diagram"><svg viewbox="0.00 0.00 1142.68 170.52" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g class="graph" id="revision-graph0" transform="scale(1 1) rotate(0) translate(15.84 154.68)">
+<title>G</title>
+<!-- W -->
+<g class="node" id="revision-node1">
+<title>W</title>
+<path d="M111,-111.84C111,-111.84 12,-111.84 12,-111.84 6,-111.84 0,-105.84 0,-99.84 0,-99.84 0,-81.84 0,-81.84 0,-75.84 6,-69.84 12,-69.84 12,-69.84 111,-69.84 111,-69.84 117,-69.84 123,-75.84 123,-81.84 123,-81.84 123,-99.84 123,-99.84 123,-105.84 117,-111.84 111,-111.84" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="61.5" y="-94.44">Workspace</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="61.5" y="-80.44">mutable .blend</text>
+</g>
+<!-- Auto -->
+<g class="node" id="revision-node2">
+<title>Auto</title>
+<path d="M339.5,-138.84C339.5,-138.84 241.5,-138.84 241.5,-138.84 235.5,-138.84 229.5,-132.84 229.5,-126.84 229.5,-126.84 229.5,-108.84 229.5,-108.84 229.5,-102.84 235.5,-96.84 241.5,-96.84 241.5,-96.84 339.5,-96.84 339.5,-96.84 345.5,-96.84 351.5,-102.84 351.5,-108.84 351.5,-108.84 351.5,-126.84 351.5,-126.84 351.5,-132.84 345.5,-138.84 339.5,-138.84" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="290.5" y="-121.44">Local autosave</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="290.5" y="-107.44">recovery only</text>
+</g>
+<!-- W&#45;&gt;Auto -->
+<g class="edge" id="revision-edge1">
+<title>W-&gt;Auto</title>
+<path d="M123.03,-98.04C153.3,-101.64 190.05,-106.01 221.31,-109.73" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="221.38,-112.38 229.14,-110.66 222,-107.17 221.38,-112.38" stroke="#728592"></polygon>
+</g>
+<!-- Rev -->
+<g class="node" id="revision-node3">
+<title>Rev</title>
+<path d="M356,-74.84C356,-74.84 225,-74.84 225,-74.84 219,-74.84 213,-68.84 213,-62.84 213,-62.84 213,-44.84 213,-44.84 213,-38.84 219,-32.84 225,-32.84 225,-32.84 356,-32.84 356,-32.84 362,-32.84 368,-38.84 368,-44.84 368,-44.84 368,-62.84 368,-62.84 368,-68.84 362,-74.84 356,-74.84" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="290.5" y="-57.44">Source revision</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="290.5" y="-43.44">immutable package</text>
+</g>
+<!-- W&#45;&gt;Rev -->
+<g class="edge" id="revision-edge2">
+<title>W-&gt;Rev</title>
+<path d="M123.03,-80.97C148.24,-76.86 177.95,-72.02 205.24,-67.57" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="205.88,-70.13 212.86,-66.33 205.04,-64.95 205.88,-70.13" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="168" y="-79.84">checkpoint</text>
+</g>
+<!-- Submit -->
+<g class="node" id="revision-node4">
+<title>Submit</title>
+<path d="M571,-74.84C571,-74.84 417,-74.84 417,-74.84 411,-74.84 405,-68.84 405,-62.84 405,-62.84 405,-44.84 405,-44.84 405,-38.84 411,-32.84 417,-32.84 417,-32.84 571,-32.84 571,-32.84 577,-32.84 583,-38.84 583,-44.84 583,-44.84 583,-62.84 583,-62.84 583,-68.84 577,-74.84 571,-74.84" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="494" y="-57.44">Submission</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="494" y="-43.44">exact source + outputs</text>
+</g>
+<!-- Rev&#45;&gt;Submit -->
+<g class="edge" id="revision-edge3">
+<title>Rev-&gt;Submit</title>
+<path d="M368.25,-53.84C377.73,-53.84 387.51,-53.84 397.23,-53.84" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="397.5,-56.46 405,-53.84 397.5,-51.21 397.5,-56.46" stroke="#728592"></polygon>
+</g>
+<!-- Submit&#45;&gt;W -->
+<g class="edge" id="revision-edge6">
+<title>Submit-&gt;W</title>
+<path d="M444.11,-32.81C421.41,-24.15 393.8,-15.15 368,-10.84 300.05,0.52 279.84,5.82 213,-10.84 170.69,-21.39 127.22,-46.3 97.95,-65.54" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="96.34,-63.46 91.56,-69.8 99.26,-67.83 96.34,-63.46" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="290.5" y="-13.84">changes requested</text>
+</g>
+<!-- Publish -->
+<g class="node" id="revision-node5">
+<title>Publish</title>
+<path d="M849,-74.84C849,-74.84 664,-74.84 664,-74.84 658,-74.84 652,-68.84 652,-62.84 652,-62.84 652,-44.84 652,-44.84 652,-38.84 658,-32.84 664,-32.84 664,-32.84 849,-32.84 849,-32.84 855,-32.84 861,-38.84 861,-44.84 861,-44.84 861,-62.84 861,-62.84 861,-68.84 855,-74.84 849,-74.84" fill="#e5eef8" stroke="#9ab1cb"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="756.5" y="-57.44">Published asset version</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="756.5" y="-43.44">reviewed source / readiness</text>
+</g>
+<!-- Submit&#45;&gt;Publish -->
+<g class="edge" id="revision-edge4">
+<title>Submit-&gt;Publish</title>
+<path d="M583.19,-53.84C602.69,-53.84 623.61,-53.84 643.9,-53.84" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="644.14,-56.46 651.64,-53.84 644.14,-51.21 644.14,-56.46" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="617.5" y="-56.84">accept</text>
+</g>
+<!-- Deliver -->
+<g class="node" id="revision-node6">
+<title>Deliver</title>
+<path d="M1099,-74.84C1099,-74.84 980,-74.84 980,-74.84 974,-74.84 968,-68.84 968,-62.84 968,-62.84 968,-44.84 968,-44.84 968,-38.84 974,-32.84 980,-32.84 980,-32.84 1099,-32.84 1099,-32.84 1105,-32.84 1111,-38.84 1111,-44.84 1111,-44.84 1111,-62.84 1111,-62.84 1111,-68.84 1105,-74.84 1099,-74.84" fill="#fdf0d8" stroke="#d8ba7b"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1039.5" y="-57.44">Delivery receipt</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1039.5" y="-43.44">Godot test project</text>
+</g>
+<!-- Publish&#45;&gt;Deliver -->
+<g class="edge" id="revision-edge5">
+<title>Publish-&gt;Deliver</title>
+<path d="M861.34,-53.84C894.05,-53.84 929.62,-53.84 960.24,-53.84" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="960.42,-56.46 967.92,-53.84 960.42,-51.21 960.42,-56.46" stroke="#728592"></polygon>
+<text font-family="DejaVu Sans" font-size="10.00" text-anchor="middle" x="914.5" y="-56.84">explicit export</text>
+</g>
+</g>
+</svg>
+<figcaption><strong>Saving is not publishing.</strong> </figcaption></figure><details class="diagram-code"><summary>Mermaid source</summary><pre><code>flowchart LR
+  W[Mutable Blender workspace] --&gt; A[Local recovery autosave]
+  W --&gt;|Checkpoint| R[Immutable source revision]
+  R --&gt; S[Submission with source, exports and evidence]
+  S --&gt;|Accepted publication| V[Asset version]
+  V --&gt;|Explicit delivery| D[Godot test-project receipt]
+  S --&gt;|Changes requested| W</code></pre></details>
+<h3 id="five-distinct-operations">Five distinct operations</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Persistence and authority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Workspace save</td>
+<td>Mutable working state on the MacBook.</td>
+</tr>
+<tr>
+<td>Local autosave</td>
+<td>Recovery-only data; not a canonical source revision until explicitly ingested.</td>
+</tr>
+<tr>
+<td>Checkpoint</td>
+<td>Immutable source snapshot and metadata acknowledged by Studio.</td>
+</tr>
+<tr>
+<td>Submission/publication</td>
+<td>Frozen proposal followed by authorized review and asset-version publication.</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Explicit application of a frozen export plan to the Godot test target.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="checkpoint-transaction">Checkpoint transaction</h3>
+<p>Stop admission of new mutations and drain the active operation. Save the scene and required modified resources. Build a stable snapshot in a separate staging directory. Hash files from that snapshot, not from paths that Blender can still rewrite. Upload only missing blobs, then submit the manifest for verification and immutable commit.</p>
+<p>Return a durable receipt before deleting staging or considering the checkpoint remotely safe. If saving an image or dependency fails, report an incomplete checkpoint; do not claim the last <code>.blend</code> timestamp proves coherence.</p>
+<p>A filesystem watcher may detect dirty state, but it must not be the publication protocol. Keep export and review evidence tied to the exact checkpoint digest.</p>
+<h3 id="human-takeover-protocol">Human takeover protocol</h3>
+<figure class="diagram"><svg viewbox="0.00 0.00 1285.68 107.68" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g class="graph" id="takeover-graph0" transform="scale(1 1) rotate(0) translate(15.84 91.84)">
+<title>G</title>
+<!-- Agent -->
+<g class="node" id="takeover-node1">
+<title>Agent</title>
+<path d="M163,-73C163,-73 12,-73 12,-73 6,-73 0,-67 0,-61 0,-61 0,-49 0,-49 0,-43 6,-37 12,-37 12,-37 163,-37 163,-37 169,-37 175,-43 175,-49 175,-49 175,-61 175,-61 175,-67 169,-73 163,-73" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="87.5" y="-51.6">Agent owns workspace</text>
+</g>
+<!-- Stop -->
+<g class="node" id="takeover-node2">
+<title>Stop</title>
+<path d="M377,-76C377,-76 222,-76 222,-76 216,-76 210,-70 210,-64 210,-64 210,-46 210,-46 210,-40 216,-34 222,-34 222,-34 377,-34 377,-34 383,-34 389,-40 389,-46 389,-46 389,-64 389,-64 389,-70 383,-76 377,-76" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="299.5" y="-58.6">Stop new mutations</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="299.5" y="-44.6">drain in-flight operation</text>
+</g>
+<!-- Agent&#45;&gt;Stop -->
+<g class="edge" id="takeover-edge1">
+<title>Agent-&gt;Stop</title>
+<path d="M175.13,-55C184.04,-55 193.14,-55 202.15,-55" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="202.2,-57.63 209.7,-55 202.2,-52.38 202.2,-57.63" stroke="#728592"></polygon>
+</g>
+<!-- CP -->
+<g class="node" id="takeover-node3">
+<title>CP</title>
+<path d="M608,-76C608,-76 436,-76 436,-76 430,-76 424,-70 424,-64 424,-64 424,-46 424,-46 424,-40 430,-34 436,-34 436,-34 608,-34 608,-34 614,-34 620,-40 620,-46 620,-46 620,-64 620,-64 620,-70 614,-76 608,-76" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="522" y="-58.6">Checkpoint</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="522" y="-44.6">and increment generation</text>
+</g>
+<!-- Stop&#45;&gt;CP -->
+<g class="edge" id="takeover-edge2">
+<title>Stop-&gt;CP</title>
+<path d="M389.23,-55C398.11,-55 407.19,-55 416.22,-55" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="416.28,-57.63 423.78,-55 416.28,-52.38 416.28,-57.63" stroke="#728592"></polygon>
+</g>
+<!-- Human -->
+<g class="node" id="takeover-node4">
+<title>Human</title>
+<path d="M826,-73C826,-73 667,-73 667,-73 661,-73 655,-67 655,-61 655,-61 655,-49 655,-49 655,-43 661,-37 667,-37 667,-37 826,-37 826,-37 832,-37 838,-43 838,-49 838,-49 838,-61 838,-61 838,-67 832,-73 826,-73" fill="#fdf0d8" stroke="#d8ba7b"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="746.5" y="-51.6">Human owns workspace</text>
+</g>
+<!-- CP&#45;&gt;Human -->
+<g class="edge" id="takeover-edge3">
+<title>CP-&gt;Human</title>
+<path d="M620.27,-55C629.13,-55 638.12,-55 646.99,-55" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="647.25,-57.63 654.75,-55 647.25,-52.38 647.25,-57.63" stroke="#728592"></polygon>
+</g>
+<!-- Save -->
+<g class="node" id="takeover-node5">
+<title>Save</title>
+<path d="M1040,-76C1040,-76 885,-76 885,-76 879,-76 873,-70 873,-64 873,-64 873,-46 873,-46 873,-40 879,-34 885,-34 885,-34 1040,-34 1040,-34 1046,-34 1052,-40 1052,-46 1052,-46 1052,-64 1052,-64 1052,-70 1046,-76 1040,-76" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="962.5" y="-58.6">Save and checkpoint</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="962.5" y="-44.6">refresh scene inventory</text>
+</g>
+<!-- Human&#45;&gt;Save -->
+<g class="edge" id="takeover-edge4">
+<title>Human-&gt;Save</title>
+<path d="M838.26,-55C847.24,-55 856.39,-55 865.43,-55" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="865.49,-57.63 872.99,-55 865.49,-52.38 865.49,-57.63" stroke="#728592"></polygon>
+</g>
+<!-- Resume -->
+<g class="node" id="takeover-node6">
+<title>Resume</title>
+<path d="M1242,-76C1242,-76 1099,-76 1099,-76 1093,-76 1087,-70 1087,-64 1087,-64 1087,-46 1087,-46 1087,-40 1093,-34 1099,-34 1099,-34 1242,-34 1242,-34 1248,-34 1254,-40 1254,-46 1254,-46 1254,-64 1254,-64 1254,-70 1248,-76 1242,-76" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1170.5" y="-58.6">Explicit agent resume</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1170.5" y="-44.6">new generation</text>
+</g>
+<!-- Save&#45;&gt;Resume -->
+<g class="edge" id="takeover-edge5">
+<title>Save-&gt;Resume</title>
+<path d="M1052.06,-55C1061.09,-55 1070.27,-55 1079.32,-55" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="1079.38,-57.63 1086.88,-55 1079.38,-52.38 1079.38,-57.63" stroke="#728592"></polygon>
+</g>
+<!-- Resume&#45;&gt;Agent -->
+<g class="edge" id="takeover-edge6">
+<title>Resume-&gt;Agent</title>
+<path d="M1101.03,-34C1085.07,-29.76 1068.04,-25.77 1052,-23 918.25,0.04 883.22,-0 747.5,-0 521,-0 521,-0 521,-0 382.4,-0 346.7,-0.15 210,-23 192.21,-25.98 173.24,-30.37 155.7,-34.95" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="154.85,-32.46 148.28,-36.92 156.2,-37.53 154.85,-32.46" stroke="#728592"></polygon>
+</g>
+</g>
+</svg>
+<figcaption><strong>Single-writer human takeover.</strong> </figcaption></figure><details class="diagram-code"><summary>Mermaid source</summary><pre><code>flowchart LR
+  A[Agent owns workspace] --&gt; D[Stop admission and drain mutation]
+  D --&gt; C[Checkpoint and fence old generation]
+  C --&gt; H[Human owns workspace]
+  H --&gt; S[Save and checkpoint, refresh scene inventory]
+  S --&gt; R[Explicit agent resume under new generation]
+  R --&gt; A</code></pre></details>
+<p>The companion stops new agent commands, waits for or explicitly interrupts the in-flight operation, checkpoints and increments/fences the workspace generation. The old provider cannot continue mutating after control transfers.</p>
+<p>During manual editing, preserve local autosave and a visible ownership indicator. To resume, the user saves/checkpoints, the companion refreshes scene inventory, and a provider receives the new authoritative state. Conversation history can assist context but must not replace inspection.</p>
+<p>If an operation cannot be safely drained, show “takeover pending” rather than admitting a second writer. Force interruption is an explicit recovery action with a potentially uncertain scene state; restore a checkpoint when necessary.</p>
+<h3 id="concurrency-and-conflicts">Concurrency and conflicts</h3>
+<p>Different assets/workspaces may run concurrently. Alternative explorations of one source use separate workspaces and child revisions. No automatic <code>.blend</code> merge is promised.</p>
+<p>At promotion, compare the expected base/current version and submission binding. A stale submission remains preserved, but cannot silently overwrite a newer accepted version. Allow an explicit new-version/rebase-by-authoring decision or a separately named variant where appropriate.</p>
+</section><section id="11-compute-nodes-and-multi-gpu-scheduling"><h2>11. Compute nodes and multi-GPU scheduling</h2>
+<h3 id="machines-devices-and-engines">Machines, devices and engines</h3>
+<p>A node is a machine-level execution environment. A device is a physical resource or an explicitly modeled partition. An engine runtime offers capabilities on one or more devices. A task attempt consumes a declared resource set.</p>
+<p>Identify a GPU with a stable node/device identity, not a global <code>gpu0</code> string. Two machines can each have device index 0. Two containers on the same GPU must map to one physical resource and one admission authority.</p>
+<p>For NVIDIA machines, collect physical UUIDs where available and record the mapping to runtime-visible devices. Treat partitioned or multi-device configurations as explicit resource models. Do not infer capacity by counting endpoints.</p>
+<h3 id="node-inventory">Node inventory</h3>
+<p>A capability advertisement should include operation/contract versions, engine identity, verified model revisions, supported export modes, platform/architecture, device memory/capacity and current loaded-model state. Include observation timestamps and freshness. A stale heartbeat is not current capacity.</p>
+<p>Readiness means a compatible authorized node has a verified supported installation; immediate schedulability also depends on current reservations and health. Keep “installed,” “loaded,” “ready,” “busy,” “unreachable” and “unknown” distinct.</p>
+<h3 id="model-verification-moves-to-the-node">Model verification moves to the node</h3>
+<p>Remove the backend requirement to mount model weights. Studio keeps the desired model/profile catalog and pinned identities. The node verifies its local artifacts against that catalog and reports inventory/verification receipts. Do not accept an unversioned “model installed” boolean as reproducibility evidence.</p>
+<p>A recipe can be ready on one node and unavailable on another. Select compatible nodes without silently substituting a model revision or exporter. Keep explicit installation/download commands outside normal job dispatch; production tasks should not trigger surprise multi-gigabyte downloads.</p>
+<h3 id="central-placement-local-admission">Central placement, local admission</h3>
+<p>The central scheduler chooses eligible tasks, node placement and priority. The node decides whether the physical resource can be admitted now and performs unload/drain where required. Preserve the existing safety concept that unknown ownership prevents dispatch. <a aria-label="Source R7" class="ref-link" href="#ref-R7">R7</a></p>
+<p>The node does not independently advance product gates or invent follow-up stages. It executes authorized attempts and reports observations. Studio commits outcomes and makes downstream work ready.</p>
+<h3 id="matching-and-optimization">Matching and optimization</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Hard matching constraints</th>
+<th>Soft placement preferences</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Operation and protocol compatibility</td>
+<td>Required model already loaded</td>
+</tr>
+<tr>
+<td>Exact model/runtime/profile identity</td>
+<td>Input artifacts already cached</td>
+</tr>
+<tr>
+<td>Authorized project and data policy</td>
+<td>Short queue and predicted completion</td>
+</tr>
+<tr>
+<td>Sufficient memory/device requirements</td>
+<td>Fewer expensive model switches</td>
+</tr>
+<tr>
+<td>Healthy resource ownership</td>
+<td>Fairness and priority across users/jobs</td>
+</tr>
+</tbody>
+</table></div>
+<p>Preserve stage-first/model-aware scheduling: group compatible operations across jobs where that saves load time. Do not let warm-model preference starve other work. Keep limits for pass length and waiting time configurable and measured, not guessed universal constants.</p>
+<h3 id="resource-granularity">Resource granularity</h3>
+<p>A Blender authoring session owns a workspace, not a remote GPU for its entire lifetime. A render/bake or VLM review may request compute separately. Release unnecessary reservations before waiting at a review gate or asking another service for work.</p>
+<p>Avoid the deadlock where an authoring stage holds the only GPU while waiting for QA on the same device. More generally, do not hold one scarce resource while synchronously waiting for another without an explicit reservation/order policy.</p>
+<h3 id="parallelism-limits">Parallelism limits</h3>
+<p>Default to one heavy inference execution per physical GPU until a tested profile permits safe concurrency. Multiple GPUs improve throughput across independent tasks. They do not automatically pool VRAM for one model. Multi-device inference requires its own capability, scheduler semantics and acceptance tests.</p>
+<p>Record capacity estimates and actual peaks separately. Memory reported free is not a guarantee that an arbitrary model run fits. Handle out-of-memory as an execution/resource event with bounded retry or an explicit smaller/different approved profile.</p>
+</section><section id="12-worker-protocol-transport-and-execution-contracts"><h2>12. Worker protocol, transport and execution contracts</h2>
+<h3 id="outbound-connections">Outbound connections</h3>
+<p>Compute nodes and the MacBook companion initiate authenticated HTTPS connections to Studio. Start with durable API commands and long-poll assignment retrieval. Optional event streams improve responsiveness but must not become the only source of truth.</p>
+<p>A disconnection can lose transient status notifications. Reconnect with an event cursor or fetch a current projection from durable state. Duplicate or reordered events must not roll an execution backward. The browser can use the existing event approach as a view over durable records.</p>
+<p>Keep large artifact transfer separate from control messages. Do not embed <code>.blend</code> files, raw meshes or image bundles in status events. Remote nodes receive artifact IDs/hashes and scoped fetch/upload authorization, not arbitrary backend filesystem paths.</p>
+<h3 id="version-negotiation">Version negotiation</h3>
+<p>Negotiate node-protocol versions and capability/operation versions at registration. Refuse incompatible work with an actionable explanation. Freeze the selected versions on an execution attempt. A node upgrade may change its inventory, but must not mutate the identity of a running or accepted attempt.</p>
+<p>Use typed request/response schemas and generated frontend/runner clients where practical. The earlier code review identified handwritten frontend response types as a maintenance risk; extending distributed contracts without schema generation would increase that risk.</p>
+<h3 id="illustrative-task-attempt-contract">Illustrative task-attempt contract</h3>
+<pre><code class="language-json">{
+  "schema": "assetstudio.execution.v1",
+  "task_id": "&lt;logical task&gt;",
+  "attempt_id": "&lt;unique attempt&gt;",
+  "assignment_generation": 12,
+  "node_id": "&lt;registered node&gt;",
+  "node_session_id": "&lt;current boot session&gt;",
+  "operation": "image_to_3d",
+  "operation_version": 1,
+  "input_digest": "&lt;hash of frozen operation inputs&gt;",
+  "inputs": [{"artifact_id": "&lt;input&gt;", "sha256": "&lt;hash&gt;"}],
+  "requirements": {
+    "engine_profile": "&lt;pinned profile&gt;",
+    "model_revision": "&lt;pinned identity&gt;",
+    "resource_profile": "&lt;tested GPU requirement&gt;"
+  },
+  "policy": {
+    "allow_model_substitution": false,
+    "allow_runtime_downloads": false,
+    "retry_policy": "bounded"
+  }
+}
+</code></pre>
+<p>The final API must define digest canonicalization, accepted enum values, field limits and error codes. The placeholder example is not a deployed schema.</p>
+<h3 id="minimal-endpoint-families">Minimal endpoint families</h3>
+<p>Names below describe a proposed interface, not existing routes.</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Operations</th>
+<th>Important preconditions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nodes</td>
+<td>Pair/register, renew identity, advertise inventory, heartbeat, revoke</td>
+<td>Authenticated identity, protocol compatibility, authorized projects.</td>
+</tr>
+<tr>
+<td>Assignments</td>
+<td>Claim/receive, acknowledge, renew, report status, cancel acknowledgement</td>
+<td>Exact node session, attempt and generation.</td>
+</tr>
+<tr>
+<td>Artifacts</td>
+<td>Create upload, transfer/resume, finalize/verify, scoped download</td>
+<td>Expected hash/size, allowed role/project, quota and containment.</td>
+</tr>
+<tr>
+<td>Authoring</td>
+<td>Freeze plan, create session, obtain handoff, checkpoint, request review, submit</td>
+<td>Exact plan/source/workspace binding and allowed writer.</td>
+</tr>
+<tr>
+<td>Review</td>
+<td>Accept/reject/request changes, record override</td>
+<td>Human authority and exact submission/report digest.</td>
+</tr>
+<tr>
+<td>Publication</td>
+<td>Preview target, publish, set current</td>
+<td>Accepted bound source/export, expected current version and idempotency.</td>
+</tr>
+<tr>
+<td>Delivery</td>
+<td>Freeze plan, preview collisions, apply/retry, inspect receipt</td>
+<td>Explicit target authorization and owned-file constraints.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="error-taxonomy">Error taxonomy</h3>
+<p>Distinguish invalid inputs, unsupported contracts, stale revisions, stale ownership, unavailable node, uncertain execution, missing artifacts, failed validation, resource exhaustion and operator cancellation. Return stable machine codes plus readable explanations.</p>
+<p>A transient network error must not be reclassified as an invalid asset. An invalid asset must not block unrelated nodes. A device-ownership ambiguity must block that device until reconciled. Do not silently convert unsupported animation export into a static success.</p>
+</section><section id="13-durable-execution-leases-and-recovery"><h2>13. Durable execution, leases and recovery</h2>
+<figure class="diagram"><svg viewbox="0.00 0.00 1350.68 73.68" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g class="graph" id="execution-graph0" transform="scale(1 1) rotate(0) translate(15.84 57.84)">
+<title>G</title>
+<!-- Q -->
+<g class="node" id="execution-node1">
+<title>Q</title>
+<path d="M135,-42C135,-42 12,-42 12,-42 6,-42 0,-36 0,-30 0,-30 0,-12 0,-12 0,-6 6,0 12,0 12,0 135,0 135,0 141,0 147,-6 147,-12 147,-12 147,-30 147,-30 147,-36 141,-42 135,-42" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="73.5" y="-24.6">Queued task</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="73.5" y="-10.6">frozen input digest</text>
+</g>
+<!-- L -->
+<g class="node" id="execution-node2">
+<title>L</title>
+<path d="M318,-42C318,-42 194,-42 194,-42 188,-42 182,-36 182,-30 182,-30 182,-12 182,-12 182,-6 188,0 194,0 194,0 318,0 318,0 324,0 330,-6 330,-12 330,-12 330,-30 330,-30 330,-36 324,-42 318,-42" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="256" y="-24.6">Leased attempt</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="256" y="-10.6">node + generation</text>
+</g>
+<!-- Q&#45;&gt;L -->
+<g class="edge" id="execution-edge1">
+<title>Q-&gt;L</title>
+<path d="M147.14,-21C156.09,-21 165.29,-21 174.35,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="174.42,-23.63 181.92,-21 174.42,-18.38 174.42,-23.63" stroke="#728592"></polygon>
+</g>
+<!-- A -->
+<g class="node" id="execution-node3">
+<title>A</title>
+<path d="M517,-42C517,-42 377,-42 377,-42 371,-42 365,-36 365,-30 365,-30 365,-12 365,-12 365,-6 371,0 377,0 377,0 517,0 517,0 523,0 529,-6 529,-12 529,-12 529,-30 529,-30 529,-36 523,-42 517,-42" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="447" y="-24.6">Local admission</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="447" y="-10.6">physical-device lease</text>
+</g>
+<!-- L&#45;&gt;A -->
+<g class="edge" id="execution-edge2">
+<title>L-&gt;A</title>
+<path d="M330.07,-21C339,-21 348.2,-21 357.32,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="357.46,-23.63 364.96,-21 357.46,-18.38 357.46,-23.63" stroke="#728592"></polygon>
+</g>
+<!-- X -->
+<g class="node" id="execution-node4">
+<title>X</title>
+<path d="M697,-42C697,-42 576,-42 576,-42 570,-42 564,-36 564,-30 564,-30 564,-12 564,-12 564,-6 570,0 576,0 576,0 697,0 697,0 703,0 709,-6 709,-12 709,-12 709,-30 709,-30 709,-36 703,-42 697,-42" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="636.5" y="-24.6">Execute and spool</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="636.5" y="-10.6">result manifest</text>
+</g>
+<!-- A&#45;&gt;X -->
+<g class="edge" id="execution-edge3">
+<title>A-&gt;X</title>
+<path d="M529.15,-21C538.2,-21 547.4,-21 556.42,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="556.45,-23.63 563.95,-21 556.45,-18.38 556.45,-23.63" stroke="#728592"></polygon>
+</g>
+<!-- U -->
+<g class="node" id="execution-node5">
+<title>U</title>
+<path d="M885,-42C885,-42 756,-42 756,-42 750,-42 744,-36 744,-30 744,-30 744,-12 744,-12 744,-6 750,0 756,0 756,0 885,0 885,0 891,0 897,-6 897,-12 897,-12 897,-30 897,-30 897,-36 891,-42 885,-42" fill="#edf5f3" stroke="#a5c6bc"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="820.5" y="-24.6">Upload + verify</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="820.5" y="-10.6">immutable artifacts</text>
+</g>
+<!-- X&#45;&gt;U -->
+<g class="edge" id="execution-edge4">
+<title>X-&gt;U</title>
+<path d="M709.17,-21C718.03,-21 727.14,-21 736.16,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="736.2,-23.63 743.7,-21 736.2,-18.38 736.2,-23.63" stroke="#728592"></polygon>
+</g>
+<!-- C -->
+<g class="node" id="execution-node6">
+<title>C</title>
+<path d="M1092,-42C1092,-42 944,-42 944,-42 938,-42 932,-36 932,-30 932,-30 932,-12 932,-12 932,-6 938,0 944,0 944,0 1092,0 1092,0 1098,0 1104,-6 1104,-12 1104,-12 1104,-30 1104,-30 1104,-36 1098,-42 1092,-42" fill="#e5eef8" stroke="#9ab1cb"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1018" y="-24.6">Commit result</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1018" y="-10.6">and downstream state</text>
+</g>
+<!-- U&#45;&gt;C -->
+<g class="edge" id="execution-edge5">
+<title>U-&gt;C</title>
+<path d="M897.09,-21C905.98,-21 915.14,-21 924.24,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="924.36,-23.63 931.86,-21 924.36,-18.38 924.36,-23.63" stroke="#728592"></polygon>
+</g>
+<!-- Ack -->
+<g class="node" id="execution-node7">
+<title>Ack</title>
+<path d="M1307,-42C1307,-42 1151,-42 1151,-42 1145,-42 1139,-36 1139,-30 1139,-30 1139,-12 1139,-12 1139,-6 1145,0 1151,0 1151,0 1307,0 1307,0 1313,0 1319,-6 1319,-12 1319,-12 1319,-30 1319,-30 1319,-36 1313,-42 1307,-42" fill="#fdf0d8" stroke="#d8ba7b"></path>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1229" y="-24.6">Durable receipt</text>
+<text font-family="DejaVu Sans" font-size="13.00" text-anchor="middle" x="1229" y="-10.6">worker may clean spool</text>
+</g>
+<!-- C&#45;&gt;Ack -->
+<g class="edge" id="execution-edge6">
+<title>C-&gt;Ack</title>
+<path d="M1104.01,-21C1113.01,-21 1122.22,-21 1131.35,-21" fill="none" stroke="#728592"></path>
+<polygon fill="#728592" points="1131.49,-23.63 1138.99,-21 1131.49,-18.38 1131.49,-23.63" stroke="#728592"></polygon>
+</g>
+</g>
+</svg>
+<figcaption><strong>Distributed task attempt and durable result.</strong> </figcaption></figure><details class="diagram-code"><summary>Mermaid source</summary><pre><code>flowchart LR
+  Q[Queued task and frozen input digest] --&gt; L[Leased attempt with node and generation]
+  L --&gt; A[Node admission and physical-device lease]
+  A --&gt; X[Execute and durably spool result]
+  X --&gt; U[Upload and verify immutable artifacts]
+  U --&gt; C[Commit accepted result and downstream state]
+  C --&gt; R[Return durable receipt before spool cleanup]</code></pre></details>
+<h3 id="logical-task-versus-attempt">Logical task versus attempt</h3>
+<p>A logical task represents an operation on exact inputs. Each computation attempt has its own ID and assignment generation. Delivering the same attempt message twice must reconcile against local durable execution state. Explicit retry after lost execution creates a new attempt; it must not change the old attempt's history.</p>
+<p>Exactly-once delivery/computation is not a realistic assumption across network failures. The requirement is replay-safe submission, verified ingestion and non-duplicated accepted publication. Duplicate computation may occur during exceptional recovery, but its effects must remain isolated and attributable.</p>
+<h3 id="proposed-execution-and-authoring-state-models">Proposed execution and authoring state models</h3>
+<p>Keep workflow state separate from connectivity and control intent. A disconnected node does not make its result failed, and a paused workflow does not prove that an in-flight computation has stopped. Persist transitions conditionally against the prior revision and owner generation.</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Record</th>
+<th>Proposed progression</th>
+<th>Important rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Logical task</td>
+<td>queued → assigned → running → result pending → succeeded</td>
+<td>Dependencies unlock only after the result is verified and durably committed. Failure/cancellation/blocked states carry reasons and retry policy.</td>
+</tr>
+<tr>
+<td>Task attempt</td>
+<td>leased → admitted → executing → spooled → ingesting → committed</td>
+<td>Lost or failed attempts remain historical. A retry creates a new attempt instead of erasing the prior one.</td>
+</tr>
+<tr>
+<td>Authoring plan</td>
+<td>draft → frozen → superseded</td>
+<td>Frozen plans are immutable. Changed requirements create a successor with a new digest.</td>
+</tr>
+<tr>
+<td>Authoring session</td>
+<td>preparing → active → waiting for review → active or completed</td>
+<td>Paused, failed and cancelled outcomes are explicit. Completed means the assigned work ended, not that the asset was published.</td>
+</tr>
+<tr>
+<td>Submission</td>
+<td>submitted → validating → ready for review → accepted or changes requested</td>
+<td>Acceptance binds the exact source/export/evidence set. Later corrections create a new submission.</td>
+</tr>
+<tr>
+<td>Delivery plan</td>
+<td>planned → authorized → applying → completed or partially failed</td>
+<td>Retry only the recorded managed outputs. Never widen the destination scope after authorization.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Use independent fields for connection health (<code>online</code>, <code>stale</code>, <code>disconnected</code>), requested control (<code>run</code>, <code>pause</code>, <code>cancel</code>) and workspace owner (<code>agent</code>, <code>human</code>, <code>unassigned</code>). Exact enum spellings are proposed; finalize them with the typed protocol. The behavior above is the design contract.</p>
+<p>If a review gate changes from optional to required during a session, record a new policy revision and require explicit authorization for its application. Do not silently invalidate past accepted history or authorize new stages using a policy the operator has not seen.</p>
+<h3 id="lease-semantics">Lease semantics</h3>
+<p>Use separate concepts for central assignment/workspace ownership and local physical-device leases. Both need stable identities and fencing generations, but their expiration policies differ.</p>
+<p>A compute assignment losing contact becomes uncertain. The node stops admitting new unauthorized work. Existing work may finish into a local spool if policy permits, but it cannot force acceptance into Studio. A late result needs matching attempt/generation and reconciliation policy.</p>
+<p>A MacBook authoring session losing contact must not automatically migrate to another writer. Preserve local state and mark disconnected. New product-stage progression pauses according to offline policy. The companion can keep recovery data without claiming remote acceptance.</p>
+<h3 id="fencing-stale-work">Fencing stale work</h3>
+<p>The backend rejects stale attempt generations. The Blender bridge must also reject stale workspace generations at the <strong>mutation boundary</strong>, not only when uploading the final result. Otherwise an old agent could continue editing after takeover even if it cannot publish.</p>
+<p>A lease is not a process kill. Do not declare a GPU idle merely because a central timer expired. Require local drain/stop confirmation or explicit operator recovery. Retain the existing epoch-and-acknowledgement principle when extracting node-local ownership. <a aria-label="Source R7" class="ref-link" href="#ref-R7">R7</a></p>
+<h3 id="result-commit-sequence">Result commit sequence</h3>
+<p>Write outputs into the worker spool, build an immutable result manifest and report the outcome. Studio stages and verifies blobs, checks the input/profile/generation bindings, then commits accepted execution outcome and required downstream scheduling state through its durable journal mechanism. Return an ingestion receipt only after the necessary records are durable.</p>
+<p>Where canonical project records and the journal are separate stores, do not claim a single distributed transaction. Use durable command intents, derived IDs, conditional commits and replay/reconciliation. The existing publication design provides a useful model: the manifest update is the publication point and receipts make retries discover the same outcome. <a aria-label="Source R8" class="ref-link" href="#ref-R8">R8</a></p>
+<h3 id="recovery-matrix">Recovery matrix</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Incident</th>
+<th>Required behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Duplicate assignment</td>
+<td>Reuse/reconcile the same local attempt; do not start a second execution.</td>
+</tr>
+<tr>
+<td>Backend restart during a run</td>
+<td>Reconstruct assignments from durable state and reconcile node receipts.</td>
+</tr>
+<tr>
+<td>Node restart after output was spooled</td>
+<td>Recover local execution and upload the preserved output.</td>
+</tr>
+<tr>
+<td>Node restart before output existed</td>
+<td>Mark the attempt lost/failed with evidence; an explicit retry gets a new attempt ID.</td>
+</tr>
+<tr>
+<td>Disconnect during GPU work</td>
+<td>Mark uncertain; do not infer physical release from heartbeat expiry.</td>
+</tr>
+<tr>
+<td>MacBook sleep</td>
+<td>Mark disconnected, keep workspace and checkpoints, do not create another writer.</td>
+</tr>
+<tr>
+<td>Agent crash while Blender lives</td>
+<td>Inspect mutation receipt/state; retain Blender workspace; resume or restore explicitly.</td>
+</tr>
+<tr>
+<td>Blender crash during save</td>
+<td>Keep prior acknowledged revision and local recovery files; incomplete staging is not a new source revision.</td>
+</tr>
+<tr>
+<td>Interrupted upload</td>
+<td>Resume/retry staging; verify full content before manifest commit.</td>
+</tr>
+<tr>
+<td>Lost upload acknowledgement</td>
+<td>Query receipt/status before resubmitting or deleting the local spool.</td>
+</tr>
+<tr>
+<td>Late result from an obsolete attempt</td>
+<td>Quarantine or retain as historical recovery output; never make current implicitly.</td>
+</tr>
+<tr>
+<td>Pause/cancel during queued work</td>
+<td>Preserve control intent; admission must recheck it atomically.</td>
+</tr>
+<tr>
+<td>Cancel during active work</td>
+<td>Request stop, await acknowledgement or record uncertainty; do not fabricate cancellation success.</td>
+</tr>
+<tr>
+<td>Out-of-memory</td>
+<td>Fail/recover the resource and retain diagnostics; no unapproved model downgrade.</td>
+</tr>
+<tr>
+<td>Invalid output</td>
+<td>Fail that result with structural evidence; continue unrelated tasks.</td>
+</tr>
+<tr>
+<td>Corrupt canonical blob</td>
+<td>Block dependants and expose repair; do not serve a size-only match as valid.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Retries must be bounded and classified. Retrying an invalid mesh or permission refusal indefinitely does not improve reliability. Keep automatic retry settings configurable and explicit retry distinguishable from automated attempts.</p>
+</section><section id="14-artifact-transfer-caching-and-source-storage"><h2>14. Artifact transfer, caching and source storage</h2>
+<h3 id="content-addressing-and-file-manifests">Content addressing and file manifests</h3>
+<p>Store immutable bytes by hash and preserve role/provenance separately. A source revision is a path-to-artifact manifest with one primary <code>.blend</code> entry point. This allows unchanged textures or dependencies to be reused across revisions without repeatedly uploading them.</p>
+<p>Whole-file deduplication does not provide binary deltas for a changed <code>.blend</code>. Start with full-file blobs and measure growth. Chunk-level deduplication can be added later without changing the concept of an immutable source revision.</p>
+<h3 id="streaming-and-resumable-transfer">Streaming and resumable transfer</h3>
+<p>Do not extend a small image-upload handler by simply raising its limit and loading a huge source bundle into memory. Support bounded streaming and a staged transfer protocol. Validate declared and actual size, hash, role and project authorization. Define limits per file, package, decoded media and aggregate workspace.</p>
+<p>Use a resumable strategy with verified ranges/chunks where justified, but always verify the final complete file before commit. Do not trust client-provided hash text without checking bytes. Interrupted or abandoned upload sessions are garbage-collection candidates, not published artifacts.</p>
+<h3 id="cache-behavior">Cache behavior</h3>
+<p>Cache inputs by immutable digest on each node. Report cache presence as a scheduling hint, not proof of integrity. Verify on materialization according to the storage policy. Eviction may remove reconstructible caches, but not the only copy of unacknowledged outputs or an active dirty workspace.</p>
+<p>Workers need not share an NFS mount. Fetch missing input blobs through authenticated transfer, then operate on local copies. A future shared/object store can optimize transport while preserving the same contracts.</p>
+<h3 id="writable-materialization">Writable materialization</h3>
+<p>Never expose canonical blobs as writable hard links in a Blender workspace. Use an independent writable copy or a correctly implemented copy-on-write mechanism. Editing a source must not alter a previously accepted revision.</p>
+<p>Materialize into a staging directory, check paths and hashes, then make the completed workspace visible. Distinguish user-editable source from generated delivery files and temporary inspection output.</p>
+<h3 id="retention-classes">Retention classes</h3>
+<p>Preserve accepted source versions and referenced dependencies. Keep named checkpoints according to project policy. Use a shorter explicit policy for local autosaves, candidate renders, logs and abandoned transfers. Raw TRELLIS intermediates can remain valuable for re-export, but their retention needs separate budgeting.</p>
+<p>Never let generic cache cleanup remove data needed by a published version or an active session. Begin retention/GC with a dry-run plan and reachable-reference analysis. Publication history must not become invalid after a cleanup pass.</p>
+<h3 id="portable-projects-and-backups">Portable projects and backups</h3>
+<p>Back up project configuration, manifests, source revisions, artifact records, blobs and the execution journal needed for recovery. A blob backup without the manifests is not enough. A journal backup taken at an unrelated time can require reconciliation.</p>
+<p>Provide a coherent snapshot procedure, integrity verification and restore test. Stop new admissions or record a clear snapshot barrier while capturing related state. Rebuildable search indexes can be regenerated; canonical records and unacknowledged work must not be assumed reconstructible.</p>
+</section><section id="15-macbook-companion-and-blender-bridge"><h2>15. MacBook companion and Blender bridge</h2>
+<h3 id="companion-responsibilities">Companion responsibilities</h3>
+<p>The companion pairs with Studio, stores scoped node credentials locally, advertises installed Blender/provider/tool versions and receives only authorized work. It manages workspace paths, local manifests, process identities, checkpoint staging and upload receipts.</p>
+<p>It should show which project/job/source is open, who owns mutation rights, what remains unsynced and whether Studio is reachable. A CLI first is sufficient for v1; an optional menu-bar application can add visibility and launch controls without duplicating the whole web UI.</p>
+<p>The companion implementation language is not decided. Reuse the project's existing expertise and supported provider interfaces. Do not require rewriting the backend in a new language or shipping CUDA/PyTorch in the MacBook application.</p>
+<h3 id="blender-bridge">Blender bridge</h3>
+<p>The bridge provides scene inspection, approved mutation operations, file save/checkpoint hooks, dependency inventory, rendering, export and validation. Main-thread scene mutations are serialized and checked against the workspace generation. Heavy network/provider work must not block Blender's UI thread.</p>
+<p>Return structured outcomes with operation ID, scene/workspace identity, affected objects, warnings and output artifact locations. Large files flow through the companion's artifact channel rather than being embedded in MCP messages.</p>
+<p>Use the community MCP integration as a version-pinned starting point where it fits. Its Python execution support is powerful but does not provide product-state ownership, publication controls or a complete sandbox. <a aria-label="Source D8" class="ref-link" href="#ref-D8">D8</a></p>
+<h3 id="tool-strategy">Tool strategy</h3>
+<p>Provide stable tools for repetitive boundaries: inspect scene, capture views, validate source, save a coherent checkpoint, collect dependencies and export with a profile. Allow scoped exploratory scripts for creative work. Promote repeated successful scripts to reviewed tooling rather than regenerating them every session.</p>
+<p>An integration cannot guarantee idempotence for arbitrary scene scripts. For risky operations, use precondition checks, operation receipts and before/after checkpoints. Restrict arbitrary code according to user policy rather than pretending a text filter makes Python execution safe.</p>
+<h3 id="session-selection">Session selection</h3>
+<p>Bind a runner to a specific Blender instance and entry file. Do not connect to the first open socket and assume it belongs to the requested job. Detect changed files/processes, unexpected scene resets and stale workspace identity before applying commands.</p>
+<p>For parallel sessions, use separate workspaces and explicit Blender process identities. The v1 default should be one interactive mutation session on the MacBook, with resource limits for background exports/reviews.</p>
+</section><section id="16-claude-code-and-codex-provider-adapters"><h2>16. Claude Code and Codex provider adapters</h2>
+<h3 id="provider-neutral-product-contract">Provider-neutral product contract</h3>
+<p>Both adapters need to start a session, send a task, surface progress and permission requests, report completion/failure, and support interruption/resumption to the extent the provider actually exposes it. Normalize product events without discarding provider-specific diagnostics.</p>
+<p>Store provider session IDs and available usage information as provenance. Do not make them the authoritative source revision or task identity. A completed chat turn does not mean a valid asset was submitted.</p>
+<h3 id="supported-integration-surfaces">Supported integration surfaces</h3>
+<p>Claude Code documents programmatic execution, including structured JSON/streaming output. Codex documents non-interactive execution and App Server integration with local stdio. Use those supported surfaces rather than scraping terminal text. Pin schemas and test the exact installed versions. <a aria-label="Source D10" class="ref-link" href="#ref-D10">D10</a> <a aria-label="Source D12" class="ref-link" href="#ref-D12">D12</a> <a aria-label="Source D13" class="ref-link" href="#ref-D13">D13</a></p>
+<p>Recommended evaluation: a structured Claude Code interface for initial managed runs, with SDK use if interaction needs justify it; Codex App Server over local stdio for rich managed sessions, with non-interactive execution for bounded tasks. This is an integration recommendation, not a frozen choice of provider API version.</p>
+<h3 id="adapter-event-model">Adapter event model</h3>
+<pre><code class="language-text">session_started
+progress_message
+operation_proposed
+permission_required
+operation_started
+operation_finished
+checkpoint_requested
+review_gate_reached
+submission_ready
+interrupted
+failed
+session_completed
+</code></pre>
+<p>These are proposed normalized product events, not claims about either provider's native event names. Preserve ordering, event IDs and raw diagnostic references where safe. Treat unsupported capabilities explicitly; never emulate reliable pause/resume by sending an optimistic status string.</p>
+<h3 id="permissions-and-credentials">Permissions and credentials</h3>
+<p>Keep provider credentials on the MacBook in supported local authentication facilities. Do not put tokens into asset packages, logs, generated scripts or backend project records. Do not extract hidden credential caches or bypass provider access policies.</p>
+<p>Separate local application execution from hosted model inference. The user selected Claude Code and Codex, but the scope of allowed outbound asset data remains open. Freeze a policy for which briefs, source text, images, renders and tool results may leave the device. Deny unapproved categories rather than assuming whole-library access.</p>
+<h3 id="two-approval-layers">Two approval layers</h3>
+<p>Provider permissions authorize a tool or file action. AssetStudio gates authorize a product milestone or publication. Neither implies the other. Agent permission to save a file does not authorize it to make that file the current asset version.</p>
+<p>Use an independent review context when useful, but keep default orchestration economical. Separate logical authoring, critique and integration responsibilities without automatically launching four costly agents for every small prop.</p>
+</section><section id="17-security-and-trust-boundaries"><h2>17. Security and trust boundaries</h2>
+<h3 id="threat-model">Threat model</h3>
+<p>The initial deployment is a trusted operator with paired personal machines, not an anonymous multi-tenant render farm. Nevertheless, arbitrary scripts, uploaded source files, external references and network failures create real boundaries. The system must not rely on “local network” as authorization.</p>
+<p>The earlier backend used a custom mutation header and origin check appropriate to its loopback-oriented posture. That is CSRF protection, not authenticated remote node identity or per-job authorization. Add real node credentials and scoped permissions before exposing remote execution.</p>
+<h3 id="pairing-and-network-access">Pairing and network access</h3>
+<p>Use a user-confirmed pairing flow with a short-lived enrollment secret, a stable node identity and revocable credentials. Require authenticated TLS for remote control/transfer. A private VPN or trusted reverse proxy may simplify access, but does not remove application authorization.</p>
+<p>Keep Blender's scene-control socket local to the MacBook. The community bridge documentation warns about unauthenticated/unencrypted local socket exposure. Do not publish that endpoint directly to the network. <a aria-label="Source D8" class="ref-link" href="#ref-D8">D8</a></p>
+<h3 id="least-privilege">Least privilege</h3>
+<p>A node can read assigned inputs, upload designated outputs and report status. It cannot approve gates, read every project, mutate source records directly, choose arbitrary target directories or push to Git. A companion should not gain access to unrelated home-directory data merely because it runs under the user's account.</p>
+<p>Restrict download URLs and artifact access to intended project/attempt scope. Do not allow agents to turn an artifact-fetch tool into unrestricted server-side URL fetching. Short-lived transfer links need expiry and purpose binding.</p>
+<h3 id="blender-source-is-executable-adjacent-content">Blender source is executable-adjacent content</h3>
+<p>Treat scripts, drivers, linked libraries and add-ons as untrusted unless explicitly approved. Disable automatic script execution for inspection where possible and document what this prevents. That setting is not a complete sandbox against parser vulnerabilities, malicious add-ons or code explicitly executed through MCP. <a aria-label="Source B3" class="ref-link" href="#ref-B3">B3</a></p>
+<p>Inspect unfamiliar sources in a restricted execution environment with resource limits, minimal filesystem access and controlled network policy. If required functionality depends on blocked code, report it and request the appropriate permission rather than silently enabling everything.</p>
+<h3 id="prompt-injection-and-external-references">Prompt injection and external references</h3>
+<p>Reference images, readme files, imported metadata and comments are task data. They do not grant permission to install software, read secrets or change the plan. Agents should identify conflicting instructions in untrusted inputs and continue under the frozen policy.</p>
+<p>The agent's shell sandbox does not automatically confine a separate Blender process reached through MCP. Enforce restrictions at the actual execution/process boundary. Claude's security documentation also treats MCP server trust and permissions as explicit concerns. <a aria-label="Source D11" class="ref-link" href="#ref-D11">D11</a></p>
+<h3 id="upload-and-archive-safety">Upload and archive safety</h3>
+<p>Check path containment, symlinks, absolute paths, duplicate normalized names, expansion ratios and aggregate sizes before materialization. Parse/inspect in constrained processes where warranted. Reject unsupported files clearly. A clean hash proves identity, not safety or licensing.</p>
+<p>Redact credentials and sensitive paths from routine logs. Keep audit records for permission grants, source access, human takeover, overrides and publication. No hidden telemetry is required for the architecture.</p>
+</section><section id="18-validation-review-gates-and-provenance"><h2>18. Validation, review gates and provenance</h2>
+<h3 id="validation-layers">Validation layers</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Purpose</th>
+<th>Suggested executor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Transfer integrity</td>
+<td>Size, hash, artifact references and manifest completeness</td>
+<td>Studio/storage worker.</td>
+</tr>
+<tr>
+<td>Source inspection</td>
+<td>Blender readability, dependency inventory and declared entry point</td>
+<td>Restricted Blender worker/companion.</td>
+</tr>
+<tr>
+<td>Geometry/material profile</td>
+<td>Dimensions, transforms, mesh/material budgets, maps and UV requirements</td>
+<td>Blender and CPU validators.</td>
+</tr>
+<tr>
+<td>Rig/animation profile</td>
+<td>Skeleton mapping, weights, clips, root motion, contacts and export playback</td>
+<td>Blender plus Godot test runner.</td>
+</tr>
+<tr>
+<td>glTF format validation</td>
+<td>Internal references, accessor/binary consistency and format constraints</td>
+<td>Pinned Khronos validator.</td>
+</tr>
+<tr>
+<td>Artistic review</td>
+<td>Style, silhouette, readability, deformation and motion intent</td>
+<td>Human, with advisory AI critique.</td>
+</tr>
+<tr>
+<td>Delivery validation</td>
+<td>Godot import, paths, clips, materials and wrapper integration</td>
+<td>Isolated Godot test project.</td>
+</tr>
+</tbody>
+</table></div>
+<p>The glTF Validator provides format checks and structured reports. It does not certify artistic quality. Keep its version and report tied to exact exported bytes. <a aria-label="Source D6" class="ref-link" href="#ref-D6">D6</a></p>
+<h3 id="configurable-gates">Configurable gates</h3>
+<p>Allow projects/jobs to select plan, blockout, material, rig, animation and final-submission gates. A simple prop may use fewer intermediate gates than a character. Some steps can be advisory, but hard integrity and authorization requirements cannot be bypassed by an AI's recommendation.</p>
+<p>Each decision binds the exact submission, source/export hashes, applicable requirements and validator profile. Changing any bound input makes the previous acceptance historical. Provide explicit stale-evidence indicators.</p>
+<p>Review outcomes include accept, reject and request changes. An override needs an authorized actor and rationale, and must only apply to permitted advisory checks. Do not allow override of corrupt bytes, wrong-project artifacts or stale ownership.</p>
+<h3 id="evidence-outputs">Evidence outputs</h3>
+<p>Provide source and delivery previews with labels. Static assets need known camera views; animated assets need actual playback, clip selection and temporal diagnostics. A rotating model preview is not animation validation.</p>
+<p>The existing <code>model-viewer</code> integration can be extended with clip selection and playback control because the library exposes animation support. Preserve the distinction between a web preview and a Godot renderer test. <a aria-label="Source D7" class="ref-link" href="#ref-D7">D7</a></p>
+<h3 id="provenance">Provenance</h3>
+<p>Capture the plan/reference/source chain, provider/model identity when known, engine/model revisions, workflow graph/profile hashes, toolchain versions, seed/settings, author/human corrections and execution receipts. Distinguish operator-declared information from machine-observed evidence.</p>
+<p>Record input-asset and motion-source rights separately from software/model component licenses. Do not assume a runtime's license automatically grants or restricts every output in the same way. Unknown rights stay unknown until reviewed; this report does not provide legal clearance for any model, mocap library or external asset service.</p>
+</section><section id="19-godot-terrain3d-and-delivery"><h2>19. Godot, Terrain3D and delivery</h2>
+<h3 id="authored-source-versus-runtime-output">Authored source versus runtime output</h3>
+<p>Blender remains the authoring source. Use a pinned GLB export profile as the normal reviewed game-delivery artifact. Godot also supports direct <code>.blend</code> import through Blender, which may be useful for local iteration; that convenience must not bypass source history or the reviewed delivery contract. <a aria-label="Source D1" class="ref-link" href="#ref-D1">D1</a></p>
+<p>Godot owns animation state transitions, runtime blending, gameplay behavior and world placement. Blender owns authored clips. The <code>AnimationTree</code>/<code>AnimationPlayer</code> distinction should be reflected in the test-project wrapper rather than attempting to reproduce the whole game inside the source asset. <a aria-label="Source D4" class="ref-link" href="#ref-D4">D4</a></p>
+<h3 id="delivery-plan">Delivery plan</h3>
+<p>Freeze selected asset versions, export hashes, output paths, target profile and wrapper metadata before writing. Show collisions and intended updates. Write only owned/generated files. Preserve hand-authored <code>.tscn</code> wrappers, project configuration and unrelated assets.</p>
+<p>Use staging and atomic per-file replacement where available, then write a durable delivery receipt. Retry should inspect the receipt and hashes, not duplicate names or overwrite changes made after the plan. Removing old generated files requires an explicit owned-file manifest and policy, not a broad directory deletion.</p>
+<h3 id="file-package-example">File package example</h3>
+<pre><code class="language-text">export-package/
+    assets/
+        props/chest_01/chest_01.glb
+        props/chest_01/asset.json
+    manifest.json
+    validation/
+        chest_01.gltf-validator.json
+        chest_01.godot-test.json
+</code></pre>
+<p>This is a proposed readable layout. Final path patterns and collision policy remain configurable. The authoring handoff package is different: it includes <code>.blend</code>, dependencies, references and task instructions rather than only runtime outputs.</p>
+<h3 id="isolated-godot-test-project">Isolated Godot test project</h3>
+<p>Import the exact export, instantiate it under a known wrapper, check scale/front/origin/materials, list and play required clips, and validate declared metadata. Run headless checks where useful and generate visual evidence for appearance/motion. Headless execution is acceptable; absence of output inspection is not.</p>
+<p>Test format compatibility and gameplay integration separately. A valid exported attack clip does not prove combat logic or multiplayer synchronization. Those remain game-project responsibilities.</p>
+<h3 id="terrain3d-boundary">Terrain3D boundary</h3>
+<p>Use Terrain3D as the terrain authority through a Godot-side adapter. AssetStudio supplies static/foliage/interactive classifications, placement hints and tested exports. It does not directly edit Terrain3D internals.</p>
+<p>The documented instancer has representation-specific limitations, including treatment of scene transforms and collision. Validate the pinned plugin and use ordinary scenes for important interactive objects when required. Avoid assuming an arbitrary multi-object <code>.blend</code> export is immediately suitable for dense instancing. <a aria-label="Source D5" class="ref-link" href="#ref-D5">D5</a></p>
+<h3 id="git-delivery">Git delivery</h3>
+<p>A later optional Git target must stage only managed export paths. No <code>git add .</code>, automatic branch replacement or implicit push. A push is a separate explicit action. The initial agreed target remains package/files plus the isolated Godot test project.</p>
+</section><section id="20-backend-persistence-modularity-and-scaling"><h2>20. Backend persistence, modularity and scaling</h2>
+<h3 id="one-backend-many-workers">One backend, many workers</h3>
+<p>Several compute nodes do not require several backend replicas. Begin with one active Studio process/authority, a durable journal on its machine and canonical project/artifact storage. Keep the single-writer/publication model understandable.</p>
+<p>Retain the distinction between canonical portable project records and the execution journal. Search indexes are derived caches; they must not become an accidental second authority for version identity or publication.</p>
+<h3 id="sqlite-and-local-persistence">SQLite and local persistence</h3>
+<p>A single-backend deployment can retain SQLite where appropriate. Workers access APIs, not database files. Do not share a live WAL database across machines through a network filesystem: SQLite documents the same-host requirement. <a aria-label="Source D14" class="ref-link" href="#ref-D14">D14</a></p>
+<p>Backend backup and restore must include enough journal state to reconcile active/uncertain executions. The node spool is an additional recovery source, not a substitute for the canonical backend record.</p>
+<h3 id="when-to-add-infrastructure">When to add infrastructure</h3>
+<p>Consider an external object store when artifact capacity or transfer patterns justify it. Consider a broker when durable event fan-out or scale requires it. Consider a different transactional database and scheduler-leader design when multiple active backend instances are genuinely needed.</p>
+<p>None of these changes follows automatically from “add a second GPU node.” Do not add infrastructure to compensate for undefined ownership or missing idempotency.</p>
+<h3 id="suggested-monorepo-layout">Suggested monorepo layout</h3>
+<pre><code class="language-text">packages/
+    assetstudio_core/           # product concepts, policies, source/review contracts
+    assetstudio_storage/        # repository backends, integrity, publication
+    assetstudio_processing/     # CPU-safe processing and validation
+    assetstudio_protocol/       # versioned node/attempt/transfer DTOs
+    assetstudio_client/         # typed transport client, no product authority
+
+services/
+    studio/                    # API, UI hosting, workflow and assignment authority
+    compute_node/              # machine identity, local admission, execution adapters
+    prompt_service/            # existing aux runtime
+    worker3d/                  # existing TRELLIS runtime
+
+apps/
+    companion/                 # native MacBook controller and provider adapters
+
+integrations/
+    blender/
+        addon/
+        inspection/
+        export/
+        validation/
+
+comfyui/
+web/
+</code></pre>
+<p>Names are proposed. Dependency direction matters more: core must not import CUDA, Blender, provider SDKs or FastAPI; nodes must not import Studio's mutable application container; provider adapters must not implement publication. Share protocol/client utilities without merging GPU execution and interactive authoring into one universal worker class.</p>
+<h3 id="implementation-mapping-from-current-modules">Implementation mapping from current modules</h3>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Existing area</th>
+<th>Proposed work</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/domain.py</code></td>
+<td>Add authoring/source/submission records and explicit workflow variants; preserve old records.</td>
+</tr>
+<tr>
+<td><code>core/contracts.py</code></td>
+<td>Introduce versioned source/delivery profiles without weakening legacy validation.</td>
+</tr>
+<tr>
+<td><code>core/recipes.py</code></td>
+<td>Separate authoring plans from image-candidate recipe assumptions.</td>
+</tr>
+<tr>
+<td><code>storage/project.py</code>, <code>publication.py</code></td>
+<td>Source revision commit, package reachability, source-capable publication and exact-bound receipts.</td>
+</tr>
+<tr>
+<td><code>server/studio.py</code>, <code>settings.py</code></td>
+<td>Replace singleton remote-engine assumptions with node registry/client configuration.</td>
+</tr>
+<tr>
+<td><code>server/services/runtime.py</code></td>
+<td>Node-reported verified model inventory and aggregated recipe readiness.</td>
+</tr>
+<tr>
+<td><code>server/gpu.py</code>, coordinator</td>
+<td>Extract local physical-device ownership; keep central task/gate scheduling.</td>
+</tr>
+<tr>
+<td>Import/library routers</td>
+<td>Add typed source-package inspection and submission; retain image/media distinction.</td>
+</tr>
+<tr>
+<td>Frontend asset/detail/viewer</td>
+<td>Source status, revision history, dependency inspection, session ownership and animation review.</td>
+</tr>
+<tr>
+<td>New companion/Blender integration</td>
+<td>Workspace materialization, provider adapters, controlled checkpointing and export/QA.</td>
+</tr>
+</tbody>
+</table></div>
+</section><section id="21-ui-requirements-without-freezing-the-planning-interface"><h2>21. UI requirements without freezing the planning interface</h2>
+<p>The interface should make task, source and delivery state visible without requiring the user to understand worker internals.</p>
+<h3 id="planning-and-job-view">Planning and job view</h3>
+<p>Show the brief, references, selected source, proposed outputs, gate policy and provider/runner choice. Preserve an editable draft and an explicit frozen plan. Display unsupported requirements and style/reference conflicts before execution.</p>
+<p>Offer both <strong>Download handoff</strong> and <strong>Start on MacBook</strong>. Explain when the MacBook or required toolchain is unavailable. A saved job is not automatically authorized to run inference or external agent calls.</p>
+<h3 id="authoring-workspace-view">Authoring workspace view</h3>
+<p>Show the active writer, provider, Blender/tool versions, current source revision, last local/remote checkpoint, dirty/unsynced state, active operation and review gate. Provide pause, takeover, resume, checkpoint and submit actions with clear preconditions.</p>
+<p>Do not show a fake percentage when there is no measurable denominator. Use stage/status and actual elapsed work. Surface “waiting for human,” “disconnected” and “uncertain operation” distinctly.</p>
+<h3 id="asset-and-source-view">Asset and source view</h3>
+<p>Show <code>.blend</code> entry point, dependency list, source-revision history, provenance, restoration result, available exports and their readiness. Allow source-only assets. Separate accepted source, current library version and last delivered version.</p>
+<p>For animation, list clips with playback, scrub, speed, loop and root-motion metadata. Show source versus Godot evidence separately. An unavailable preview should not delete or invalidate the stored source.</p>
+<h3 id="nodes-and-runtime-view">Nodes and runtime view</h3>
+<p>Display node health, platform, devices, verified/loaded models, capacity, reservations, recent failures and unsynced outputs. Explain why a task cannot run: no compatible model revision, insufficient resources, disconnected node or unknown device ownership.</p>
+<p>These are required information needs. Layout, conversational planning and a richer desktop UI remain open design choices.</p>
+</section><section id="22-observability-performance-and-operating-limits"><h2>22. Observability, performance and operating limits</h2>
+<h3 id="traceability">Traceability</h3>
+<p>Use project, job, task, attempt, session, source revision, submission and publication IDs consistently in logs/events. Correlate a visible asset version to its source and execution receipts. Preserve error categories rather than returning generic “failed” for every incident.</p>
+<h3 id="metrics">Metrics</h3>
+<p>Track queue time, local preparation, model load time, execution, upload, validation and human waiting separately. Track resource peaks, retries, lost/uncertain attempts, duplicate messages, cache hits and failed restoration. For authoring, record milestone count, correction cycles and accepted-output rate.</p>
+<p>Provider tokens/cost are recorded only when available, with measurement source and provider/model identity. Missing values remain null/unavailable, not zero. Do not infer current billing rules or subscription entitlements from the fact that a CLI is installed.</p>
+<h3 id="limits">Limits</h3>
+<p>Bound upload/package sizes, archive expansion, image dimensions, memory use, execution duration, provider iterations, concurrent sessions and log retention. Keep limits profile-specific and testable. Do not copy example values from a report into universal production limits without measurement.</p>
+<p>A production task cannot silently download a new model, install an add-on, increase external budget or switch a provider to recover from failure. These require explicit policy authorization.</p>
+<h3 id="offline-states">Offline states</h3>
+<p>Distinguish <strong>offline library access</strong>, <strong>offline local inference</strong> and <strong>local agent application with hosted inference</strong>. They are different properties. Library-only mode must still support source browsing, manual handoff preparation and preserved review history without GPU workers.</p>
+<p>The default proposal is to pause new autonomous authoring progression when backend authorization cannot be renewed, while preserving local recovery. Continued offline authoring is an open policy decision; support eventual reconciliation without claiming offline work was remotely approved.</p>
+</section><section id="23-acceptance-test-matrix"><h2>23. Acceptance-test matrix</h2>
+<p>These are proposed release tests, not passing results. Use simulated engines/agents for failure injection, then a small real stack. Test each provider separately; a pass for one does not validate the other.</p>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Scenario</th>
+<th>Required result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A01</td>
+<td>Backend starts without GPU, Blender or model mount</td>
+<td>Library/planning/source history available; execution readiness reflects remote nodes.</td>
+</tr>
+<tr>
+<td>A02</td>
+<td>Two nodes each report local GPU index 0</td>
+<td>Distinct physical resource identities; no reservation collision.</td>
+</tr>
+<tr>
+<td>A03</td>
+<td>Two runtimes share one physical GPU</td>
+<td>Only one ownership authority admits heavy work; unload/drain is acknowledged.</td>
+</tr>
+<tr>
+<td>A04</td>
+<td>Correct model exists only on remote node</td>
+<td>Recipe ready there; backend local weight absence does not block it.</td>
+</tr>
+<tr>
+<td>A05</td>
+<td>Node has wrong model revision</td>
+<td>Explicit incompatibility; no silent substitution.</td>
+</tr>
+<tr>
+<td>A06</td>
+<td>Duplicate assignment delivery</td>
+<td>Same attempt is reconciled, not executed as two new attempts.</td>
+</tr>
+<tr>
+<td>A07</td>
+<td>Backend restart mid-computation</td>
+<td>Durable task state reconciled with node; no duplicate accepted publication.</td>
+</tr>
+<tr>
+<td>A08</td>
+<td>Worker restart after spooling</td>
+<td>Output recovered and ingested before local deletion.</td>
+</tr>
+<tr>
+<td>A09</td>
+<td>Worker restart before result</td>
+<td>Lost attempt recorded; new retry identity required.</td>
+</tr>
+<tr>
+<td>A10</td>
+<td>Lease expiry during unreachable execution</td>
+<td>Unknown state; no unsupported claim that the device is free.</td>
+</tr>
+<tr>
+<td>A11</td>
+<td>Late obsolete result</td>
+<td>Retained/quarantined or rejected as specified, never silently current.</td>
+</tr>
+<tr>
+<td>A12</td>
+<td>Cancel while queued or running</td>
+<td>Intent survives restart; admission and completion obey the documented policy.</td>
+</tr>
+<tr>
+<td>A13</td>
+<td>One invalid asset in a batch</td>
+<td>Unaffected assets continue.</td>
+</tr>
+<tr>
+<td>A14</td>
+<td><code>.blend</code> upload without GLB</td>
+<td>Source preserved and shown with honest inspection/export readiness.</td>
+</tr>
+<tr>
+<td>A15</td>
+<td>Source with external textures/linked dependency</td>
+<td>Complete manifest or explicit unresolved-dependency report.</td>
+</tr>
+<tr>
+<td>A16</td>
+<td>Clean-directory source restore</td>
+<td>Same declared resources available under the supported toolchain.</td>
+</tr>
+<tr>
+<td>A17</td>
+<td>Unsafe archive/path/case collision</td>
+<td>Controlled rejection before workspace escape or ambiguous materialization.</td>
+</tr>
+<tr>
+<td>A18</td>
+<td>Interrupted large upload</td>
+<td>Resumable/replay-safe; partial files never form a committed revision.</td>
+</tr>
+<tr>
+<td>A19</td>
+<td>Reused blob is corrupt</td>
+<td>Hash/integrity check detects it and blocks affected dependants.</td>
+</tr>
+<tr>
+<td>A20</td>
+<td>Blender and texture edited during checkpoint</td>
+<td>Snapshot is coherent or rejected; never silently mixed across saves.</td>
+</tr>
+<tr>
+<td>A21</td>
+<td>Agent timeout after scene mutation</td>
+<td>Inspect receipt/state; no blind duplicate geometry operation.</td>
+</tr>
+<tr>
+<td>A22</td>
+<td>Human takeover</td>
+<td>Old generation fenced, operation drained, one writer remains.</td>
+</tr>
+<tr>
+<td>A23</td>
+<td>Agent resumes after manual edit</td>
+<td>Fresh scene/source state supplied; no stale selection assumptions.</td>
+</tr>
+<tr>
+<td>A24</td>
+<td>MacBook sleeps</td>
+<td>Session disconnected, no automatic second writer; local data preserved.</td>
+</tr>
+<tr>
+<td>A25</td>
+<td>Claude Code manual and managed modes</td>
+<td>Same source/submission contract, permission handling and provenance.</td>
+</tr>
+<tr>
+<td>A26</td>
+<td>Codex manual and managed modes</td>
+<td>Same contract tested independently; unsupported controls exposed.</td>
+</tr>
+<tr>
+<td>A27</td>
+<td>Hosted-data permission not granted</td>
+<td>No prohibited reference/source upload to provider.</td>
+</tr>
+<tr>
+<td>A28</td>
+<td>Reference contains malicious instructions</td>
+<td>Treated as data; cannot broaden permissions or publish.</td>
+</tr>
+<tr>
+<td>A29</td>
+<td>Source changes after review</td>
+<td>Acceptance becomes stale; wrong-source publication refused.</td>
+</tr>
+<tr>
+<td>A30</td>
+<td>Source-only accepted milestone</td>
+<td>Can be retained/published as source-ready without being game-ready.</td>
+</tr>
+<tr>
+<td>A31</td>
+<td>Corrupt/malformed GLB JSON shapes</td>
+<td>Controlled validation failure, including the reported type-assumption cases.</td>
+</tr>
+<tr>
+<td>A32</td>
+<td>Animated export</td>
+<td>Required clips, rig, contacts/root semantics and playback verified.</td>
+</tr>
+<tr>
+<td>A33</td>
+<td>Static-only transform requested for skinned asset</td>
+<td>Explicitly unsupported or routed through a tested animation-aware operation.</td>
+</tr>
+<tr>
+<td>A34</td>
+<td>Godot test import fails</td>
+<td>Source retained; delivery not marked successful.</td>
+</tr>
+<tr>
+<td>A35</td>
+<td>Delivery collision with hand-edited file</td>
+<td>Preview/conflict; no overwrite outside the approved plan.</td>
+</tr>
+<tr>
+<td>A36</td>
+<td>Lost publication/delivery response</td>
+<td>Retry returns the same receipt/result, not an extra version/export.</td>
+</tr>
+<tr>
+<td>A37</td>
+<td>Archived guidance image used by frozen plan</td>
+<td>Historical evidence preserved; new selection rules remain explicit.</td>
+</tr>
+<tr>
+<td>A38</td>
+<td>Node protocol/toolchain mismatch</td>
+<td>Refused with actionable compatibility diagnostics.</td>
+</tr>
+<tr>
+<td>A39</td>
+<td>Retention/GC dry run</td>
+<td>No referenced published source, dependency or unacknowledged spool is removed.</td>
+</tr>
+<tr>
+<td>A40</td>
+<td>Backup restore with active/uncertain work</td>
+<td>Canonical data verified and attempts reconciled under a documented recovery path.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="real-acceptance-assets">Real acceptance assets</h3>
+<p>Use a crate/table, a hinged chest/door and a small modular building set first. Add a sword for hard-surface checks, then a humanoid under the tested profile. Treat a deer/video-fitting experiment as a research benchmark after the stable pipeline exists.</p>
+<p>Required evidence includes the actual source package, delivered bytes, validator reports, playback/renders and a restore result. Repository-reported prior tests are useful context but do not certify the new distributed/Blender features.</p>
+</section><section id="24-migration-and-implementation-plan"><h2>24. Migration and implementation plan</h2>
+<h3 id="phase-0-baseline-and-contract-audit">Phase 0 — Baseline and contract audit</h3>
+<p>Pin the implementation baseline and compare it with this report's source references. Run existing backend/frontend tests and capture actual results. Inventory current IDs, storage contracts, receipts, model profiles, media references and frontend API shapes. Address the malformed-GLB test cases without presenting that as a complete audit.</p>
+<p>Preserve newer review/run/provenance hardening and Media Library behavior. Avoid reintroducing the older acceptance-binding or readiness weaknesses while extracting execution.</p>
+<h3 id="phase-1-protocol-and-node-registry">Phase 1 — Protocol and node registry</h3>
+<p>Create typed node, attempt, capability, inventory and transfer contracts. Add registration/revocation, durable assignment and simulated-node tests. Define single-backend ownership and database boundaries. Demonstrate two nodes with identical local GPU indices and incompatible model revisions.</p>
+<p>Keep a compatibility adapter for the existing local deployment so the product remains usable during extraction. Do not migrate all engine code and authoring UI in one untestable change.</p>
+<h3 id="phase-2-extract-linux-compute-control">Phase 2 — Extract Linux compute control</h3>
+<p>Move verified model inventory and physical-device admission to the compute node. Adapt ComfyUI/aux/TRELLIS through existing interfaces. Preserve result spooling, cancellation, epochs and exact model/workflow receipts. Run Studio with no model-weight mount as the acceptance target.</p>
+<p>Prove one remote node before optimizing multiple nodes. Then add capability-based placement, cache/residency preference and fairness, with failure-injection tests for disconnect/restart.</p>
+<h3 id="phase-3-first-class-source-lifecycle-and-manual-round-trip">Phase 3 — First-class source lifecycle and manual round trip</h3>
+<p>Implement source-package upload, dependency manifest, immutable source revision, restoration and source-only asset state. Add handoff packages and manual submission before managed agent launch. Prove that an edited source can return, be reviewed and reopen elsewhere without the original MacBook paths.</p>
+<p>Extend publication contracts by schema/profile, not by disabling existing role checks. Keep legacy model-only versions valid. Add retention reachability and restore tests before relying on a large source library.</p>
+<h3 id="phase-4-macbook-companion-and-blender-bridge">Phase 4 — MacBook companion and Blender bridge</h3>
+<p>Implement pairing, local workspace/process binding, serialized mutation, coherent checkpointing, local spool and explicit takeover. Start with one interactive session and a small versioned tool set. Test sleep, agent interruption and Blender crash recovery.</p>
+<h3 id="phase-5-claude-code-and-codex-adapters">Phase 5 — Claude Code and Codex adapters</h3>
+<p>Integrate each provider through a supported structured interface. Implement normalized events, permission prompts, bounded runs, reference-data policy and identical submission contracts. Preserve manual mode. Validate provider capabilities independently and document limitations.</p>
+<h3 id="phase-6-review-and-godot-delivery">Phase 6 — Review and Godot delivery</h3>
+<p>Add source/dependency views, animation controls, validation reports and exact-bound gates. Implement export plans, file/package delivery and the isolated Godot test target. Preserve hand-authored wrappers and forbid main-game writes by default.</p>
+<h3 id="phase-7-animation-profile-and-scale-hardening">Phase 7 — Animation profile and scale hardening</h3>
+<p>Complete the articulated-object slice, then one humanoid profile with retargeting/contact/loop checks. Profile artifact transfer, memory, storage growth, multi-node fairness and provider cost. Only then decide whether object storage, chunk deduplication or richer orchestration is justified.</p>
+<h3 id="migration-rules">Migration rules</h3>
+<p>Do not rewrite immutable published provenance, recycle IDs or relabel old generated assets as Blender-authored. Use explicit schema versions and compatibility readers. Mutable records may migrate through checked updates. Preserve command receipts so retries across an upgrade do not create duplicate versions.</p>
+<p>Keep API and worker compatibility windows explicit. Reject unsafe version combinations with a reason rather than best-effort decoding of unknown fields. The migration document should include old/new workflow mapping, source-role contract changes, recovery steps and rollback limitations.</p>
+</section><section id="25-open-decisions-and-recommended-defaults"><h2>25. Open decisions and recommended defaults</h2>
+<div class="table-wrap" tabindex="0"><table>
+<thead>
+<tr>
+<th>Open item</th>
+<th>Recommendation</th>
+<th>Why it remains open</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Physical backend location</td>
+<td>Always-on Linux server when available; co-location with GPU node also supported</td>
+<td>The user did not choose between these deployment options.</td>
+</tr>
+<tr>
+<td>Planning UI</td>
+<td>Domain-first plan plus readable preview; form/chat/Markdown interchangeable</td>
+<td>The user explicitly asked to keep it open.</td>
+</tr>
+<tr>
+<td>Supported toolchain</td>
+<td>Pin tested Blender, Godot, Terrain3D, MCP and provider versions</td>
+<td>No exact versions have been selected or acceptance-tested here.</td>
+</tr>
+<tr>
+<td>Hosted model data</td>
+<td>Explicit per-project/job policy; no blanket whole-library access</td>
+<td>Provider selection is not a complete data-sharing authorization.</td>
+</tr>
+<tr>
+<td>Source-kit publication</td>
+<td>One primary <code>.blend</code> per revision; define multi-asset outputs later</td>
+<td>First-class <code>.blend</code> does not settle one-kit-to-many-asset semantics.</td>
+</tr>
+<tr>
+<td>Companion UI/language</td>
+<td>Native CLI/service first; small status UI later</td>
+<td>No implementation language or desktop framework was chosen.</td>
+</tr>
+<tr>
+<td>Offline authoring</td>
+<td>Preserve local work; pause unauthorized new progression until reconnect</td>
+<td>Continued offline autonomous editing needs a clear ownership/reconciliation policy.</td>
+</tr>
+<tr>
+<td>Retention and quotas</td>
+<td>Named/source preservation plus bounded autosave/log/cache policies</td>
+<td>Actual source sizes and storage budget must be measured.</td>
+</tr>
+<tr>
+<td>Review policy</td>
+<td>Configurable milestones; mandatory integrity and authorized final promotion</td>
+<td>Exact category templates and override rules need product definition.</td>
+</tr>
+<tr>
+<td>Advanced motion tools</td>
+<td>Separate research adapters after the basic pipeline</td>
+<td>Video-fitting quality and cost were not verified.</td>
+</tr>
+<tr>
+<td>Multiple active backends</td>
+<td>Defer</td>
+<td>Multi-worker execution does not require multi-backend consistency complexity.</td>
+</tr>
+</tbody>
+</table></div>
+<p>These entries are not missing requirements for the confirmed core. They are explicit configuration or product decisions that must not be silently frozen by an implementation agent.</p>
+</section><section id="26-final-architecture-verdict-and-completion-criteria"><h2>26. Final architecture verdict and completion criteria</h2>
+<p>The three-role split is appropriate because inference and interactive authoring need different hardware, operating systems, permissions and recovery behavior. The cost is a real distributed-systems surface: pairing, transfer, uncertain execution, version compatibility and source restoration. Clear ownership makes that cost manageable.</p>
+<p>The implementation is complete for the agreed scope when a user can plan an asset, choose manual or managed MacBook authoring with either supported provider, take over safely, preserve <code>.blend</code> sources and dependencies, submit exact evidence, pass configurable review and deliver the approved export into a Godot test project. The backend must remain usable without model weights or connected execution machines, and multiple compute nodes must execute independently without double-counting physical resources or duplicating publication.</p>
+<div class="callout"><strong>Non-negotiable boundary:</strong> Studio decides what is requested and accepted. A compute node decides whether it can safely execute assigned model work. The MacBook companion controls who may edit the Blender workspace. Immutable source and result records connect those responsibilities without making any worker a second product authority.</div>
+<h3 id="coverage-and-limitations">Coverage and limitations</h3>
+<p>This report covers the prior code review, source/version integration, two handoff modes, native MacBook authoring, provider adapters, configurable review, multi-service/multi-worker design, security, storage, recovery, animation-aware QA, Godot/Terrain3D boundaries and implementation phases. It incorporates a targeted newer repository check without claiming a whole-codebase revalidation.</p>
+<p>It does not claim successful Blender MCP execution, real provider integration, visual inspection of YouTube footage, a fresh full test-suite pass, a production security audit or current legal clearance for third-party assets/models. All proposed commands, records and tests must be implemented and validated against a pinned toolchain.</p>
+</section><section id="sources-and-evidence-register"><h2>Sources and evidence register</h2><p>External links are references, not embedded dependencies. The report itself works offline. Retrieval status is stated where it affects confidence.</p><ul class="references"><li id="ref-R0"><span class="tag">R0</span> <a href="https://github.com/andrejvysny/asset-studio/tree/47c20db4da20c75b4095eb7c899feab266711583" rel="noopener noreferrer" target="_blank">AssetStudio: pinned repository snapshot</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/tree/47c20db4da20c75b4095eb7c899feab266711583</span><span class="reference-note">Head checked on 30 September 2026; targeted refresh, not a new whole-repository validation run.</span></li><li id="ref-R14"><span class="tag">R14</span> <a href="https://github.com/andrejvysny/asset-studio/compare/65c16ab63145ac377149599dc4bef03c11e76879...47c20db4da20c75b4095eb7c899feab266711583" rel="noopener noreferrer" target="_blank">AssetStudio: recent hardening and media-library changes</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/compare/65c16ab63145ac377149599dc4bef03c11e76879...47c20db4da20c75b4095eb7c899feab266711583</span><span class="reference-note">Compare metadata retrieved: two newer commits, review/run/provenance hardening and reusable guidance-image library. No whole-repository retest.</span></li><li id="ref-R1"><span class="tag">R1</span> <a href="https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_core/domain.py" rel="noopener noreferrer" target="_blank">AssetStudio: domain records</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_core/domain.py</span><span class="reference-note">Refreshed source includes MediaItem, existing jobs/builds, assets and versions; no proposed authoring entities yet.</span></li><li id="ref-R8"><span class="tag">R8</span> <a href="https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/packages/assetstudio_storage/publication.py" rel="noopener noreferrer" target="_blank">AssetStudio: publication</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/packages/assetstudio_storage/publication.py</span><span class="reference-note">Earlier full source review; immutable versions, checked role contracts, expected-current pointer and idempotent publication.</span></li><li id="ref-R12"><span class="tag">R12</span> <a href="https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/packages/assetstudio_core/recipes.py" rel="noopener noreferrer" target="_blank">AssetStudio: build recipes</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/packages/assetstudio_core/recipes.py</span><span class="reference-note">Earlier reviewed baseline is generation-oriented; adding fake candidates is not the proposed authoring integration.</span></li><li id="ref-R4"><span class="tag">R4</span> <a href="https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/compose.yml" rel="noopener noreferrer" target="_blank">AssetStudio: prior deployment review</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/compose.yml</span><span class="reference-note">Inspected in the architecture discussion: Studio, ComfyUI, aux and worker3d; Studio mounts model weights for readiness checks.</span></li><li id="ref-R5"><span class="tag">R5</span> <a href="https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/studio.py" rel="noopener noreferrer" target="_blank">AssetStudio: prior application-container review</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/studio.py</span><span class="reference-note">Inspected at 65c16ab: singleton engine/aux/worker3d and a fixed gpu1 ownership lane.</span></li><li id="ref-R6"><span class="tag">R6</span> <a href="https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/services/runtime.py" rel="noopener noreferrer" target="_blank">AssetStudio: prior runtime/readiness review</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/services/runtime.py</span><span class="reference-note">Inspected at 65c16ab: central local model-root verification must be replaced for remote-node readiness.</span></li><li id="ref-R7"><span class="tag">R7</span> <a href="https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/gpu.py" rel="noopener noreferrer" target="_blank">AssetStudio: GPU handoff implementation</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/services/studio/assetstudio_server/gpu.py</span><span class="reference-note">Inspected at 65c16ab: monotonic epochs and acknowledged drain/release; unknown ownership blocks dispatch.</span></li><li id="ref-R2"><span class="tag">R2</span> <a href="https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_core/contracts.py" rel="noopener noreferrer" target="_blank">AssetStudio: artifact role contracts</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_core/contracts.py</span><span class="reference-note">Refreshed source: model3d requires model and allows preview/meta; first-class Blender source support is still a design gap.</span></li><li id="ref-R3"><span class="tag">R3</span> <a href="https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_processing/glb.py" rel="noopener noreferrer" target="_blank">AssetStudio: GLB validation</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/47c20db4da20c75b4095eb7c899feab266711583/packages/assetstudio_processing/glb.py</span><span class="reference-note">Refreshed source; narrow container and mesh checks. Wrong-shaped JSON values remain an explicit hardening case.</span></li><li id="ref-R11"><span class="tag">R11</span> <a href="https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/web/src/components/ui.tsx" rel="noopener noreferrer" target="_blank">AssetStudio: frontend 3D viewer</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/web/src/components/ui.tsx</span><span class="reference-note">Earlier reviewed baseline: camera controls and auto-rotation, not a clip-review interface.</span></li><li id="ref-R15"><span class="tag">R15</span> <a href="https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/web/src/screens/Export.tsx" rel="noopener noreferrer" target="_blank">AssetStudio: earlier delivery screen</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/web/src/screens/Export.tsx</span><span class="reference-note">Earlier inspected screen is explicitly a future export-target placeholder; not evidence of working bundle/Godot delivery.</span></li><li id="ref-R9"><span class="tag">R9</span> <a href="https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/services/studio/assetstudio_server/services/imports.py" rel="noopener noreferrer" target="_blank">AssetStudio: import workflow</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/8de5fe8b9ff86c3ba1a8d702a57e061866ba0032/services/studio/assetstudio_server/services/imports.py</span><span class="reference-note">Earlier reviewed baseline: PNG/JPEG/GLB and defined bundles, not a Blender source package.</span></li><li id="ref-R16"><span class="tag">R16</span> <a href="https://github.com/andrejvysny/asset-studio/commit/47c20db4da20c75b4095eb7c899feab266711583" rel="noopener noreferrer" target="_blank">AssetStudio: media-library commit</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/commit/47c20db4da20c75b4095eb7c899feab266711583</span><span class="reference-note">Commit describes image-only guidance library, tagging, search, soft archive, and reference reuse; targeted domain confirmation obtained.</span></li><li id="ref-R13"><span class="tag">R13</span> <a href="https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/docs/acceptance.md" rel="noopener noreferrer" target="_blank">AssetStudio: acceptance evidence</a><span class="reference-url">https://github.com/andrejvysny/asset-studio/blob/65c16ab63145ac377149599dc4bef03c11e76879/docs/acceptance.md</span><span class="reference-note">Repository-reported evidence, not tests rerun for these reports. GPU variant acceptance was recorded at 65c16ab.</span></li><li id="ref-B2"><span class="tag">B2</span> <a href="https://docs.blender.org/manual/en/4.5/files/blend/packed_data.html" rel="noopener noreferrer" target="_blank">Blender manual: packed data</a><span class="reference-url">https://docs.blender.org/manual/en/4.5/files/blend/packed_data.html</span><span class="reference-note">Versioned reference link; fetch unavailable during consolidation. Dependency behavior must be tested in the selected Blender version.</span></li><li id="ref-D8"><span class="tag">D8</span> <a href="https://github.com/ahujasid/mcp-for-blender" rel="noopener noreferrer" target="_blank">Blender MCP / mcp-for-blender</a><span class="reference-url">https://github.com/ahujasid/mcp-for-blender</span><span class="reference-note">Primary project documentation retrieved; the older ahujasid/blender-mcp URL redirects here. Pin a tested revision.</span></li><li id="ref-D10"><span class="tag">D10</span> <a href="https://code.claude.com/docs/en/headless" rel="noopener noreferrer" target="_blank">Claude Code: programmatic execution</a><span class="reference-url">https://code.claude.com/docs/en/headless</span><span class="reference-note">Official documentation retrieved; supported flags and event schemas must be pinned and tested.</span></li><li id="ref-D12"><span class="tag">D12</span> <a href="https://learn.chatgpt.com/docs/app-server" rel="noopener noreferrer" target="_blank">Codex App Server</a><span class="reference-url">https://learn.chatgpt.com/docs/app-server</span><span class="reference-note">Official documentation retrieved via developers.openai.com/codex/app-server, which redirects to this page.</span></li><li id="ref-D13"><span class="tag">D13</span> <a href="https://learn.chatgpt.com/docs/non-interactive-mode" rel="noopener noreferrer" target="_blank">Codex: non-interactive mode</a><span class="reference-url">https://learn.chatgpt.com/docs/non-interactive-mode</span><span class="reference-note">Official documentation retrieved via developers.openai.com/codex/noninteractive.</span></li><li id="ref-B3"><span class="tag">B3</span> <a href="https://docs.blender.org/manual/en/4.5/advanced/security.html" rel="noopener noreferrer" target="_blank">Blender manual: scripting security</a><span class="reference-url">https://docs.blender.org/manual/en/4.5/advanced/security.html</span><span class="reference-note">Versioned reference link; fetch unavailable during consolidation. Treat imported source files and scripts as untrusted.</span></li><li id="ref-D11"><span class="tag">D11</span> <a href="https://code.claude.com/docs/en/security" rel="noopener noreferrer" target="_blank">Claude Code: security</a><span class="reference-url">https://code.claude.com/docs/en/security</span><span class="reference-note">Official documentation retrieved.</span></li><li id="ref-D6"><span class="tag">D6</span> <a href="https://github.com/KhronosGroup/glTF-Validator" rel="noopener noreferrer" target="_blank">Khronos glTF Validator</a><span class="reference-url">https://github.com/KhronosGroup/glTF-Validator</span><span class="reference-note">Primary project documentation retrieved.</span></li><li id="ref-D7"><span class="tag">D7</span> <a href="https://modelviewer.dev/examples/animation/" rel="noopener noreferrer" target="_blank">model-viewer: animation controls</a><span class="reference-url">https://modelviewer.dev/examples/animation/</span><span class="reference-note">Primary project examples retrieved.</span></li><li id="ref-D1"><span class="tag">D1</span> <a href="https://docs.godotengine.org/en/stable/tutorials/assets_pipeline/importing_3d_scenes/available_formats.html" rel="noopener noreferrer" target="_blank">Godot: available 3D formats</a><span class="reference-url">https://docs.godotengine.org/en/stable/tutorials/assets_pipeline/importing_3d_scenes/available_formats.html</span><span class="reference-note">Official documentation retrieved on 30 September 2026.</span></li><li id="ref-D4"><span class="tag">D4</span> <a href="https://docs.godotengine.org/en/stable/tutorials/animation/animation_tree.html" rel="noopener noreferrer" target="_blank">Godot: using AnimationTree</a><span class="reference-url">https://docs.godotengine.org/en/stable/tutorials/animation/animation_tree.html</span><span class="reference-note">Official documentation retrieved on 30 September 2026.</span></li><li id="ref-D5"><span class="tag">D5</span> <a href="https://terrain3d.readthedocs.io/en/stable/docs/instancer.html" rel="noopener noreferrer" target="_blank">Terrain3D: foliage instancing</a><span class="reference-url">https://terrain3d.readthedocs.io/en/stable/docs/instancer.html</span><span class="reference-note">Official project documentation retrieved; version-specific limitations must be retested against the pinned plugin.</span></li><li id="ref-D14"><span class="tag">D14</span> <a href="https://www.sqlite.org/wal.html" rel="noopener noreferrer" target="_blank">SQLite: write-ahead logging</a><span class="reference-url">https://www.sqlite.org/wal.html</span><span class="reference-note">Official documentation retrieved; WAL requires processes using the database to be on the same host.</span></li></ul>
+</section><div class="no-results">No sections match. Clear the search to show the complete report.</div></div><footer class="foot"><strong>Companion report:</strong> <a href="Modeling_And_Animating_Guide.html">Modeling &amp; Animating Guide</a><br>Consolidated from the discussion, a targeted repository refresh, and the linked primary documentation. All specification examples are proposed unless explicitly marked implemented. Approx. 12,946 words including tables and reference notes.</footer></article></main><script>
+(function(){
+ const input=document.getElementById('search'), sections=[...document.querySelectorAll('main section')], nav=[...document.querySelectorAll('.toc a')], status=document.getElementById('search-status');
+ function filter(){const q=input.value.trim().toLowerCase();let n=0;sections.forEach(s=>{const yes=!q||s.textContent.toLowerCase().includes(q);s.classList.toggle('hidden-by-search',!yes);if(yes)n++});nav.forEach(a=>{const s=document.getElementById(a.hash.slice(1));a.classList.toggle('hidden-by-search',!!s&&s.classList.contains('hidden-by-search'))});status.textContent=q?`${n} matching section${n===1?'':'s'} · Escape to clear`:'Search stays on this device';document.querySelector('.no-results').style.display=n?'none':'block'}
+ input.addEventListener('input',filter);input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.value='';filter()}});
+ document.querySelectorAll('a[href^="#"]').forEach(a=>a.addEventListener('click',()=>{if(input.value){input.value='';filter()}}));
+ document.getElementById('print').addEventListener('click',()=>window.print());
+ document.getElementById('expand').addEventListener('click',e=>{const ds=[...document.querySelectorAll('details')],open=ds.some(d=>!d.open);ds.forEach(d=>d.open=open);e.target.textContent=open?'Close details':'Open details'});
+ document.getElementById('mobile-nav').addEventListener('click',e=>{const open=document.querySelector('.sidebar').classList.toggle('nav-open');e.target.setAttribute('aria-expanded',String(open));e.target.textContent=open?'Hide contents':'Show contents'});
+ function progress(){const h=document.documentElement;document.getElementById('progress').style.width=((h.scrollTop/(h.scrollHeight-h.clientHeight||1))*100)+'%'}window.addEventListener('scroll',progress,{passive:true});progress();
+ if('IntersectionObserver'in window){const obs=new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting){nav.forEach(a=>a.classList.toggle('active',a.hash==='#'+e.target.id))}})},{rootMargin:'-8% 0px -72% 0px'});sections.forEach(s=>obs.observe(s))}
+ document.querySelectorAll('pre:not(.no-copy)').forEach(pre=>{const code=pre.querySelector('code');if(!code)return;const b=document.createElement('button');b.type='button';b.className='copy-code';b.textContent='Copy';b.setAttribute('aria-label','Copy code sample');b.addEventListener('click',async()=>{try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(code.textContent)}else{const r=document.createRange();r.selectNodeContents(code);const s=window.getSelection();s.removeAllRanges();s.addRange(r);document.execCommand('copy');s.removeAllRanges()}b.textContent='Copied';setTimeout(()=>b.textContent='Copy',1200)}catch{b.textContent='Select to copy'}});pre.appendChild(b)});
+ filter();
+})();
+</script></body></html>

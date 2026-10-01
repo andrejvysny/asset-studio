@@ -49,10 +49,10 @@ class BuildInput:
                             **({"advisory": True} if advisory else {})})
         return bool(ok)
 
-    def artifact_id(self, role: str, *extra: str) -> str:
+    def artifact_id(self, role: str, *extra: str, call: str | None = None) -> str:
         """Derived per (run, role): re-registering after a crash returns the same artifact record."""
         assert self.run is not None
-        return derived_id("art", self.run.id, role, *extra)
+        return self.env.output_id("art", self.run.id, role, *extra, call=call)
 
     def add_png(self, role: str, arr: np.ndarray, meta: dict[str, Any] | None = None) -> str:
         art = self.env.ctx.store.register_artifact(to_png(arr), role, "image/png", lineage=[self.source.id],
@@ -116,15 +116,17 @@ def foreground_mask(inp: BuildInput, allow_compute: bool = False) -> np.ndarray:
         return metrics.mask_array(store.artifact_bytes(mask_id))
     if not allow_compute:
         raise ItemFailed("no reusable foreground mask and no segmentation stage ran for this build", "internal")
-    aux = inp.env.studio.aux
+    aux = inp.env.aux
     if aux is None:
         raise Blocked("no segmentation service configured", "aux_unconfigured", operator=True)
     try:
-        res = aux.cutout(image=inp.data, epoch=inp.env.epoch("aux"))
+        with inp.env.call("segment"):
+            res = aux.cutout(image=inp.data, epoch=inp.env.epoch("aux"))
     except EngineRejected as e:
         raise ItemFailed(f"segmentation rejected the approved image: {e}", "input_invalid") from e
     art = store.register_artifact(res["mask_png"], "mask", "image/png", lineage=[inp.source.id],
-                                  source={"model": res.get("meta", {})}, artifact_id=inp.artifact_id("mask"))
+                                  source={"model": res.get("meta", {})},
+                                  artifact_id=inp.artifact_id("mask", call="segment"))
     inp.meta["mask"] = {"artifact_id": art.id, "source": "computed", "simulated": bool(aux.simulated)}
     return metrics.mask_array(res["mask_png"])
 

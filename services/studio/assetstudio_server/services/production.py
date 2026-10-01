@@ -85,7 +85,7 @@ def _fail(results: list[dict[str, Any]], unit: ItemRef, jid: str | None, e: ApiE
 
 
 def _exporters(studio: Studio) -> dict[str, Any]:
-    return (studio.worker3d.health().get("exporters") or {}) if studio.worker3d is not None else {}
+    return (w.health().get("exporters") or {}) if (w := studio.execution.worker3d()) is not None else {}
 
 
 def _require_exporter(exporters: dict[str, Any], name: str) -> None:

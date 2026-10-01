@@ -20,7 +20,26 @@ from assetstudio_core.ids import derived_id, new_id
 from . import runcontrol
 from .runcontrol import NOT_HELD_SQL, RunControlMixin, RunNotOpen
 
+ADMISSION_PAUSED_KEY = "admission_paused"  # "1" while `execution switch` drains or holds the journal (R15)
+EXECUTION_GENERATION_KEY = "execution_generation"  # bumped by every serving-process activation
+
+
+def fence_clause(generation: int | None, *, paused: bool = True) -> tuple[str, list[Any]]:
+    """SQL predicate (journal_meta lives in the same database) that makes an UPDATE fail once the pause flag is set
+    or a newer serving process has activated. generation=None skips the generation check (never activated)."""
+    parts: list[str] = []
+    args: list[Any] = []
+    if paused:
+        parts.append("COALESCE((SELECT value FROM journal_meta WHERE key=?),'0') != '1'")
+        args.append(ADMISSION_PAUSED_KEY)
+    if generation is not None:
+        parts.append("CAST(COALESCE((SELECT value FROM journal_meta WHERE key=?),'0') AS INTEGER) = ?")
+        args += [EXECUTION_GENERATION_KEY, generation]
+    return " AND ".join(parts) or "1", args
+
 TASK_ACTIVE = ("queued", "running", "reconciling", "blocked")
+# Attempt states where a runner may still be working (or its outcome is unknown); `ingested` is delivered.
+INFLIGHT_ATTEMPTS = ("offered", "leased", "admitted", "executing", "spooled", "uploading", "uncertain")
 TASK_TERMINAL = ("succeeded", "failed", "cancelled")
 __all__ = ["Busy", "NewTask", "RunNotOpen", "StageTask", "TaskStore", "TASK_ACTIVE", "TASK_TERMINAL"]
 
@@ -260,15 +279,18 @@ class TaskStore(RunControlMixin):
             self.changed.notify_all()
         return n == 1
 
-    def claim(self, task_id: str, pass_id: str) -> bool:
+    def claim(self, task_id: str, pass_id: str, generation: int | None = None) -> bool:
+        """The pause/generation fence is part of the UPDATE: a stale process cannot win a claim from a cache."""
+        fence, fence_args = fence_clause(generation)
         with self._lock:
             n = self._db.execute(
                 "UPDATE stage_tasks SET state='running', pass_id=?, attempts=attempts+1, updated_at=?, "
                 "revision=revision+1 WHERE id=? AND state='queued' AND control='run' AND " + NOT_HELD_SQL + " AND "
                 "NOT EXISTS (SELECT 1 FROM stage_tasks o WHERE o.project_id=stage_tasks.project_id "
-                "AND o.item_id=stage_tasks.item_id AND o.family=stage_tasks.family AND o.state='running' "
-                "AND o.command_id != stage_tasks.command_id)",
-                (pass_id, now_iso(), task_id)).rowcount
+                "AND o.item_id=stage_tasks.item_id AND o.family=stage_tasks.family "
+                "AND o.state IN ('running','reconciling') "
+                "AND o.command_id != stage_tasks.command_id) AND " + fence,
+                (pass_id, now_iso(), task_id, *fence_args)).rowcount
         return n == 1
 
     def progress(self, task_id: str, progress: dict[str, Any], touch: bool = True) -> None:
@@ -336,11 +358,20 @@ class TaskStore(RunControlMixin):
                 self._db.execute("UPDATE stage_tasks SET control='cancel_requested', updated_at=? WHERE id=? "
                                  f"AND state IN ({','.join('?' * len(TASK_ACTIVE))})",
                                  (now_iso(), tid, *TASK_ACTIVE))
+                if self._reconciling_inflight(tid):  # the runner must acknowledge; maintenance settles it
+                    continue
                 if self._set(tid, ("queued", "blocked", "reconciling"), "cancelled",
                              error={"code": "cancelled", "message": "cancelled before start"}):
                     done.append(tid)
             self.changed.notify_all()
         return done
+
+    def _reconciling_inflight(self, task_id: str) -> bool:
+        row = self._db.execute(
+            "SELECT 1 FROM stage_tasks WHERE id=? AND state='reconciling' AND EXISTS (SELECT 1 FROM attempts "
+            f"WHERE task_id=stage_tasks.id AND state IN ({','.join('?' * len(INFLIGHT_ATTEMPTS))}))",
+            (task_id, *INFLIGHT_ATTEMPTS)).fetchone()
+        return row is not None
 
     def set_control(self, ids: list[str], control: str, only_from: tuple[str, ...]) -> int:
         n = 0
@@ -390,9 +421,13 @@ class TaskStore(RunControlMixin):
     def block(self, task_id: str, error: dict[str, Any]) -> str:
         return self.finish(task_id, "blocked", error=error)
 
-    def recover_after_restart(self) -> dict[str, int]:
+    def recover_after_restart(self, keep: frozenset[str] | set[str] = frozenset()) -> dict[str, int]:
         """Never assume work stopped or finished because this process restarted: running tasks are requeued
-        (handlers reconcile engine work by deterministic ids); pending cancellations complete as cancelled."""
+        (handlers reconcile engine work by deterministic ids); pending cancellations complete as cancelled.
+        Tasks in `keep` (node mode: their runner attempts are still live) become `reconciling` instead, and their
+        pending cancel stays pending until the runner acknowledges it (R8)."""
+        kept = tuple(keep)
+        skip = f" AND id NOT IN ({','.join('?' * len(kept))})" if kept else ""
         with self._lock:
             # Engine work a crashed process had in flight for a task whose cancel was pending: the caller asks the
             # engine to stop exactly these prompts (never a global interrupt).
@@ -402,14 +437,28 @@ class TaskStore(RunControlMixin):
                            "AND control='cancel_requested'").fetchall()]
             c = self._db.execute(
                 "UPDATE stage_tasks SET state='cancelled', error=?, updated_at=? WHERE state IN "
-                "('running','reconciling','queued','blocked') AND control='cancel_requested'",
+                "('running','reconciling','queued','blocked') AND control='cancel_requested'" + skip,
                 (json.dumps({"code": "cancelled", "message": "cancelled (confirmed after restart)"}),
-                 now_iso())).rowcount
+                 now_iso(), *kept)).rowcount
+            if kept:
+                self._db.execute(
+                    "UPDATE stage_tasks SET state='reconciling', updated_at=? WHERE state IN ('running','reconciling')"
+                    f" AND id IN ({','.join('?' * len(kept))})", (now_iso(), *kept))
             r = self._db.execute(
                 "UPDATE stage_tasks SET state='queued', progress=json_set(progress, '$.reconciled_after_restart', 1), "
-                "updated_at=? WHERE state IN ('running','reconciling')", (now_iso(),)).rowcount
+                "updated_at=? WHERE state IN ('running','reconciling')" + skip, (now_iso(), *kept)).rowcount
             self.changed.notify_all()
         return {"cancelled": c, "requeued": r, "orphans": orphans}
+
+    def settle_reconciling(self, task_id: str, to: str) -> bool:
+        """A reconciling task whose attempts are all settled: `queued` re-enters the stage (it replays ingested
+        results), `cancelled` completes a cancel the runner has acknowledged."""
+        if to == "cancelled":
+            return self._set(task_id, ("reconciling",), "cancelled",
+                             error={"code": "cancelled", "message": "cancelled (runner acknowledged)"})
+        cur = self.get(task_id)
+        progress = {**(cur.progress if cur else {}), "reconciled_after_restart": 1}
+        return self._set(task_id, ("reconciling",), "queued", progress=progress)
 
     def pending_downstream(self, project_id: str | None = None, item_id: str | None = None) -> list[StageTask]:
         where, args = "", []

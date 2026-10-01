@@ -54,7 +54,7 @@ def _bindings(item: JobItem, vs: VariantSource | None, mode: str, res: dict[str,
 
 
 def enhance(env: TaskEnv) -> dict[str, Any]:
-    aux = env.studio.aux
+    aux = env.aux
     if aux is None:
         raise Blocked("no aux service configured (library-only mode)", "aux_unconfigured", operator=True)
     t = env.task
@@ -68,9 +68,10 @@ def enhance(env: TaskEnv) -> dict[str, Any]:
     vs = variant_source(env.ctx, job)
     args, sel = _call_args(env, job, item, snap, vs)
     try:
-        res = aux.enhance(kind=KINDS[Kind(snap["recipe"]["kind"])].label,
-                          style_guide=(snap.get("style") or {}).get("guide", ""), epoch=env.epoch("aux"),
-                          execution_id=derived_id("att", t.id, str(t.attempts)), **args)
+        with env.call("enhance"):
+            res = aux.enhance(kind=KINDS[Kind(snap["recipe"]["kind"])].label,
+                              style_guide=(snap.get("style") or {}).get("guide", ""), epoch=env.epoch("aux"),
+                              execution_id=derived_id("att", t.id, str(t.attempts)), **args)
     except EngineRejected as e:
         raise ItemFailed(f"enhancer rejected the brief: {e}"[:300], "input_invalid") from e
     description = res.get("description")

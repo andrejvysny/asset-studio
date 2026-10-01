@@ -212,8 +212,8 @@ def plan_run(studio: Studio, ctx: ProjectContext, batch_id: str | None, job_ids:
                 groups[enhance_res] = groups.get(enhance_res, 0) + 1
         jobs.append({"job_id": jid, "title": job.title, "kind": job.kind.value, "recipe_id": job.recipe_id,
                      "revision": job.revision, "config_revision": job.config_revision, "items": entries})
-    preflight = {"aux": "ready" if studio.aux is not None else "unavailable: no aux service configured",
-                 "engine": "ready" if studio.engine is not None else "unavailable: library-only mode"}
+    preflight = {"aux": "ready" if studio.execution.aux() is not None else "unavailable: no aux service configured",
+                 "engine": "ready" if studio.execution.engine() is not None else "unavailable: library-only mode"}
     body = {"batch_id": batch_id, "batch_revision": batch_rev, "stop_at": stop_at, "jobs": jobs,
             "residency_groups": groups, "preflight": preflight}
     plan_id = new_id("sel")

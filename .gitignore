@@ -24,3 +24,4 @@ comfyui/user/
 projects/*
 !projects/.gitkeep
 dist/
+secrets/

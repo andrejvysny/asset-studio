@@ -13,8 +13,11 @@ from typing import Any
 
 from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.ids import new_id
+from assetstudio_protocol.execution import TERMINAL_STATES as ATTEMPT_TERMINAL
 
-from .taskstore import TaskStore
+from .attemptstore import AttemptStore
+from .runnerstore import RunnerStore, journal_txn
+from .taskstore import ADMISSION_PAUSED_KEY, EXECUTION_GENERATION_KEY, TaskStore
 
 ACTIVE_STATES = ("held", "queued", "running", "cancel_requested", "reconciling")
 TERMINAL_STATES = ("succeeded", "failed", "cancelled")
@@ -44,7 +47,59 @@ INSERT OR IGNORE INTO scoped_commands SELECT '', 'legacy', key, payload_hash, re
 _V3 = """
 CREATE TABLE IF NOT EXISTS lane_epochs (lane TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
 """
-_MIGRATIONS = ((2, _V2), (3, _V3))
+# v4: compute runners (sessions, devices, slots), execution attempts + events, resumable uploads, journal meta.
+_V4 = """
+CREATE TABLE IF NOT EXISTS journal_meta (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS runner_sessions (
+  id TEXT PRIMARY KEY, runner_id TEXT NOT NULL, boot_id TEXT NOT NULL, protocol_version INTEGER NOT NULL,
+  dispatch TEXT NOT NULL, platform TEXT NOT NULL, software TEXT NOT NULL, state TEXT NOT NULL,
+  lifecycle TEXT NOT NULL DEFAULT 'active', inventory TEXT, inventory_revision INTEGER NOT NULL DEFAULT -1,
+  created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL, UNIQUE(runner_id, boot_id));
+CREATE INDEX IF NOT EXISTS rse_runner_state ON runner_sessions(runner_id, state);
+CREATE TABLE IF NOT EXISTS devices (
+  uuid TEXT PRIMARY KEY, runner_id TEXT NOT NULL, idx INTEGER NOT NULL, name TEXT NOT NULL,
+  memory_mb INTEGER NOT NULL, fallback INTEGER NOT NULL, claim TEXT NOT NULL DEFAULT 'free', claim_attempt TEXT,
+  updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS slots (
+  runner_id TEXT NOT NULL, slot_id TEXT NOT NULL, capability TEXT NOT NULL, device_uuids TEXT NOT NULL,
+  engines TEXT NOT NULL, loaded_residency TEXT, state TEXT NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY(runner_id, slot_id));
+CREATE TABLE IF NOT EXISTS attempts (
+  id TEXT PRIMARY KEY, task_id TEXT NOT NULL, call_key TEXT NOT NULL, generation INTEGER NOT NULL,
+  project_id TEXT NOT NULL, operation TEXT NOT NULL, operation_version INTEGER NOT NULL,
+  input_digest TEXT NOT NULL, offer TEXT NOT NULL, runner_id TEXT, session_id TEXT, slot_id TEXT,
+  state TEXT NOT NULL, control TEXT NOT NULL DEFAULT 'run', offer_expires_at TEXT, lease_until TEXT,
+  manifest TEXT, disposition TEXT, disposition_at TEXT, receipt_delivered INTEGER NOT NULL DEFAULT 0,
+  error TEXT, progress TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(task_id, call_key, generation));
+CREATE INDEX IF NOT EXISTS atp_state ON attempts(state);
+CREATE INDEX IF NOT EXISTS atp_runner_state ON attempts(runner_id, state);
+CREATE INDEX IF NOT EXISTS atp_task ON attempts(task_id);
+CREATE TABLE IF NOT EXISTS attempt_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT, attempt_id TEXT NOT NULL, at TEXT NOT NULL, event TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '{}');
+CREATE INDEX IF NOT EXISTS ate_attempt ON attempt_events(attempt_id);
+CREATE TABLE IF NOT EXISTS uploads (
+  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, generation INTEGER NOT NULL, project_id TEXT NOT NULL,
+  runner_id TEXT NOT NULL, sha256 TEXT NOT NULL, size INTEGER NOT NULL, role TEXT NOT NULL, mime TEXT NOT NULL,
+  chunk_size INTEGER NOT NULL, received TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL,
+  reserved_bytes INTEGER NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, finalized_at TEXT,
+  UNIQUE(attempt_id, generation, sha256));
+"""
+_MIGRATIONS = ((2, _V2), (3, _V3), (4, _V4))
+# Absent row means "direct" (Studio-local execution); no data migration writes it.
+EXECUTION_MODE_KEY = "execution_mode"
+EXECUTION_SWITCH_KEY = "execution_switch"  # JSON {"state": active|draining|quiesced, "from", "to", "at"}
+__all__ = ["ADMISSION_PAUSED_KEY", "EXECUTION_GENERATION_KEY", "EXECUTION_MODE_KEY", "EXECUTION_SWITCH_KEY"]
+
+
+class ExecutionModeMismatch(RuntimeError):
+    """Configured execution mode differs from the journal's (live work, or a pending switch handoff) (R15)."""
+
+
+class JournalTooNew(Exception):
+    pass
 
 
 class IdempotencyConflict(Exception):
@@ -91,6 +146,11 @@ class Journal:
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
+        found = self._db.execute("PRAGMA user_version").fetchone()[0]
+        known = max(v for v, _ in _MIGRATIONS)
+        if found > known:
+            self._db.close()
+            raise JournalTooNew(f"journal schema v{found} is newer than this Studio (v{known})")
         self._db.executescript(_DDL)
         for version, script in _MIGRATIONS:
             if self._db.execute("PRAGMA user_version").fetchone()[0] < version:
@@ -98,9 +158,120 @@ class Journal:
         self._lock = threading.RLock()
         self.changed = threading.Condition(self._lock)
         self.tasks = TaskStore(self._db, self._lock, self.changed)
+        self.runners = RunnerStore(self._db, self._lock, self.changed)
+        self.attempts = AttemptStore(self._db, self._lock, self.changed)
 
     def close(self) -> None:
-        self._db.close()
+        with self._lock:  # never close under a thread that is mid-query
+            self._db.close()
+
+    def meta_get(self, key: str) -> str | None:
+        with self._lock:
+            row = self._db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    def _meta(self, db: sqlite3.Connection, key: str) -> str | None:
+        row = db.execute("SELECT value FROM journal_meta WHERE key=?", (key,)).fetchone()
+        return None if row is None else str(row["value"])
+
+    @staticmethod
+    def _put(db: sqlite3.Connection, key: str, value: str) -> None:
+        db.execute("INSERT INTO journal_meta(key, value, updated_at) VALUES (?,?,?) "
+                   "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                   (key, value, now_iso()))
+
+    def _switch(self, db: sqlite3.Connection) -> dict[str, Any]:
+        raw = self._meta(db, EXECUTION_SWITCH_KEY)
+        return json.loads(raw) if raw else {"state": "active"}
+
+    def _set_switch(self, db: sqlite3.Connection, state: str, frm: str | None, to: str | None) -> None:
+        self._put(db, EXECUTION_SWITCH_KEY, json.dumps({"state": state, "from": frm, "to": to, "at": now_iso()}))
+
+    def switch_state(self) -> dict[str, Any]:
+        with self._lock:
+            return self._switch(self._db)
+
+    def generation(self) -> int:
+        return int(self.meta_get(EXECUTION_GENERATION_KEY) or 0)
+
+    # Switch transitions are compare-and-set under BEGIN IMMEDIATE, so a CLI and a Studio in different processes
+    # cannot both win; the claim/placement fences read the same rows inside their own UPDATE.
+    def begin_switch(self, to: str) -> str:
+        """'started' (active -> draining, admission paused), 'done' (same target already quiesced: a lost CLI
+        response), or 'busy' (another switch is in progress)."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] == "quiesced" and cur.get("to") == to:
+                return "done"
+            if cur["state"] != "active":
+                return "busy"
+            self._set_switch(db, "draining", self._meta(db, EXECUTION_MODE_KEY) or "direct", to)
+            self._put(db, ADMISSION_PAUSED_KEY, "1")
+        return "started"
+
+    def complete_switch(self) -> bool:
+        """draining -> quiesced, records the target mode; the pause STAYS until the new process activates."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] != "draining":
+                return False
+            self._put(db, EXECUTION_MODE_KEY, cur["to"])
+            self._set_switch(db, "quiesced", cur["from"], cur["to"])
+        return True
+
+    def abort_switch(self, states: tuple[str, ...] = ("draining", "quiesced")) -> bool:
+        """-> active with the original mode and admission resumed; the generation is untouched, so the old process
+        keeps working."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] not in states:
+                return False
+            if cur["state"] == "quiesced":  # draining never touched the mode (an absent row stays absent)
+                self._put(db, EXECUTION_MODE_KEY, cur["from"] or "direct")
+            self._set_switch(db, "active", cur["from"], cur["to"])
+            self._put(db, ADMISSION_PAUSED_KEY, "0")
+        return True
+
+    def activate(self, expected_mode: str) -> int:
+        """Called by the serving process only. Bumps the generation (fencing any older process) and resumes
+        admission; refuses while a switch is draining or targets another mode (admission stays paused)."""
+        with journal_txn(self._db, self._lock, self.changed) as db:
+            cur = self._switch(db)
+            if cur["state"] == "draining":
+                raise ExecutionModeMismatch(
+                    f"an execution switch to {cur['to']!r} is still draining (the CLI died?). Re-run "
+                    f"`assetstudio execution switch --to {cur['to']}` or `assetstudio execution abort`")
+            if cur["state"] == "quiesced" and cur.get("to") != expected_mode:
+                raise ExecutionModeMismatch(
+                    f"journal is quiesced for a switch to {cur['to']!r} but STUDIO_EXECUTION={expected_mode!r}; "
+                    f"admission stays paused. Restart with STUDIO_EXECUTION={cur['to']}, or run "
+                    "`assetstudio execution abort` to resume the previous mode")
+            gen = int(self._meta(db, EXECUTION_GENERATION_KEY) or 0) + 1
+            self._put(db, EXECUTION_GENERATION_KEY, str(gen))
+            self._set_switch(db, "active", cur.get("from"), cur.get("to"))
+            self._put(db, ADMISSION_PAUSED_KEY, "0")
+        return gen
+
+    def live_work(self) -> dict[str, int]:
+        """Work a mode change could orphan: running/reconciling tasks, queued tasks that may run, open attempts."""
+        terminal = tuple(sorted(ATTEMPT_TERMINAL))
+        with self._lock:
+            counts = {r["state"]: r["n"] for r in self._db.execute(
+                "SELECT state, COUNT(*) AS n FROM stage_tasks WHERE state IN ('running','reconciling') "
+                "OR (state='queued' AND control='run') GROUP BY state")}
+            attempts = self._db.execute(
+                f"SELECT COUNT(*) FROM attempts WHERE state NOT IN ({','.join('?' * len(terminal))})",
+                terminal).fetchone()[0]
+        return {"running": counts.get("running", 0), "reconciling": counts.get("reconciling", 0),
+                "queued": counts.get("queued", 0), "attempts": attempts}
+
+    def meta_set(self, key: str, value: str) -> None:
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO journal_meta(key, value, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, value, now_iso()))
+            self.changed.notify_all()
 
     def enqueue(self, *, project_id: str, kind: str, lane: str, affinity: str, payload: dict[str, Any],
                 idempotency_key: str, batch_id: str | None = None, hold: bool = False) -> tuple[Operation, bool]:

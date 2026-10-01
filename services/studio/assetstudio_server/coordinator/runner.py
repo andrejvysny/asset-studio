@@ -10,18 +10,22 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from assetstudio_core.canonical import now_iso
-from assetstudio_core.ids import is_id
+from assetstudio_core.ids import derived_id, is_id
 
+from ..adapters.base import AuxService, ImageEngine, Worker3dService
+from ..journal import ADMISSION_PAUSED_KEY
 from ..registry import ProjectContext
 from ..studio import Studio
 from ..taskstore import Busy, RunNotOpen, StageTask
 from .errors import Blocked, Cancelled, ItemFailed, classify
+from .node_pool import CLASS_OF_LANE, NodePool, worker_key
 
 log = logging.getLogger("assetstudio.coordinator")
 LANES = ("gpu0", "gpu1", "cpu")
@@ -52,6 +56,39 @@ class TaskEnv:
     studio: Studio
     ctx: ProjectContext
     task: StageTask
+    preferred_slot: tuple[str, str] | None = None  # node mode: (runner_id, slot_id) soft placement hint
+    _calls: list[str] = field(default_factory=list)
+
+    @property
+    def engine(self) -> ImageEngine | None:
+        return self.studio.execution.engine(self)
+
+    @property
+    def aux(self) -> AuxService | None:
+        return self.studio.execution.aux(self)
+
+    @property
+    def worker3d(self) -> Worker3dService | None:
+        return self.studio.execution.worker3d(self)
+
+    @contextmanager
+    def call(self, key: str) -> Iterator[None]:
+        """Name the engine call in flight (docs/modular/compute-runner.md operation identity table)."""
+        self._calls.append(key)
+        try:
+            yield
+        finally:
+            self._calls.pop()
+
+    @property
+    def current_call(self) -> str | None:
+        return self._calls[-1] if self._calls else None
+
+    def output_id(self, prefix: str, *parts: str, call: str | None = None) -> str:
+        """Output artifact id: legacy form at generation 1, suffixed `g<N>` once a call was re-placed."""
+        legacy = derived_id(prefix, *parts)
+        generation = self.studio.execution.generation(self, call) if call is not None else 1
+        return legacy if generation == 1 else derived_id(prefix, *parts, f"g{generation}")
 
     def progress(self, **fields: Any) -> None:
         self.task.progress.update(fields)
@@ -74,7 +111,7 @@ class TaskEnv:
 
     def epoch(self, worker: str) -> int:
         """Lease epoch for a GPU1 worker (acquires the device if another worker holds it)."""
-        return self.studio.lanes["gpu1"].acquire(worker)
+        return self.studio.execution.acquire("gpu1", worker)
 
 
 def _age_s(iso: str) -> float:
@@ -98,41 +135,79 @@ class Coordinator:
         self._current: dict[str, dict[str, Any]] = {}
         self._pick_lock = threading.Lock()
         self._admission_failures: dict[str, dict[str, Any]] = {}  # residency -> {"count", "since"}
+        self._pause_read: tuple[float, bool] = (float("-inf"), False)
+        self.generation: int | None = None  # set by start(): this process's execution generation
+        self._pool = NodePool(self)
+        self._task_worker: dict[str, str] = {}  # claimed task id -> worker key (kept out of _run_task's signature)
+        self._preferred: dict[str, tuple[str, str]] = {}  # worker key -> slot of its last call in the pass
 
     # --- lifecycle ------------------------------------------------------------------------------------------
-    def _cancel_orphaned_prompts(self, orphans: list[dict[str, Any]]) -> None:
-        """Cancelled-while-down generation tasks: stop their own unfinished engine prompts by exact id."""
-        engine = self.studio.engine
-        if engine is None:
-            return
-        for t in orphans:
-            if t["stage"] != "generate":
-                continue
-            for slot in (t["progress"].get("engine") or {}).values():
-                if isinstance(slot, dict) and slot.get("prompt_id") and "artifact_id" not in slot:
-                    try:
-                        engine.cancel(slot["prompt_id"])
-                    except Exception as e:  # noqa: BLE001 - unknown outcome: logged, the prompt id stays recorded
-                        log.warning("cancel of orphaned prompt %s (task %s) not confirmed: %s",
-                                    slot["prompt_id"], t["id"], e)
+    def _kept_after_restart(self) -> frozenset[str]:
+        """Node mode (R8): a running/reconciling task whose runner attempt is still open is never requeued, so
+        its call is never re-placed on another runner; it reconciles against the attempt instead."""
+        if self.studio.execution.mode != "nodes":
+            return frozenset()
+        from ..services._runner_util import NON_TERMINAL
+
+        journal = self.studio.journal
+        return frozenset(t.id for t in journal.tasks.list(states=("running", "reconciling"))
+                         if journal.attempts.list(task_id=t.id, states=NON_TERMINAL, limit=1))
+
+    def paused(self) -> bool:
+        """Scheduling hint only (the authoritative fence is in claim/place/accept SQL): a switch holds the journal,
+        or a newer process superseded this one (R15). Re-read at most once a second."""
+        at, value = self._pause_read
+        if time.monotonic() - at >= 1.0:
+            journal = self.studio.journal
+            value = journal.meta_get(ADMISSION_PAUSED_KEY) == "1" or (
+                self.generation is not None and journal.generation() != self.generation)
+            self._pause_read = (time.monotonic(), value)
+        return value
 
     def start(self) -> None:
-        rec = self.studio.journal.tasks.recover_after_restart()
+        # Activation first: it fences any older process before this one reconciles or claims anything.
+        self.generation = self.studio.execution_generation = self.studio.journal.activate(
+            self.studio.settings.execution)
+        keep = self._kept_after_restart()
+        rec = self.studio.journal.tasks.recover_after_restart(keep)
         orphans = rec.pop("orphans", [])
-        if rec["requeued"] or rec["cancelled"]:
-            log.warning("restart reconciliation: %s", rec)
-        self._cancel_orphaned_prompts(orphans)
+        if rec["requeued"] or rec["cancelled"] or keep:
+            log.warning("restart reconciliation: %s (reconciling against live attempts: %d)", rec, len(keep))
+        self.studio.execution.cancel_orphans(orphans)
+        from ..services.attempts import repair_custody
+
+        repair_custody(self.studio)
+        if keep:
+            from ..services.runner_maintenance import reconcile_tasks
+
+            reconcile_tasks(self.studio)
         from .reconcile import reconcile_on_start
 
         reconcile_on_start(self.studio)
-        workers = [("gpu0", 0), ("gpu1", 0)] + [("cpu", i) for i in range(self.limits.cpu_workers)]
+        nodes = self.studio.execution.mode == "nodes"
+        workers = ([] if nodes else [("gpu0", 0), ("gpu1", 0)]) + [("cpu", i) for i in range(self.limits.cpu_workers)]
         for lane, i in workers:
-            t = threading.Thread(target=self._loop, args=(lane,), name=f"lane-{lane}-{i}", daemon=True)
-            t.start()
-            self._threads.append(t)
-        t = threading.Thread(target=self._retry_loop, name="retry-blocked", daemon=True)
+            self._start_thread(self._loop, (lane,), f"lane-{lane}-{i}")
+        self._start_thread(self._retry_loop, (), "retry-blocked")
+        if nodes:
+            self._pool.refresh()
+            self._start_thread(self._pool_loop, (), "node-pool")
+
+    def _start_thread(self, target: Callable[..., None], args: tuple[Any, ...], name: str) -> None:
+        t = threading.Thread(target=target, args=args, name=name, daemon=True)
         t.start()
-        self._threads.append(t)
+        with self._pick_lock:
+            self._threads = [x for x in self._threads if x.is_alive()] + [t]
+
+    def spawn_worker(self, lane: str, k: int) -> None:
+        self._start_thread(self._loop, (lane, k), f"lane-{lane}-{k}")
+
+    def _pool_loop(self) -> None:
+        while not self._stop.wait(self.studio.settings.runner_maintenance_s):
+            try:
+                self._pool.refresh()
+            except Exception:  # the pools keep their last target
+                log.exception("node pool refresh failed")
 
     def stop(self) -> None:
         self._stop.set()
@@ -141,18 +216,25 @@ class Coordinator:
         for t in self._threads:
             t.join(timeout=5)
 
-    def _loop(self, lane: str) -> None:
-        while not self._stop.is_set():
-            try:
-                picked = self.choose(lane)
-                if picked is None:
-                    with self.studio.journal.changed:
-                        self.studio.journal.changed.wait(timeout=1.0)
-                    continue
-                self.run_pass(lane, *picked)
-            except Exception:  # supervision: a scheduler bug is logged; the lane keeps running
-                log.exception("lane %s loop error", lane)
-                time.sleep(1.0)
+    def _loop(self, lane: str, k: int | None = None) -> None:
+        key = worker_key(lane, k)
+        try:
+            while not self._stop.is_set():
+                try:
+                    picked = self.choose(lane, key)
+                    if picked is None:
+                        if k is not None and self._pool.should_exit(lane, k):
+                            return
+                        with self.studio.journal.changed:
+                            self.studio.journal.changed.wait(timeout=1.0)
+                        continue
+                    self.run_pass(lane, *picked, key=key)
+                except Exception:  # supervision: a scheduler bug is logged; the lane keeps running
+                    log.exception("lane %s loop error", key)
+                    time.sleep(1.0)
+        finally:
+            if k is not None:
+                self._pool.left(lane, k)
 
     # --- planning -------------------------------------------------------------------------------------------
     def _producers_pending(self, stage: str) -> bool:
@@ -180,9 +262,11 @@ class Coordinator:
         return (len(group) >= self.limits.coalesce_window or oldest >= self.limits.coalesce_max_wait_s
                 or not self._producers_pending(group[0].stage))
 
-    def choose(self, lane: str) -> tuple[str, list[StageTask]] | None:
+    def choose(self, lane: str, key: str | None = None) -> tuple[str, list[StageTask]] | None:
         """Pick the residency group to run next on `lane`: stay on the resident model while it has work (bounded
         by max_consecutive_passes), otherwise the group holding the highest-priority / oldest ready task."""
+        if self.paused():
+            return None
         with self._pick_lock:
             ready = [t for t in self.studio.journal.tasks.ready(lane) if t.stage in self.stages]
             if not ready:
@@ -193,13 +277,14 @@ class Coordinator:
             eligible = {r: g for r, g in groups.items() if self._eligible(r, g)}
             if not eligible:
                 return None
-            last, streak = self._last.get(lane, (None, 0))
+            key = key or lane  # fairness streaks are per worker
+            last, streak = self._last.get(key, (None, 0))
             if last in eligible and (streak < self.limits.max_consecutive_passes or len(eligible) == 1):
                 pick = last
             else:  # fairness boundary: another waiting group goes first
                 others = {r: g for r, g in eligible.items() if r != last} or eligible
                 pick = min(others, key=lambda r: (others[r][0].priority, others[r][0].seq))
-            self._last[lane] = (pick, streak + 1 if pick == last else 1)
+            self._last[key] = (pick, streak + 1 if pick == last else 1)
             return pick, eligible[pick][: self.limits.max_tasks_per_pass]
 
     # --- execution ------------------------------------------------------------------------------------------
@@ -207,7 +292,7 @@ class Coordinator:
         return getattr(self.stages[task.stage], "worker", None)
 
     def _loads(self, worker: str | None) -> dict[str, Any] | None:
-        w = {"aux": self.studio.aux, "worker3d": self.studio.worker3d}.get(worker or "")
+        w = {"aux": self.studio.execution.aux(), "worker3d": self.studio.execution.worker3d()}.get(worker or "")
         if w is None:
             return None  # e.g. ComfyUI exposes no model-load counter: reported as unavailable, never as 0
         try:
@@ -216,18 +301,21 @@ class Coordinator:
             return None
         return loads if isinstance(loads, dict) else None
 
-    def run_pass(self, lane: str, residency: str, members: list[StageTask]) -> dict[str, Any]:
+    def run_pass(self, lane: str, residency: str, members: list[StageTask],
+                 key: str | None = None) -> dict[str, Any]:
         tasks = self.studio.journal.tasks
+        key = key or lane  # node workers record passes under `<lane>#<k>`
+        self._preferred.pop(key, None)
         worker = self._worker_of(members[0])
         before = self._loads(worker)
-        pid = tasks.open_pass(lane, residency, worker, before)
-        prev = self._current.get(lane, {}).get("residency")
-        self._current[lane] = {"pass_id": pid, "residency": residency, "task": None, "started": time.time()}
+        pid = tasks.open_pass(key, residency, worker, before)
+        prev = self._current.get(key, {}).get("residency")
+        self._current[key] = {"pass_id": pid, "residency": residency, "task": None, "started": time.time()}
         started, done, jobs, reason = time.monotonic(), [], [], "exhausted"
         epoch = None
         if lane == "gpu1" and worker is not None:
             try:
-                epoch = self.studio.lanes["gpu1"].acquire(worker)
+                epoch = self.studio.execution.acquire("gpu1", worker)
                 self._admission_failures.pop(residency, None)
                 for t in members:
                     if t.progress.pop("admission", None) is not None:
@@ -240,10 +328,14 @@ class Coordinator:
                 members = []
         queue, seen = list(members), {t.id for t in members}
         while queue:
+            if self.paused():
+                reason = "admission_paused"
+                break
             t = queue.pop(0)
-            if not tasks.claim(t.id, pid):
+            if not tasks.claim(t.id, pid, self.generation):
                 continue
-            self._current[lane]["task"] = t.id
+            self._current[key]["task"] = t.id
+            self._task_worker[t.id] = key
             task_started = time.monotonic()  # the block began no earlier than this (see _backing_off)
             _, resource_blocked = self._run_task(t)
             done.append(t.id)
@@ -271,11 +363,12 @@ class Coordinator:
         measured = {"model_loads": None if before is None or after is None else
                     {k: after.get(k, 0) - before.get(k, 0) for k in after},
                     "previous_residency": prev, "switched": prev not in (None, residency)}
-        session = self.studio.lanes["gpu1"].sessions.get(worker or "") if lane == "gpu1" else None
+        gpu1 = self.studio.lanes.get("gpu1")
+        session = gpu1.sessions.get(worker or "") if lane == "gpu1" and gpu1 is not None else None
         tasks.close_pass(pid, task_ids=done, jobs=jobs, reason=reason, loads_after=after, measured=measured,
                          session=session, epoch=epoch)
-        self._current[lane] = {"residency": residency, "pass_id": None, "task": None}
-        self.studio.events.publish("pass", lane=lane, pass_id=pid)
+        self._current[key] = {"residency": residency, "pass_id": None, "task": None}
+        self.studio.events.publish("pass", lane=key, pass_id=pid)
         return {"pass_id": pid, "tasks": done, "reason": reason}
 
     def _admission_failed(self, residency: str, worker: str, members: list[StageTask], message: str) -> None:
@@ -302,6 +395,7 @@ class Coordinator:
         finally:
             from .reconcile import retry_deferred
 
+            self._task_worker.pop(t.id, None)
             retry_deferred(self.studio, t.project_id, t.item_id)
 
     def _execute(self, t: StageTask) -> tuple[str, bool]:
@@ -311,10 +405,15 @@ class Coordinator:
         except Exception as e:  # project unavailable (moved/unmounted): keep the task, do not guess
             tasks.block(t.id, {"code": "project_unavailable", "message": str(e)[:300], "retryable": True})
             return "blocked", False
-        env = TaskEnv(self.studio, ctx, t)
+        key = self._task_worker.get(t.id, t.lane)
+        env = TaskEnv(self.studio, ctx, t, preferred_slot=self._preferred.get(key))
         stage = self.stages[t.stage]
         try:
-            result = stage.run(env)
+            try:
+                result = stage.run(env)
+            finally:
+                if env.preferred_slot is not None:
+                    self._preferred[key] = env.preferred_slot
         except Exception as e:
             state, err, resource = classify(e)
             if state == "failed" and err["code"] == "internal_error":
@@ -325,6 +424,7 @@ class Coordinator:
                     hook(env, final, err)
                 except Exception:
                     log.exception("error hook for %s failed", t.id)
+            self._task_finished(t.id, final)
             self._publish(t)
             return final, resource
         from .reconcile import downstream_for
@@ -336,8 +436,15 @@ class Coordinator:
             log.exception("planning downstream of %s failed", t.id)
             follow = None
         final = tasks.complete(t.id, result, follow)
+        self._task_finished(t.id, final)
         self._publish(t)
         return final, False
+
+    def _task_finished(self, task_id: str, state: str) -> None:
+        try:
+            self.studio.execution.task_finished(task_id, state)
+        except Exception:  # custody bookkeeping must never change a task's outcome
+            log.exception("settling execution results of task %s failed", task_id)
 
     def _publish(self, t: StageTask) -> None:
         self.studio.events.publish("task", project_id=t.project_id, job_id=t.job_id, item_id=t.item_id,
@@ -365,12 +472,23 @@ class Coordinator:
             except (Busy, RunNotOpen) as e:  # another owner / closed run: stays blocked for an operator decision
                 log.warning("automatic retry of %s refused: %s", t.id, e)
 
+    def _lane_status(self, lane: str) -> dict[str, Any]:
+        tasks = self.studio.journal.tasks
+        keys = self._pool.keys(lane) if lane in CLASS_OF_LANE and self.studio.execution.mode == "nodes" else [lane]
+        currents = {k: self._current.get(k) for k in keys}
+        busy = next((c for c in currents.values() if c and c.get("task")), None)
+        out: dict[str, Any] = {"current": busy or currents[keys[0]] if keys else None,
+                               "running": (busy or {}).get("task"),
+                               "queued": len(tasks.list(lane=lane, states=("queued",))),
+                               "blocked": len(tasks.list(lane=lane, states=("blocked",)))}
+        if keys != [lane]:
+            out["workers"] = currents
+            out["pool_target"] = self._pool.target(lane)
+        return out
+
     def status(self) -> dict[str, Any]:
         tasks = self.studio.journal.tasks
-        return {"lanes": {lane: {"current": self._current.get(lane),
-                                 "running": (self._current.get(lane) or {}).get("task"),
-                                 "queued": len(tasks.list(lane=lane, states=("queued",))),
-                                 "blocked": len(tasks.list(lane=lane, states=("blocked",)))} for lane in LANES},
+        return {"lanes": {lane: self._lane_status(lane) for lane in LANES},
                 "limits": self.limits.__dict__, "passes": tasks.passes(limit=20),
                 "admission_failures": {r: dict(v) for r, v in self._admission_failures.items()}}
 

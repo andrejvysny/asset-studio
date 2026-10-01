@@ -1,3 +1,4 @@
+import { RunnersPanel } from "../components/RunnersPanel";
 import { Bar, BAD, bytes, ErrorLine, INFO, Loading, NONE, OK, PageHead, relTime, WARN } from "../components/ui";
 import { type Runtime as RT, send } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
@@ -19,15 +20,15 @@ export function Runtime() {
         {d.gpus.map((g) => {
           const own = g.ownership;
           const running = g.lane ? d.coordinator?.lanes[g.lane]?.running : null;
-          const state = own?.state === "unknown" && own.last_error ? "ownership unknown" : running ? "busy" : own?.state === "owned" ? `owned by ${own.owner}` : "idle";
+          const state = own?.state === "unknown" && own.last_error ? "ownership unknown" : running ? "busy" : own?.state === "owned" ? `owned by ${own.owner}` : g.util_pct === null ? "usage unknown" : "idle";
           const color = state === "ownership unknown" ? BAD : running ? WARN : OK;
           return (
             <div key={g.uuid} className="panel" style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
               <div className="row" style={{ justifyContent: "space-between" }}><span style={{ fontWeight: 600 }}>GPU{g.index} · {g.name}</span>
                 <span className="sub" style={{ color }}>{state}</span></div>
-              <Bar pct={(g.vram_used_mb / g.vram_total_mb) * 100} color={color} />
-              <span className="sub">{bytes(g.vram_used_mb * 2 ** 20)} / {bytes(g.vram_total_mb * 2 ** 20)} · util {g.util_pct}% · lane {g.lane ?? "—"}
-                {g.lane && d.coordinator ? ` · queued ${d.coordinator.lanes[g.lane]?.queued ?? 0}` : ""} · measured {relTime(g.measured_at)}</span>
+              <Bar pct={g.vram_used_mb === null ? 0 : (g.vram_used_mb / g.vram_total_mb) * 100} color={color} />
+              <span className="sub">{g.vram_used_mb === null ? "used unknown" : bytes(g.vram_used_mb * 2 ** 20)} / {bytes(g.vram_total_mb * 2 ** 20)} · util {g.util_pct === null ? "unknown" : `${g.util_pct}%`} · lane {g.lane ?? "—"}
+                {g.lane && d.coordinator ? ` · queued ${d.coordinator.lanes[g.lane]?.queued ?? 0}` : ""} · measured {g.measured_at ? relTime(g.measured_at) : "never"}</span>
               {own?.last_error && <><span className="error">{own.last_error}</span>
                 <button className="btn" disabled={act.busy} onClick={() => void act.run(async () => { await send("POST", `/api/v1/runtime/lanes/${g.lane}:reset`); rt.reload(); })}>
                   Verify release of all {g.lane} workers</button></>}
@@ -35,6 +36,7 @@ export function Runtime() {
           );
         })}
       </div>
+      <RunnersPanel />
       <div>
         <div className="label" style={{ marginBottom: 8 }}>Recent model passes (stage work grouped by model residency across Jobs)</div>
         {!d.coordinator?.passes.length ? <div className="empty">No passes yet.</div> : (

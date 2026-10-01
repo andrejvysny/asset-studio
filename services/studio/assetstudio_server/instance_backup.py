@@ -74,10 +74,12 @@ def create_instance_backup(s: Settings, out_dir: Path) -> Path:
             if src.is_file():
                 staged[arc] = Path(tmp) / f"{i}.bin"
                 _stage(src, staged[arc], locked=not arc.endswith("server.json"))
-        journal = s.instance_dir / "journal" / "operations.sqlite"
-        if journal.is_file():
-            staged["journal/operations.sqlite"] = Path(tmp) / "journal.sqlite"
-            _snapshot_journal(journal, staged["journal/operations.sqlite"])
+        # Node mode: auth.sqlite holds runner credentials, registration tokens and the Studio offer-signing keys.
+        for arc, db in (("journal/operations.sqlite", s.instance_dir / "journal" / "operations.sqlite"),
+                        ("auth.sqlite", s.instance_dir / "auth.sqlite")):
+            if db.is_file():
+                staged[arc] = Path(tmp) / arc.replace("/", "_")
+                _snapshot_journal(db, staged[arc])
         for arc, p in staged.items():
             members[arc] = {"sha256": _sha(p), "size": p.stat().st_size}
         manifest = Path(tmp) / MANIFEST
@@ -188,7 +190,7 @@ def _check_semantics(tmp: Path, listed: dict[str, dict], rep: InstanceVerifyRepo
                     rep.fail(f"{name}: 'tokens' is not a list")
             except (ValueError, AttributeError):
                 rep.fail(f"{name}: not a token store")
-        elif name == "journal/operations.sqlite":
+        elif name in ("journal/operations.sqlite", "auth.sqlite"):
             con = sqlite3.connect(p)
             try:
                 res = con.execute("PRAGMA integrity_check").fetchone()[0]
@@ -197,7 +199,7 @@ def _check_semantics(tmp: Path, listed: dict[str, dict], rep: InstanceVerifyRepo
             finally:
                 con.close()
             if res != "ok":
-                rep.fail(f"journal integrity: {res}")
+                rep.fail(f"{name} integrity: {res}")
 
 
 def _check_identity(p: Path, rep: InstanceVerifyReport) -> None:

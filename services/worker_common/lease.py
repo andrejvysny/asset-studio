@@ -37,6 +37,9 @@ class Lease:
         with self._cond:
             if epoch < self.epoch:
                 raise StaleLease(f"epoch {epoch} is older than {self.epoch}")
+            if epoch > self.epoch and self.active:
+                # Work admitted under an older grant is still running: a new grant would overlap it.
+                raise StaleLease(f"{self.active} request(s) of epoch {self.epoch} still active; drain first")
             self.epoch, self.admitting = epoch, True
         return self.info()
 

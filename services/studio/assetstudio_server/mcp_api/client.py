@@ -26,12 +26,13 @@ class StudioError(ToolError):
 
 
 class StudioClient:
-    def __init__(self, app: ASGIApp, actor: str) -> None:
-        self.app, self.actor = app, actor
+    def __init__(self, app: ASGIApp, actor: str, scope: str = "read") -> None:
+        self.app, self.actor, self.scope = app, actor, scope  # default is least privilege
 
     def _headers(self) -> dict[str, str]:
         return {CSRF_HEADER: "1", actor_mod.ACTOR_HEADER: self.actor,
-                actor_mod.INTERNAL_HEADER: actor_mod.INTERNAL_SECRET}
+                actor_mod.INTERNAL_HEADER: actor_mod.INTERNAL_SECRET,
+                actor_mod.SCOPE_HEADER: self.scope}
 
     async def _send(self, method: str, path: str, **kw: Any) -> httpx.Response:
         if not path.startswith("/api/"):

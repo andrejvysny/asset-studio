@@ -1,0 +1,54 @@
+# Node mode, profile S (single machine): Studio without model weights + one runner that owns the GPUs and engines.
+#   docker compose -f compose.yml -f compose.nodes.yml up -d      (or: make runner-token up-nodes)
+# Needs Docker Compose >= 2.24.4 (`!override` / `!reset` tags; earlier 2.24.x mis-merged `!override`). Not supported by podman-compose (Makefile refuses).
+# Direct mode (compose.yml alone) stays the default.
+
+services:
+  studio:
+    environment:
+      STUDIO_EXECUTION: nodes
+      STUDIO_PUBLIC_URL: http://studio:8190   # audience runners sign; they reach Studio on the internal network
+      COMFY_URL: ""                            # Studio no longer talks to engines
+      AUX_URL: ""
+      WORKER3D_URL: ""
+    # Replaces (not merges) the base list: no ./models, Studio runs without model weights.
+    volumes: !override
+      - ${PROJECTS_DIR:-./projects}:/projects
+      - studio-instance:/data/instance
+
+  comfyui:
+    ports: !reset []   # only the runner submits prompts (R7): no host port
+
+  runner:
+    image: localhost/assetstudio-studio:dev   # same image as Studio, different command
+    command: ["assetstudio-node", "run", "--config", "/etc/assetstudio/runner.yaml"]
+    restart: unless-stopped
+    depends_on: [studio, comfyui, aux, worker3d]
+    environment:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - runner-state:/var/lib/assetstudio-runner   # state dir and key (per Compose project)
+      # Host lock: a HOST path, so two Compose projects on one machine cannot both run a runner.
+      # Create it once: sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner
+      - ${RUNNER_HOST_LOCK_DIR:-/var/lock/assetstudio-runner}:/var/lock/assetstudio-runner
+      - ./config/runner.single.yaml:/etc/assetstudio/runner.yaml:ro
+    secrets:
+      - source: runner_registration_token
+        target: /run/secrets/runner_registration_token
+    deploy:
+      resources:
+        reservations:
+          devices:
+            # utility = nvidia-smi (UUID discovery) without CUDA compute
+            - {driver: nvidia, device_ids: ["${GPU_IMAGE_ID:-0}", "${GPU_AUX_ID:-1}"], capabilities: [utility]}
+    networks: [internal]
+
+secrets:
+  runner_registration_token:
+    file: ./secrets/runner_registration_token
+
+volumes:
+  runner-state: {}

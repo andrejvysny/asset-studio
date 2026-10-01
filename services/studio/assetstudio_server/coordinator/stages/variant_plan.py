@@ -31,9 +31,10 @@ def _draft_and_refs(env: TaskEnv) -> tuple[VariantDraft, dict[str, Any], list[Re
 
 
 def _aux(env: TaskEnv) -> Any:
-    if env.studio.aux is None:
+    aux = env.aux
+    if aux is None:
         raise Blocked("no aux service configured (library-only mode)", "aux_unconfigured", operator=True)
-    return env.studio.aux
+    return aux
 
 
 def _load_bytes(env: TaskEnv, images: list[ReferenceImage]) -> list[tuple[bytes, str]]:
@@ -52,9 +53,10 @@ def analyze(env: TaskEnv) -> dict[str, Any]:
     if rec is None:
         env.check_cancel()
         try:
-            res = aux.analyze_source(images=_load_bytes(env, images), kind=draft.source.kind.value,
-                                     user_facts=draft.request, epoch=env.epoch("aux"),
-                                     execution_id=derived_id("att", t.id, str(t.attempts)))
+            with env.call("analyze"):
+                res = aux.analyze_source(images=_load_bytes(env, images), kind=draft.source.kind.value,
+                                         user_facts=draft.request, epoch=env.epoch("aux"),
+                                         execution_id=derived_id("att", t.id, str(t.attempts)))
         except EngineRejected as e:
             raise ItemFailed(f"analysis rejected: {e}"[:300], "input_invalid") from e
         rec = {"id": aid, "draft_id": draft.id, "reference_set_id": record["id"],
@@ -80,11 +82,12 @@ def suggest(env: TaskEnv) -> dict[str, Any]:
     request = str(t.inputs.get("request") or "")
     env.check_cancel()
     try:
-        res = aux.suggest_variants(
-            images=_load_bytes(env, ordered), request=request, count=count, intent=intent,
-            preserve="; ".join(str(x) for x in t.inputs.get("preserve") or []), kind=draft.source.kind.value,
-            observations=observations, epoch=env.epoch("aux"),
-            execution_id=derived_id("att", t.id, str(t.attempts)))
+        with env.call("suggest"):
+            res = aux.suggest_variants(
+                images=_load_bytes(env, ordered), request=request, count=count, intent=intent,
+                preserve="; ".join(str(x) for x in t.inputs.get("preserve") or []), kind=draft.source.kind.value,
+                observations=observations, epoch=env.epoch("aux"),
+                execution_id=derived_id("att", t.id, str(t.attempts)))
     except EngineRejected as e:
         raise ItemFailed(f"suggestion rejected: {e}"[:300], "input_invalid") from e
     rows = va.normalise_rows(res.get("rows") or [], count)

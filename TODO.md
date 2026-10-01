@@ -1,3 +1,15 @@
+# TODO — Merge feat/modular-arch into master (2026-10-01)
+
+Plan: ~/.claude/plans/snappy-waddling-oasis.md (Codex review approve_with_changes, all 6 findings folded in).
+Evidence: docs/acceptance.md "Merge of feat/modular-arch into master".
+- [x] commit master WIP (Godot client core + tests, addon packaging) 90071ad
+- [x] branch fixes: auth.sqlite 0600 before open (WAL held keys at 0644); cryptography pin 50.0.1 (no downgrade)
+- [x] master-written v3 journal + instance backup fixtures; upgrade/recovery/backup-compat tests
+- [x] merged tree: per-test-id parity (0 regressions), process, web, e2e, Godot, compose render, rehearsal, smoke
+- [ ] NOT RUN: GPU acceptance (direct + nodes), Studio image build/container smoke, mixed worker images, Traefik/Authelia
+- [ ] backup-restore.md: restore must re-register projects (projects.json not in instance backup) — pre-existing
+- [ ] push master (only on instruction); then Plane update
+
 # TODO — Review hardening 11f5b18 (2026-10-01)
 
 Source: review-and-hardening.md (H01–H18). Phase A on master (integration code); Phase B in worktree of
@@ -12,17 +24,70 @@ Phase A (master)
 - [x] H03/H04/H05 verified source capabilities (profile v2), lock-free dependency closure, per-representation readiness
 - [x] H09 source structure evidence: node/surface/collision checks, instancing/include cycles
 - [x] H07 (shutdown part) mutation gate + single studio close; H18 instance backup incl. integration identity
-- [ ] H06 integration admission: staging reservation, disk floor, bounded processing, render outside lock
+- [x] H06 integration admission: staging reservation, disk floor, bounded processing, render outside lock
 - [x] H08b asset-list pagination revision snapshot
 Phase B (feat/modular-arch worktree)
-- [ ] H13+H14 custody single-write + repair + late quarantine upload; quota in reservation txn
-- [ ] H12 effective engine id persisted; per-operation reconciliation
-- [ ] H15 MCP internal principal through role policy (agent deny list)
-- [ ] H10 studio-only/compute/combined compose, public routes 8191/8192, host-wide runner lock, Compose 2.24.4
-- [ ] H07 switch: transactional pause+generation fence in claim/place, quiesced->activate handshake
-- [ ] H16 one eligibility evaluator; nullable telemetry
-- [ ] H11 per-slot supervisors, bounded transfer workers, free-slot acquire
-- [ ] merge master (Phase A) into feat/modular-arch; full suites both branches
+- [x] H13+H14 custody single-write + repair + late quarantine upload; quota in reservation txn
+- [x] H12 effective engine id persisted; per-operation reconciliation
+- [x] H15 MCP internal principal through role policy (agent deny list)
+- [x] H10 studio-only/compute/combined compose, public routes 8191/8192, host-wide runner lock, Compose 2.24.4
+- [x] H07 switch: transactional pause+generation fence in claim/place, quiesced->activate handshake
+- [x] H16 one eligibility evaluator; nullable telemetry
+- [x] H11 per-slot supervisors, bounded transfer workers, free-slot acquire
+- [x] merge master (Phase A) into feat/modular-arch; full suites both branches
+
+# TODO — Modular system (2026-09-30)
+
+Plan: ~/.claude/plans/act-as-senior-software-snoopy-waffle.md (Modular_system_spec.html + compute runner spec R0–R16,
+two Codex reviews folded in). Detail P0–P2; P3–P7 roadmap. Commit per verified WP on feat/modular-arch, no push.
+
+Phase 0 — baseline, hardening, specs, scaffold
+- [x] WP0.1 baseline lint/test/web-build/e2e counts in docs/acceptance.md (3 test defects stabilised; 3 e2e need models/)
+- [x] WP0.2 GLB JSON-shape hardening (A31): check_document_shape at every reader, 25 tests
+- [x] WP0.3 docs/modular/compute-runner.md (R0–R16 + operation identity table) + docs/modular/migration.md
+- [x] WP0.4 layout scaffold (protocol, client, compute_node, companion, blender) + import-boundary test
+
+Phase 1 — protocol, registry, attempts, runner auth (simulated runners)
+- [x] WP1.1 protocol DTOs · [x] WP1.2 stores (auth.sqlite, journal v4) · [x] WP1.3 runner API + auth
+- [x] WP1.4 registry + placement · [x] WP1.5 attempt service · [x] WP1.6 client + runner skeleton + e2e over HTTP
+- [x] WP1.7 web: generated types + Runners panel
+
+Phase 2 — extract compute, single machine, public profile
+- [x] WP2.0 pin model hashes (already pinned; guard test) · [x] WP2.1 move execution code · [x] WP2.1b lease hardening · [x] WP2.2 runner runtime
+- [x] WP2.3 ExecutionBackend seam · [x] WP2.4 remote adapters · [x] WP2.5 continuations/placement · [x] WP2.5b fences
+- [x] WP2.6 readiness · [x] WP2.7 single-machine compose · [x] WP2.8 failure injection · [~] WP2.9 real acceptance (suite written; needs GPU box run)
+- [ ] WP2.10 remove direct mode (needs user confirmation) · [x] WP2.11 public profile (not validated on real Traefik/Authelia) · [x] WP2.12 ephemeral (simulated)
+
+Result (2026-09-30): P0–P2 implemented on feat/modular-arch (lint clean; 671 backend + 4 process + 27/30 e2e — the 3
+e2e failures need model files, same as baseline). Direct mode is still the default.
+Open:
+- [ ] WP2.9 run `make acceptance-gpu-nodes` on the 2x4090 box (profile S via compose.nodes.yml), then node B
+      (GPU_NODES_RUNNER_B=1, both slot layouts); record in docs/acceptance.md
+- [ ] WP2.10 remove direct mode — only after WP2.9 evidence + explicit user confirmation
+- [ ] validate compose.public.yml on real Traefik + Authelia (header stripping, router priorities, XFF handling)
+- [ ] Runtime UI: show runner_readiness + audit view; node-mode GPU usage shows as unknown, not idle
+- [ ] aux calls lose Studio execution_id reconciliation in node mode (attempt id is the identity instead)
+- [ ] research exporter in node mode depends on runner label `exporter-research` (untested on hardware)
+- [ ] merge of master (MCP, build profiles): geometry_policy in node mode needs every export-capable runner to
+      advertise `export-feature.geometry_policy.v1` (placement does not route on it)
+- [x] MCP in proxy auth mode: loopback authorizes as agent principal from the MCP token (docs/modular/compute-runner.md R16)
+- [ ] reviewer role cannot cancel/retry tasks (owner only) — product decision
+- [ ] tests/unit/test_runner_agent.py and test_runner_services.py exceed 500 lines — split
+- [ ] P3–P7 detailed planning (source lifecycle, companion, providers, delivery, scale)
+
+# TODO — Merge master@fffe1cd (Godot integration) into feat/modular-arch (2026-10-01)
+
+Conflicts (ids.py, settings.py, cli.py imports, TODO.md) were additive; resolved by keeping both sides.
+Result: lint clean; 959/960 backend (grouped-3D flake, passes 6/6 on rerun) + 4/4 process. GDScript, web, e2e NOT RUN.
+Open:
+- [ ] execution switch: clears admission_paused while the old process still runs in the old mode (it can claim queued
+      work before restart); pause read is cached 1 s, not checked at claim. Needs a durable switch/activation handshake
+- [ ] integration publication commits ignore admission_paused: freeze the integration listener during a mode switch
+- [ ] instance backup: include integration/ (server.json identity, client tokens) with auth, MCP and runner state
+- [ ] public profile (compose.public.yml) resets studio ports: integration API (and MCP) unreachable, no Traefik route
+- [ ] compose.public.yml layers on compose.nodes.yml without removing engines/runner: not a Studio-only VPS profile
+- [ ] runner host.lock lives in the per-project runner-state volume: not host-wide across compose projects
+- [ ] gpu_nodes chaos kills the container named `runner`, not the runner bound to the observed attempt
 
 # TODO — Godot integration backend, AS-00 → AS-05 (2026-10-01)
 

@@ -40,10 +40,14 @@ def test_model_closure(tmp_path: Path) -> None:
     assert esc.status == "corrupt" and "outside" in esc.problems[0]
 
 
-def test_repo_lock_marks_dinov3_pending() -> None:
-    from assetstudio_server.models import verify_all
+def test_repo_lock_pins_dinov3() -> None:
+    """Gated access was granted and every file hash pinned (2026-09-29): absent weights read as missing, never
+    as pending access, and only a verified download is ready."""
+    from assetstudio_server.models import load_lock, verify_all
+    files = load_lock(ROOT / "config")["models"]["dinov3_vitl16"]["files"]
+    assert files and all(f.get("sha256") for f in files.values())
     st = verify_all(ROOT / "config", ROOT / "models")["dinov3_vitl16"]
-    assert st.status in ("pending_access", "ok") and (st.status == "ok") == st.ready
+    assert st.status in ("missing", "incomplete", "ok") and (st.status == "ok") == st.ready
 
 
 def aux_with(handler) -> AuxClient:
@@ -100,6 +104,47 @@ def test_explicit_ack_grants_with_increasing_epochs() -> None:
     assert lane.owner == "aux" and e2 > e1 and lane.sessions == {"worker3d": "w3", "aux": "a"}
     with pytest.raises(OwnershipUnknown):
         lane.epoch_for("worker3d")
+
+
+def test_first_grant_drains_the_target_too() -> None:
+    """After a restart the target may still run old requests: it must acknowledge a drain before its fresh grant;
+    once released it is not drained again on the next handoff back."""
+    calls: list[str] = []
+
+    def unload(name: str):
+        def ack(t: str, e: int) -> dict:
+            calls.append(f"unload:{name}:{e}")
+            return {"loaded": False, "owner_token": t, "epoch": e, "active": 0, "admitting": False}
+        return ack
+
+    def lease(name: str):
+        def grant(e: int) -> dict:
+            calls.append(f"lease:{name}:{e}")
+            return {"epoch": e, "admitting": True, "session_id": name}
+        return grant
+
+    lane = _lane({n: LaneWorker(lease(n), unload(n)) for n in ("aux", "worker3d")})
+    e1 = lane.acquire("aux")
+    assert calls == [f"unload:aux:{e1}", f"unload:worker3d:{e1}", f"lease:aux:{e1}"]
+    calls.clear()
+    e2 = lane.acquire("worker3d")  # worker3d acknowledged a release for e1 and admitted nothing since
+    assert calls == [f"unload:aux:{e2}", f"lease:worker3d:{e2}"]
+
+
+def test_worker_refuses_a_new_grant_while_old_work_runs() -> None:
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services" / "worker_common"))
+    from lease import Lease, StaleLease
+
+    lease = Lease()
+    lease.grant(3)
+    lease.enter(3)  # a request from a Studio that has since restarted
+    with pytest.raises(StaleLease, match="still active"):
+        lease.grant(4)
+    assert lease.grant(3)["admitting"] is True  # the same grant replayed is not a new one
+    lease.leave()
+    assert lease.grant(4)["epoch"] == 4
 
 
 def test_rejected_lease_keeps_ownership_unknown() -> None:

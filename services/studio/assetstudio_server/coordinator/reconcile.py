@@ -28,15 +28,15 @@ def qa_tasks(studio: Studio, ctx: ProjectContext, t: StageTask, candidate_set_id
               "run_id": t.run_id, "wave_id": t.wave_id}
     ins = {"candidate_set_id": candidate_set_id}
     out, deps = [], []
-    if studio.aux is not None and needs_mask:
+    if studio.execution.aux() is not None and needs_mask:
         m = new_task(studio, STAGES["mask"], inputs=ins, **common)
         out.append(m)
         deps.append(m.id)
-    if studio.aux is not None and needs_vlm:
+    if studio.execution.aux() is not None and needs_vlm:
         v = new_task(studio, STAGES["qa_vlm"], inputs=ins, **common)
         out.append(v)
         deps.append(v.id)
-    if studio.aux is not None and compare_needed(load_job(ctx.store, t.job_id)[0], item, snap, ctx.store):
+    if studio.execution.aux() is not None and compare_needed(load_job(ctx.store, t.job_id)[0], item, snap, ctx.store):
         c = new_task(studio, STAGES["qa_compare"], inputs=ins, **common)
         out.append(c)
         deps.append(c.id)

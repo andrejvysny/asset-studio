@@ -35,7 +35,7 @@ class Deps:
         info = self.identity(ctx)
         if write and info.scope != "full":
             raise ToolError(f"forbidden: token {info.name!r} has scope 'read'; this tool changes state")
-        return StudioClient(self.app, info.actor)
+        return StudioClient(self.app, info.actor, info.scope)
 
     async def project_id(self, client: StudioClient, project_id: str | None) -> str:
         """Explicit id, or the only open project. Ambiguity is an error listing the choices."""

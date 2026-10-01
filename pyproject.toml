@@ -15,11 +15,13 @@ dependencies = [
   "scipy>=1.14,<1.17",
   "trimesh==4.9.0",
   "networkx>=3.3,<3.6",
+  "cryptography==50.0.1",
   "mcp==1.30.0",
 ]
 
 [project.scripts]
 assetstudio = "assetstudio_server.cli:main"
+assetstudio-node = "assetstudio_node.cli:main"
 
 [dependency-groups]
 dev = [
@@ -38,15 +40,18 @@ packages = [
   "packages/assetstudio_core",
   "packages/assetstudio_storage",
   "packages/assetstudio_processing",
+  "packages/assetstudio_protocol",
+  "packages/assetstudio_client",
   "services/studio/assetstudio_server",
+  "services/compute_node/assetstudio_node",
 ]
 
 [tool.hatch.build]
-dev-mode-dirs = ["packages", "services/studio"]
+dev-mode-dirs = ["packages", "services/studio", "services/compute_node"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/contract", "tests/regression"]
-markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests"]
+markers = ["gpu: needs the real GPU stack (make acceptance-gpu)", "e2e: browser tests", "process: process-level failure injection (make test-process)", "gpu_nodes: node-mode real GPU acceptance (make acceptance-gpu-nodes)"]
 addopts = "-p no:cacheprovider"
 
 [tool.ruff]

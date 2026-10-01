@@ -204,7 +204,11 @@ def test_grouped_3d_builds_do_not_thrash_gpu1_and_other_items_continue(make_api,
     body = {"idempotency_key": "wave-build-3d", "items": [
         {"job_id": i["job_id"], "item_id": i["id"], "approval_id": i["approval"],
          "expected_item_revision": i["revision"]} for i in items if i["approval"]]}
+    # Pause while the wave creates its per-item tasks: otherwise a fast lane can start the first item's sample
+    # before the second item's task exists (a race of the test, not of the grouping rule under test).
+    api.post(f"{V2}/{pid}/runs/{rid}:pause", {})
     api.post(f"{V2}/{pid}/runs/{rid}:build-approved", body)
+    api.post(f"{V2}/{pid}/runs/{rid}:resume", {})
     api.wait_ops()
     run = _run(api, pid, rid)
     builds = {i["name"]: i["build"] for i in _items(run) if i["build"]}

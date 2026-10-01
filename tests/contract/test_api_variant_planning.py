@@ -127,7 +127,7 @@ def test_without_references_task_fails_visibly(make_api) -> None:
     _analyze(api, pid, d, status=202)
     cur = _wait_state(api, pid, d, "analyze", ("failed",))
     assert cur["tasks"]["analyze"]["code"] == "references_missing" and cur["tasks"]["suggest"]["state"] == "idle"
-    assert api.studio.aux.calls == []
+    assert [c for c in api.studio.aux.calls if c not in ("lease", "unload")] == []  # GPU handoff only, no inference
 
 
 def test_aux_unavailable_blocks_only_the_planning_task(make_api) -> None:

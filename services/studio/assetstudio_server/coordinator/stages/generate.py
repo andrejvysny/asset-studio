@@ -54,7 +54,7 @@ def loras(env: TaskEnv, snap: dict[str, Any]) -> tuple[LoraUse | None, LoraUse |
 
 
 def _await(env: TaskEnv, prompt_id: str) -> None:
-    engine = env.studio.engine
+    engine = env.engine
     assert engine is not None
     deadline = time.monotonic() + TIMEOUT_S
     while True:
@@ -206,7 +206,8 @@ def _make_artifact(env: TaskEnv, engine: ImageEngine, plan: _Plan, req: T2IReque
                    rec: dict[str, Any], state: dict[str, Any], key: str, prompt_id: str) -> None:
     """Run one slot and register its candidate artifact; raises EngineRejected / ImageRejected for this slot."""
     t = env.task
-    data = _slot(env, engine, req, rec, state, key)
+    with env.call(key):
+        data = _slot(env, engine, req, rec, state, key)
     info = inspect_image(data, ("PNG",))
     source = {"engine": engine.describe(), "prompt_id": rec["prompt_id"], "prompt_revision_id": prompt_id,
               "simulated": engine.simulated}
@@ -214,14 +215,14 @@ def _make_artifact(env: TaskEnv, engine: ImageEngine, plan: _Plan, req: T2IReque
         source |= {"receipt": state[key].get("receipt"), "conditioning": plan.vs.conditioning()}
     art = env.ctx.store.register_artifact(
         data, "candidate", info.mime, meta={**info.as_meta(), "seed": rec["seed"]}, retention="candidate",
-        artifact_id=derived_id("art", t.id, key), source=source)
+        artifact_id=env.output_id("art", t.id, key, call=key), source=source)
     state[key] = {**state[key], "artifact_id": art.id, "sha256": art.sha256, "width": info.width,
                   "height": info.height}
     env.progress(engine=state, done=sum(1 for r in state.values() if "artifact_id" in r))
 
 
 def generate(env: TaskEnv) -> dict[str, Any]:
-    engine = env.studio.engine
+    engine = env.engine
     if engine is None:
         raise Blocked("no image engine configured (library-only mode)", "engine_unconfigured", operator=True)
     t, store = env.task, env.ctx.store

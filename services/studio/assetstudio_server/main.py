@@ -12,16 +12,32 @@ from types import FrameType
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import actor, errors
 from .coordinator.runner import Coordinator
 from .journal import IdempotencyConflict
-from .routers import batches, batches_v2, jobs, library, media, projects, variant_plans, variants
+from .operator_auth import AuthError, authorize
+from .routers import (
+    batches,
+    batches_v2,
+    jobs,
+    library,
+    media,
+    projects,
+    runner_api,
+    runners,
+    variant_plans,
+    variants,
+)
+from .runner_errors import RunnerError
+from .services.runner_maintenance import RunnerMaintenance
 from .settings import Settings
 from .studio import Studio, build_studio
 
 CSRF_HEADER = "x-assetstudio"
+RUNNER_PREFIX = "/api/runner/"  # bearer-authenticated; browsers never hold runner tokens, so no CSRF gate
 
 
 log = logging.getLogger("assetstudio")
@@ -30,16 +46,21 @@ log = logging.getLogger("assetstudio")
 def create_app(settings: Settings | None = None, studio: Studio | None = None, *, owns_studio: bool = True) -> FastAPI:
     """owns_studio=False: the caller closes the Studio after ALL listeners (companions share it) have stopped."""
     settings = settings or (studio.settings if studio else Settings())
+    settings.validate()  # proxy mode without a secret must not start
     st = studio or build_studio(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        coord = None
+        coord, maintenance = None, None
         if settings.start_coordinator:
             coord = Coordinator(st)
             coord.start()
+            maintenance = RunnerMaintenance(st)
+            maintenance.start()
         app.state.coordinator = coord
         yield
+        if maintenance is not None:
+            maintenance.stop()
         if coord is not None:
             coord.stop()
         if owns_studio:
@@ -56,10 +77,39 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None, *
     async def _idem(_: Request, e: IdempotencyConflict) -> JSONResponse:
         return JSONResponse(errors.body(e.code, str(e)), status_code=409)
 
+    @app.exception_handler(RunnerError)
+    async def _runner_error(_: Request, e: RunnerError) -> JSONResponse:
+        retry = e.detail.get("retry_after_s") if e.status == 429 else None
+        return JSONResponse(e.body(), status_code=e.status,
+                            headers={"Retry-After": str(retry)} if retry else None)
+
+    browser_validation = app.exception_handlers[RequestValidationError]
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation(request: Request, e: RequestValidationError) -> Response:
+        if not request.url.path.startswith(RUNNER_PREFIX):
+            return await browser_validation(request, e)
+        errs = [{"path": ".".join(str(p) for p in err["loc"]), "message": err["msg"]} for err in e.errors()]
+        return JSONResponse(RunnerError(400, "invalid_input", "request failed validation", {"errors": errs}).body(),
+                            status_code=400)
+
+    @app.middleware("http")
+    async def operator_gate(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """Registered before `same_origin` so it runs inside it: the CSRF check happens first (R16)."""
+        path = request.url.path
+        if path.startswith("/api/") and not path.startswith(RUNNER_PREFIX) and path != "/api/health":
+            try:
+                request.state.operator = authorize(request, settings)
+            except AuthError as e:
+                return JSONResponse(errors.body(e.code, e.message), status_code=e.status)
+        return await call_next(request)
+
     @app.middleware("http")
     async def same_origin(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """State changes need a custom header (forces a CORS preflight, which we never grant cross-origin)."""
-        if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+        path = request.url.path
+        if request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith("/api/") \
+                and not path.startswith(RUNNER_PREFIX):
             if request.headers.get(CSRF_HEADER) != "1":
                 return JSONResponse(errors.body("csrf", f"missing {CSRF_HEADER} header"), status_code=403)
             origin = request.headers.get("origin")
@@ -86,6 +136,8 @@ def create_app(settings: Settings | None = None, studio: Studio | None = None, *
     app.include_router(batches_v2.router)
     app.include_router(variants.router)
     app.include_router(variant_plans.router)
+    app.include_router(runner_api.router)
+    app.include_router(runners.router)
 
     @app.get("/api/health")
     def health() -> dict:

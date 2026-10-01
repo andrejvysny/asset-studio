@@ -1,3 +1,113 @@
+# Merge of feat/modular-arch into master (2026-10-01)
+
+Base master 90071ad, branch 1f9ed19. Host: macOS (Apple silicon), Docker CLI without a daemon, no GPU, empty
+`models/`. Direct mode stays the default (`STUDIO_EXECUTION=direct`, `STUDIO_AUTH_MODE=local`). Each check ran
+before the merge commit, on the uncommitted merged tree, and compared against master at 90071ad.
+
+| Check | master 90071ad | merged tree |
+|---|---|---|
+| `make lint` | pass | pass (now also covers `services/compute_node`) |
+| Backend (`pytest`, unit + contract + regression), per test id | 704 pass, 2 fail | 1065 pass. 0 regressions, 0 missing ids; the 2 master failures now pass (dinov3 test renamed) |
+| `make test-process` | n/a | 4 pass |
+| Web `npm ci && tsc -b --noEmit && vite build` (local Node 22) | pass | pass |
+| Browser e2e, per test id | 33 pass, 3 fail | 34 pass (new: Runners panel), same 3 fail with the same signature ("Save and run" disabled without model files) |
+| Godot `run_tests.gd` / `run_client_tests.py` | 39/39, 17/17 | 39/39, 17/17 |
+| `docker compose config`: `compose.yml` | rendered | byte-identical rendering |
+| `docker compose config`: nodes, studio, studio+public, node-remote | n/a | all render; the public overlay requires `STUDIO_HOST` and `STUDIO_PROXY_SECRET` (fails fast without them) |
+
+Upgrade, restore and rollback rehearsal. One persistent data dir; in-process apps on SIMULATED engines; one process
+at a time.
+1. master seeded the data dir: a project, a batch job, an integration token, an MCP token, and one source
+   publication.
+2. master stopped, then took an instance backup and a project backup.
+3. Merged code opened the same data dir (journal v3 to v4; `auth.sqlite` and its `-wal`/`-shm` created 0600). Then it
+   was stopped and took both backups again.
+4. Each backup set was restored into a clean dir (manual procedure plus `project register`) and opened by the
+   version that made it.
+5. master opened the data dir the merged code had touched (rollback). It runs on the v4 journal.
+
+Every one of these checks passed in all five stages:
+- `server_id` unchanged
+- the integration health, capabilities and libraries endpoints answer
+- a bad token gets 401
+- the MCP token verifies
+- a publication commit replayed with the same idempotency key returns the identical response
+- every artifact downloads with its recorded sha256
+- the old run is visible
+- a new job and a new publication succeed
+
+`instance restore-verify` and `project restore-verify` accept both versions' archives in both directions.
+`tests/fixtures/journal_v3_master` freezes a master-written journal (crashed mid-generation) and a master instance
+backup: `tests/regression/test_journal_upgrade_from_master.py`.
+
+Real-process smoke (`assetstudio serve`, fake engine, all three listeners) gave identical results on master and merged
+code:
+- UI/REST:
+  - health 200
+  - same `/api/v1/runtime` keys
+  - project create 201
+  - a missing CSRF header gets 403
+- Integration:
+  - health, capabilities and libraries 200
+  - a bad token gets 401
+  - downloads match their hashes
+- MCP:
+  - a read token can run a read tool
+  - a read token is refused on a write tool
+  - a full token can run a write tool
+
+Fixed on the branch before the merge:
+- `auth.sqlite` sidecars were created 0644 and held signing keys while open. The file is now 0600 before SQLite opens
+  it.
+- The branch pinned `cryptography==48.0.0`, which would have downgraded master's locked 50.0.1. It is now pinned to
+  50.0.1.
+
+Direct-mode changes that ship with the merge (all deliberate):
+- journal v4 (additive tables)
+- `auth.sqlite`
+- `operator_gate` (local mode resolves to owner)
+- GPU drain-before-grant, and the worker refusing a new lease while old work is active (needs rebuilt aux and
+  worker3d images)
+- strict glTF JSON shape (A31)
+- the claim fence
+- the Runners panel, and a runner maintenance loop
+
+NOT RUN: GPU acceptance (`acceptance-gpu`, `acceptance-gpu-nodes`), the Studio image build and container smoke (no
+Docker daemon), mixed old and new worker images, real Traefik and Authelia, and the 3 model-dependent e2e tests.
+
+Pre-existing gap, not caused by the merge: the instance backup leaves out `instance/projects.json`, so after a clean
+restore every project must be re-registered (`assetstudio project register ROOT`). The project id is preserved.
+`docs/operations/backup-restore.md` does not say so.
+
+Known flake: `test_grouped_3d_builds_do_not_thrash_gpu1_and_other_items_continue` failed once in a full-suite run on
+the branch (passed 6/6 alone, and in the merged full run).
+
+# Modular-system baseline (2026-09-30, head 47c20db)
+
+Host: macOS (Apple silicon), no Docker, no GPU, empty `models/`. Web build run with the local Node 22 toolchain
+(same commands as `make web-build`, which needs a container runtime).
+
+| Suite | Command | Result |
+|---|---|---|
+| Lint | `make lint` | pass |
+| Backend (unit + contract + regression) | `make test` | 369 pass after stabilising 3 pre-existing test defects (below); 366 pass / 3 fail at 47c20db as-is |
+| Frontend type-check + build | `npm ci && npx tsc -b --noEmit && npx vite build` | pass |
+| Browser e2e | `uv run --group e2e pytest tests/e2e -m e2e` | 26 pass, 3 fail (environment: see below) |
+
+Stabilised test defects (test-only, no product change):
+- `test_repo_lock_marks_dinov3_pending` expected gated-pending hashes; the lock has pinned every DINOv3 file since
+  the 2026-09-29 audit, so absent weights read `missing`. Now `test_repo_lock_pins_dinov3`.
+- `test_grouped_3d_builds_do_not_thrash_gpu1_and_other_items_continue`: the `:build-approved` wave creates per-item
+  tasks in separate transactions; a fast lane could start the first sample before the second existed. The test now
+  pauses the run around the wave (the grouping rule itself is unchanged).
+- `test_gpu_acquire_failures_are_visible_then_bounded`: tasks touched within the backoff slack (10 ms) of the block
+  start are, by design, treated as queued after it; on a fast machine the test's tasks were. They are now backdated.
+
+Environment-dependent e2e (unchanged): `test_full_concept_lifecycle`, `test_3d_build_and_reexport` and
+`test_sprite_build_shows_cutout_and_pivot` need model files under `models/`, because generation readiness is gated on
+local weights even with the SIMULATED engine. They pass on the GPU host; on this host "Save and run" stays disabled.
+Node mode (Phase 2) moves model verification to runners, which removes this coupling.
+
 # Acceptance evidence — Phases 0–2 (2026-09-28)
 
 Host: 2 × RTX 4090 24 GB, Linux, Podman 4.9.3 + podman-compose 1.0.6 (`docker` on this host is a podman wrapper).
@@ -191,6 +301,52 @@ CPU evidence only (SIMULATED engines). Lint clean; `uv run pytest` 358 pass; `ma
 | Implemented, validated on target hardware at 8de5fe8 only | generative variants (GPU run above predates this pass; renderer v2 + input profile v2 not yet GPU-run) |
 | Experimental | source-conditioned generative variants (no egress-blocked edit-model run) |
 | Deferred | files + manifest exporter (folder/ZIP), project style wizard, Surface/Seamless materials, S3/GC, style-LoRA registration, Docker (non-Podman) run |
+
+### Process-level failure injection
+
+`make test-process` (`tests/process/`, marker `process`, not part of `make test`): Studio (`assetstudio serve`,
+`STUDIO_EXECUTION=nodes`), a compute runner (`assetstudio-node run`, real HTTP engine clients, `simulated: false`) and a
+fake aux engine server (`tests/process/fake_engines.py`, real `worker_common.lease` semantics, controllable delay/hold)
+run as separate OS processes and are killed with SIGKILL independently. Model receipts are the one simulated part
+(pre-seeded for Studio's real catalog sha; real ones need the weights). Evidence is CPU/simulated, not GPU proof.
+
+| Scenario | Proves |
+|---|---|
+| A07 Studio killed mid-attempt | task `reconciling`, attempt keeps its runner and generation 1 (never re-placed), runner delivers, engine computed once |
+| A08 runner killed after spooling | spooled output recovered from the runner's spool after restart, committed, spool empty, no recompute |
+| A09/A10 runner killed while executing | lease expiry -> attempt and device claim `uncertain` (not freed); `:declare-lost` offers generation 2 but the device stays uncertain; restarted runner's fresh inventory releases it; generation 2 commits |
+| R7 engine outlives the agent | agent process killed with a request in flight in the engine process; a new agent's barrier reports the slot `unknown`, admits nothing (late request fenced) until the request ends, then `ready` |
+
+Results: run with `make test-process`.
+
+### Ephemeral runners (simulated)
+
+`tests/contract/test_ephemeral_runner.py` (WP2.12, in-process, SIMULATED engines, part of `make test`): an ephemeral
+group registers a runner (`RegisterResponse.ephemeral`), exactly one attempt runs and commits, the agent heartbeats
+`safe_to_terminate` only after the receipt was delivered (spool and state empty) and deregisters; the runner is then
+`revoked`, counts in neither `runner_readiness` nor `gpus`, and no second attempt is offered (a forced second accept
+returns 409 `admission_rejected`); deregistering with custody not transferred returns 409. Its device claim stays
+`free` (not retired); scheduling is prevented by the revoked runner.
+
+### Node mode — real GPU acceptance (tests/gpu_nodes)
+
+`make acceptance-gpu-nodes` (marker `gpu_nodes`, not part of `make test`). Operator-run on the 2 x 4090 host against a
+stack started with `make up-nodes` (Studio without `/models`, runner with the GPUs). Skips unless `STUDIO_URL` is set
+and `/api/v1/runtime` reports `engine_mode == "nodes"`; fails fast with `runner_readiness` reasons if a needed
+operation is not ready. Strict like `tests/gpu`: a failed stage is a failure. The direct-mode suite cannot certify node
+topology (it inspects ComfyUI directly and assumes fixed gpu0/gpu1 lanes), hence this separate suite.
+
+| Scenario | Spec | Env flag | Proves |
+|---|---|---|---|
+| Studio has no models | A01 | `GPU_NODES_DOCKER=1` for the container check | every ready model is runner-verified, GPUs come from runners; `/models` absent in the Studio container |
+| 2D lifecycle (concept_art, 2 items) | A02 | - | 8 candidates, 8 `image.t2i` attempts all committed on generation 1, QA, 2 publications, spool drained |
+| 3D lifecycle (model3d, 1 item) | A02 | - | generate/export attempts committed on the aux3d slot, valid GLB, published |
+| Runner killed mid-sample | A08 | `GPU_NODES_CHAOS=1` | `docker compose kill/start runner`; one TRELLIS attempt, generation 1, single publication |
+| Studio restarted mid-generation | A07 | `GPU_NODES_CHAOS=1` | `docker compose restart studio`; exactly 8 executions, no generation 2 |
+| Two runners | A02, A04 | `GPU_NODES_RUNNER_B=1` | distinct device UUIDs even at index 0; an operation only one runner can serve lands on it |
+
+`NODES_COMPOSE` overrides the compose flags (default `docker compose -f compose.yml -f compose.nodes.yml`).
+Results: **not yet run on hardware**.
 
 ## Known limitations (this release)
 

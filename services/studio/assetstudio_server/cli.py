@@ -5,11 +5,13 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
 
 from .gpu import nvidia_smi
 from .integration_api.tokens import IntegrationTokenStore
+from .journal import ADMISSION_PAUSED_KEY, EXECUTION_MODE_KEY, Journal
 from .models import HashCache, verify_all
 from .registry import Registry
 from .settings import Settings
@@ -204,6 +206,148 @@ def cmd_storage_verify(s: Settings, a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
+def _auth_store(s: Settings):  # noqa: ANN202 - AuthStore
+    from .authstore import AuthStore
+
+    return AuthStore(s.instance_dir / "auth.sqlite")
+
+
+def _csv_or_all(value: str) -> list[str] | str:
+    return "*" if value.strip() == "*" else [v.strip() for v in value.split(",") if v.strip()]
+
+
+def cmd_runners(s: Settings, a: argparse.Namespace) -> int:
+    """Runner groups, registration tokens and revocation; opens the auth DB directly (no server needed)."""
+    store = _auth_store(s)
+    try:
+        if a.sub == "group-create":
+            try:
+                _print(store.create_group(a.name, _csv_or_all(a.projects), _csv_or_all(a.operations),  # type: ignore[arg-type]
+                                          [x for x in a.labels.split(",") if x], a.ephemeral, "cli"))
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif a.sub == "token":
+            group = store.get_group(a.group) or next((g for g in store.groups() if g["name"] == a.group), None)
+            if group is None:
+                print(f"unknown runner group {a.group!r}", file=sys.stderr)
+                return 1
+            try:
+                print(store.create_registration_token(group["id"], a.ttl, "cli"))
+            except ValueError as e:
+                print(e, file=sys.stderr)
+                return 1
+        elif a.sub == "list":
+            for r in store.runners():
+                print(f"{r['id']}  {r['name']:20} {r['state']:8} group={r['group_id']}  "
+                      f"last_seen={r['last_seen_at'] or '-'}")
+        else:
+            if store.get_runner(a.runner) is None:
+                print(f"unknown runner {a.runner!r}", file=sys.stderr)
+                return 1
+            store.revoke_runner(a.runner, "cli")
+            print(f"{a.runner} revoked")
+    finally:
+        store.close()
+    return 0
+
+
+def build_openapi() -> dict:
+    """OpenAPI schema of a throwaway app: temp instance dir, no coordinator, never touches real state."""
+    import tempfile
+    from dataclasses import replace
+
+    from .main import create_app
+
+    with tempfile.TemporaryDirectory(prefix="assetstudio-openapi-") as tmp:
+        root = Path(tmp)
+        s = replace(Settings(), instance_dir=root / "instance", project_roots=[root / "projects"],
+                    engine="none", start_coordinator=False)
+        s.ensure()
+        app = create_app(s)
+        schema = app.openapi()
+        app.state.studio.close()
+    return schema
+
+
+def cmd_openapi(_: Settings, a: argparse.Namespace) -> int:
+    text = json.dumps(build_openapi(), indent=2, sort_keys=True) + "\n"
+    if a.out:
+        Path(a.out).write_text(text)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _journal(s: Settings) -> Journal:
+    s.ensure()
+    return Journal(s.instance_dir / "journal" / "operations.sqlite")
+
+
+def cmd_execution_status(s: Settings, _: argparse.Namespace) -> int:
+    j = _journal(s)
+    try:
+        _print({"persisted_mode": j.meta_get(EXECUTION_MODE_KEY) or "direct", "configured_mode": s.execution,
+                "admission_paused": j.meta_get(ADMISSION_PAUSED_KEY) == "1", "switch": j.switch_state(),
+                "generation": j.generation(), "live": j.live_work()})
+    finally:
+        j.close()
+    return 0
+
+
+def _draining(live: dict[str, int]) -> bool:
+    return bool(live["running"] or live["reconciling"] or live["attempts"])
+
+
+def _await_quiescence(j: Journal, a: argparse.Namespace) -> dict[str, int]:
+    deadline = time.monotonic() + a.timeout
+    live = j.live_work()
+    try:
+        while _draining(live) and time.monotonic() < deadline:
+            time.sleep(a.poll)
+            live = j.live_work()
+    except BaseException:  # Ctrl-C must not leave Studio paused
+        j.abort_switch(("draining",))
+        raise
+    return live
+
+
+def cmd_execution_switch(s: Settings, a: argparse.Namespace) -> int:
+    """R15 handoff, CLI half: draining -> quiesced with admission STILL paused. Only the new Studio process
+    (Coordinator.start -> Journal.activate) resumes it, so the old process can never claim after this returns."""
+    j = _journal(s)
+    try:
+        began = j.begin_switch(a.to)
+        if began == "busy":
+            print(f"error: an execution switch is already {j.switch_state()['state']}; wait for it, re-run it, or "
+                  "run `assetstudio execution abort`", file=sys.stderr)
+            return 2
+        if began == "started":
+            live = _await_quiescence(j, a)
+            if _draining(live):
+                j.abort_switch(("draining",))
+                print(f"timed out after {a.timeout:g}s with work in flight ({live}); admission restored, "
+                      "nothing changed", file=sys.stderr)
+                return 3
+            if not j.complete_switch():
+                print("error: the switch was aborted while draining", file=sys.stderr)
+                return 1
+    finally:
+        j.close()
+    print(f"quiesced for {a.to}; restart Studio with STUDIO_EXECUTION={a.to}; admission resumes when it activates")
+    return 0
+
+
+def cmd_execution_abort(s: Settings, _: argparse.Namespace) -> int:
+    j = _journal(s)
+    try:
+        aborted = j.abort_switch()
+    finally:
+        j.close()
+    print("switch aborted; previous mode and admission restored" if aborted else "no switch in progress")
+    return 0
+
+
 def cmd_mcp_token(s: Settings, a: argparse.Namespace) -> int:
     from .mcp_api.server import token_store
 
@@ -334,6 +478,35 @@ def main(argv: list[str] | None = None) -> int:
         o = op.add_parser(name)
         o.add_argument("task")
         o.set_defaults(fn=cmd_operations)
+    rn = sub.add_parser("runners").add_subparsers(dest="sub", required=True)
+    gc = rn.add_parser("group-create", help="create a runner group")
+    gc.add_argument("--name", required=True)
+    gc.add_argument("--projects", default="*", help="'*' or comma-separated project ids")
+    gc.add_argument("--operations", default="*", help="'*' or comma-separated operations")
+    gc.add_argument("--labels", default="", help="comma-separated")
+    gc.add_argument("--ephemeral", action="store_true")
+    gc.set_defaults(fn=cmd_runners)
+    rt = rn.add_parser("token", help="print a one-time registration token for a group")
+    rt.add_argument("--group", required=True, help="group name or id")
+    rt.add_argument("--ttl", type=int, default=900, help="seconds (1..3600)")
+    rt.set_defaults(fn=cmd_runners)
+    rn.add_parser("list").set_defaults(fn=cmd_runners)
+    rr = rn.add_parser("revoke")
+    rr.add_argument("runner")
+    rr.set_defaults(fn=cmd_runners)
+    ex = sub.add_parser("execution").add_subparsers(dest="sub", required=True)
+    ex.add_parser("status", help="persisted vs configured execution mode and live work").set_defaults(
+        fn=cmd_execution_status)
+    sw = ex.add_parser("switch", help="pause admission, wait for quiescence, then change the recorded mode")
+    sw.add_argument("--to", choices=("nodes", "direct"), required=True)
+    sw.add_argument("--timeout", type=float, default=300.0, help="seconds to wait for quiescence")
+    sw.add_argument("--poll", type=float, default=1.0, help="seconds between checks")
+    sw.set_defaults(fn=cmd_execution_switch)
+    ex.add_parser("abort", help="cancel a draining/quiesced switch; the previous mode resumes").set_defaults(
+        fn=cmd_execution_abort)
+    oa = sub.add_parser("openapi", help="write Studio's OpenAPI schema (default: stdout)")
+    oa.add_argument("--out", help="file to write")
+    oa.set_defaults(fn=cmd_openapi)
     mcp = sub.add_parser("mcp", help="bearer tokens for the MCP endpoint (remote agents)")
     mt = mcp.add_subparsers(dest="sub", required=True)
     tc = mt.add_parser("create", help="new token; printed once")

@@ -16,6 +16,8 @@ from typing import Any
 import numpy as np
 import trimesh
 
+from .glb import GlbRejected, check_document_shape
+
 
 def srgb_to_linear(c: np.ndarray) -> np.ndarray:
     """Piecewise sRGB EOTF, float32 0..1 in and out."""
@@ -119,7 +121,13 @@ def gltf_json(data: bytes) -> dict[str, Any]:
         doc = json.loads(data[20:20 + jlen])
     except (struct.error, ValueError):
         return {}
-    return doc if isinstance(doc, dict) else {}
+    if not isinstance(doc, dict):
+        return {}
+    try:
+        check_document_shape(doc)
+    except GlbRejected:
+        return {}  # same as unreadable JSON: no extension/sampler facts
+    return doc
 
 
 def check_required(doc: dict[str, Any]) -> None:

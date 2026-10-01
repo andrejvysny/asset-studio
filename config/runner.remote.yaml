@@ -1,0 +1,25 @@
+# Runner config for a remote host (compose.node-remote.yml). Mounted at /etc/assetstudio/runner.yaml.
+studio_url: https://studio.example.com   # EDIT: the public Studio URL (STUDIO_HOST); never an internal address
+name: home-box                            # EDIT: unique per runner
+state_dir: /var/lib/assetstudio-runner/state
+host_lock: /var/lock/assetstudio-runner/host.lock
+registration_token_file: /run/secrets/runner_registration_token   # token minted in Studio (Runtime UI), single use
+dispatch: pull   # a runner behind NAT cannot be pushed to
+
+engines:
+  aux: http://aux:8001
+  worker3d: http://worker3d:8003
+
+slots:
+  - slot_id: aux3d          # aux and worker3d time-share this GPU
+    capability: aux3d
+    devices: ["index:0"]
+    engines: [aux, worker3d]
+
+# Image variant (ComfyUI on this host's GPU): replace engines/slots above with
+#   engines: {comfyui: "http://comfyui:8188"}
+#   slots:
+#     - {slot_id: image, capability: image, devices: ["index:0"], engines: [comfyui]}
+# and set `workflows_dir: /app/comfyui/workflows` below.
+
+models_root: /models        # verified against the catalog Studio sends at session start

@@ -116,11 +116,12 @@ def unavailable(checks: list[Check], reason: str) -> list[CheckResult]:
 
 def _call(env: TaskEnv, images: list[tuple[bytes, str, str]], group: list[Check], context: str,
           tag: str) -> list[CheckResult]:
-    aux = env.studio.aux
+    aux = env.aux
     assert aux is not None
     try:
-        res = aux.compare(images=images, questions=[(c.id, c.question) for c in group], context=context,
-                          epoch=env.epoch("aux"), execution_id=derived_id("att", env.task.id, tag))
+        with env.call(tag):
+            res = aux.compare(images=images, questions=[(c.id, c.question) for c in group], context=context,
+                              epoch=env.epoch("aux"), execution_id=derived_id("att", env.task.id, tag))
     except EngineRejected as e:
         return [_result(c, "unavailable", f"VLM rejected the request: {e}", "aux.vlm") for c in group]
     return _answers(res, group)

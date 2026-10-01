@@ -1,0 +1,97 @@
+# A remote runner host (home box, node B): runner + engines only, no Studio. Registers over the internet with
+# the public Studio URL from config/runner.remote.yaml (docs/installation.md "Public Studio (VPS)").
+#   docker compose -f compose.node-remote.yml up -d
+# Needs Docker Compose >= 2.24.4. Standalone file (does not layer on compose.yml). Needs the image from `make build` (or a registry copy), the models
+# from `make models`, and secrets/runner_registration_token (minted in Studio: Runtime -> Compute runners).
+
+name: assetstudio-node
+
+x-offline: &offline
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  DO_NOT_TRACK: "1"
+
+services:
+  runner:
+    image: ${ASSETSTUDIO_IMAGE:-localhost/assetstudio-studio:dev}   # same image as Studio, different command
+    command: ["assetstudio-node", "run", "--config", "/etc/assetstudio/runner.yaml"]
+    restart: unless-stopped
+    depends_on: [aux, worker3d]   # aux3d default layout; add comfyui when using the image variant
+    environment: *offline
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - runner-state:/var/lib/assetstudio-runner   # state dir and key (per Compose project)
+      # Host lock: a HOST path, shared by every Compose project on this machine (one runner per host).
+      # Create it once: sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner
+      - ${RUNNER_HOST_LOCK_DIR:-/var/lock/assetstudio-runner}:/var/lock/assetstudio-runner
+      - ./config/runner.remote.yaml:/etc/assetstudio/runner.yaml:ro
+    secrets:
+      - source: runner_registration_token
+        target: /run/secrets/runner_registration_token
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - {driver: nvidia, device_ids: ["${GPU_AUX_ID:-0}"], capabilities: [utility]}   # UUID discovery only
+    networks: [internal, egress]   # egress: reach the public Studio URL; engines stay on the internal network
+
+  aux:
+    image: localhost/assetstudio-aux:dev
+    restart: unless-stopped
+    shm_size: 2g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-0}"], capabilities: [gpu]}]
+    networks: [internal]
+
+  worker3d:
+    image: localhost/assetstudio-worker3d:${RESEARCH_EXPORTER_TAG:-dev}
+    restart: unless-stopped
+    shm_size: 8g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - worker3d-spool:/spool
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-0}"], capabilities: [gpu]}]
+    networks: [internal]
+
+  # Image variant (one GPU for ComfyUI instead): uncomment, switch config/runner.remote.yaml to the image slot,
+  # drop aux/worker3d and set the runner's depends_on to [comfyui].
+  # comfyui:
+  #   image: localhost/assetstudio-comfyui:dev
+  #   restart: unless-stopped
+  #   environment: *offline
+  #   volumes:
+  #     - ${MODELS_DIR:-./models}:/models:ro
+  #     - comfy-user:/comfy-user
+  #     - comfy-output:/comfy-output
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices: [{driver: nvidia, device_ids: ["${GPU_IMAGE_ID:-0}"], capabilities: [gpu]}]
+  #   networks: [internal]
+
+secrets:
+  runner_registration_token:
+    file: ./secrets/runner_registration_token
+
+volumes:
+  runner-state: {}
+  worker3d-spool: {}
+  # comfy-user: {}
+  # comfy-output: {}
+
+networks:
+  internal: {internal: true}
+  egress: {}

@@ -13,6 +13,8 @@ PREFIXES = {
     "fam", "vdr", "vpl", "srs", "vsa", "div", "row", "jrf",
     # Media library.
     "med",
+    # Compute runners.
+    "rnr", "rgp", "rse", "atp", "xfr",
     # Godot integration deliveries.
     "dlv",
     # Godot integration publication previews (staged, expiring).

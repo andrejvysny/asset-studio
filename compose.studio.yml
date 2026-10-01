@@ -1,0 +1,32 @@
+# Topology 1, Studio only (VPS): no GPU, no engines, no runner, no model weights. Remote runners connect to it.
+#   docker compose -f compose.studio.yml up -d                       (private; UI/REST via an SSH tunnel or an overlay)
+#   docker compose -f compose.studio.yml -f compose.public.yml up -d (public, behind Traefik; see compose.public.yml)
+# Self-contained: does not layer on compose.yml. Needs the image from `make build` (or a registry copy via
+# ASSETSTUDIO_IMAGE). Docker Compose >= 2.24.4 (the overlay files use `!reset`/`!override`). Not for podman-compose.
+# No host ports: the three listeners (8190 UI+REST, 8191 MCP, 8192 integration) are reachable on the internal network
+# only; compose.public.yml adds the Traefik routes.
+
+name: assetstudio-studio
+
+services:
+  studio:
+    image: ${ASSETSTUDIO_IMAGE:-localhost/assetstudio-studio:dev}
+    restart: unless-stopped
+    environment:
+      STUDIO_EXECUTION: nodes
+      STUDIO_PUBLIC_URL: http://studio:8190   # audience runners sign; overridden by compose.public.yml
+      STUDIO_MCP: ${STUDIO_MCP:-1}
+      STUDIO_INTEGRATION_ENABLED: ${STUDIO_INTEGRATION_ENABLED:-0}
+      COMFY_URL: ""                            # Studio never talks to engines in node mode
+      AUX_URL: ""
+      WORKER3D_URL: ""
+    volumes:
+      - ${PROJECTS_DIR:-./projects}:/projects
+      - studio-instance:/data/instance         # journal, index, staging: machine-local state
+    networks: [internal]
+
+volumes:
+  studio-instance: {}
+
+networks:
+  internal: {internal: true}
