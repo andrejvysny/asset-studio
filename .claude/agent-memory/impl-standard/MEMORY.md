@@ -3,3 +3,6 @@
 - [Integration publication](repo_integration_publication.md) — preview/commit modules, test helpers, schema-count gotcha
 - [Godot client](repo_godot_client.md) — AS-06 addon core: HTTP/test-runner gotchas
 - [Lifecycle/backup](repo_lifecycle_backup.md) — MutationGate, run() shutdown order, instance_backup module
+- [Addon project (AS-07a)](repo_addon_project.md) — coordinator/lock/installer/CLI gotchas, test files, U+0000 limit
+- [Addon editor (AS-08)](repo_addon_editor.md) — @tool requirement, finalize/wrapper determinism, plugin test harness
+- [Fantasy consumer](repo_fantasy_consumer.md) — binding slug rule, wrapper-owned bodies, descriptor cache
