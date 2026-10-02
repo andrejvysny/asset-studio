@@ -19,7 +19,7 @@ Design: `docs/architecture.md` § Security posture.
 | Disable | `STUDIO_MCP=0` |
 
 The UI/REST port (8190) has **no authentication** and must stay on loopback. Expose only the MCP port. Put a TLS
-reverse proxy or tunnel in front of it (Caddy, nginx, Tailscale, cloudflared), then set
+reverse proxy or tunnel in front of it (nginx, Tailscale, cloudflared, ...), then set
 `STUDIO_MCP_PUBLIC_URL=https://…`. That URL is the only non-loopback `Host` the endpoint accepts (DNS-rebinding
 protection), and it is the base of signed file URLs.
 
@@ -56,6 +56,8 @@ Python SDK: `streamable_http_client(url, http_client=httpx.AsyncClient(headers={
 ## Tools
 
 `ᴿ` = read-only (allowed for `read` tokens). `project_id` may be omitted when exactly one project is open.
+In proxy auth mode (`STUDIO_AUTH_MODE=proxy`) the operator-administration tools `register_project`, `config_set`,
+`config_delete`, `config_replace_yaml`, `reset_lane` and `rebuild_index` are not listed: agents get 403 for them there.
 
 | Group | Tools |
 |---|---|

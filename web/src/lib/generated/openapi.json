@@ -1678,6 +1678,42 @@
         "title": "FileRef",
         "type": "object"
       },
+      "GroupAssets": {
+        "properties": {
+          "anchor_asset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Asset Id"
+          },
+          "asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Asset Ids",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "asset_ids"
+        ],
+        "title": "GroupAssets",
+        "type": "object"
+      },
       "GroupCreate": {
         "additionalProperties": false,
         "properties": {
@@ -8059,6 +8095,56 @@
           }
         },
         "summary": "Families"
+      },
+      "post": {
+        "description": "Group existing same-kind assets into a family (created if new); repeating with more ids adds members.",
+        "operationId": "create_family_group_api_v1_projects__project_id__families_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupAssets"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Family Group Api V1 Projects  Project Id  Families Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Family Group"
       }
     },
     "/api/v1/projects/{project_id}/families/{family_id}": {

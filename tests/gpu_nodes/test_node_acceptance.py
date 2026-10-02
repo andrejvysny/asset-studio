@@ -2,7 +2,8 @@
 
 Real Qwen-Image + Qwen3-VL + BiRefNet + TRELLIS.2 behind a runner; Studio has no /models and no GPU.
 Env: STUDIO_URL (set by the make target), GPU_NODES_DOCKER=1 (A01 container check), GPU_NODES_CHAOS=1 (kill/restart
-scenarios), GPU_NODES_RUNNER_B=1 (a second runner is registered), NODES_COMPOSE (compose file flags).
+scenarios), GPU_NODES_RUNNER_B=1 (a second runner is registered), NODES_COMPOSE (compose file flags),
+GPU_NODES_RUNNER_SERVICES (`runner name=compose service,...`; required by the kill test when >1 runner is active).
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from tests.gpu_nodes.conftest import (
     project_task_ids,
     require_ready,
     runner_detail,
+    runner_service,
     runners,
     wait,
 )
@@ -124,10 +126,11 @@ def test_a08_runner_killed_mid_sample_reconciles_without_second_trellis_run() ->
         cl.post(f"/api/v1/projects/{pid}/batches/{bid}:build-approved", json={"idempotency_key": "chaos-sample", "items": [
             {"item_id": i["id"], "approval_id": i["approval"], "expected_item_revision": i["revision"]} for i in items]})
         tasks = project_task_ids(cl, pid)
-        wait(lambda: any(a["operation"] == "worker3d.generate" and a["state"] in ("leased", "executing")
-                         for a in attempts_of(cl, tasks)), 600, "sampling attempt", poll=1)
-        compose("kill", "runner")
-        compose("start", "runner")
+        observed = wait(lambda: next((a for a in attempts_of(cl, tasks) if a["operation"] == "worker3d.generate"
+                                      and a["state"] in ("leased", "executing")), None), 600, "sampling attempt", poll=1)
+        service = runner_service(runners(cl), observed["runner_id"], os.environ.get("GPU_NODES_RUNNER_SERVICES", ""))
+        compose("kill", service)
+        compose("start", service)
         wait(lambda: ops_idle(cl, pid), 3600, "reconciled build", poll=5)
         assert detail(cl, pid, bid)["items"][0]["build"]["result"] == "valid"
         rows = [a for a in attempts_of(cl, tasks) if a["operation"] == "worker3d.generate"]

@@ -1,0 +1,102 @@
+# AssetStudio — all-in-one GPU box (Linux + Docker + NVIDIA Container Toolkit): Studio + engines on one machine.
+# Not the default: plain `docker compose up` runs Studio only (compose.yml). Use `make gpu-up` or
+# `docker compose -f compose.gpu-local.yml up -d`. Podman (legacy): `podman-compose -f compose.gpu-local.yml -f compose.podman.yml`.
+# GPU0: comfyui (image generation). GPU1: aux (text/VLM/segmentation) + worker3d (TRELLIS.2), time-shared under
+# Studio ownership (explicit unload acknowledgements).
+name: assetstudio
+
+x-gpu0: &gpu0
+  deploy:
+    resources:
+      reservations:
+        devices: [{driver: nvidia, device_ids: ["${GPU_IMAGE_ID:-0}"], capabilities: [gpu]}]
+x-gpu1: &gpu1
+  deploy:
+    resources:
+      reservations:
+        devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-1}"], capabilities: [gpu]}]
+x-offline: &offline
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  DO_NOT_TRACK: "1"
+
+services:
+  studio:
+    build: {context: ., dockerfile: services/studio/Dockerfile}
+    image: localhost/assetstudio-studio:dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-8190}:8190"              # UI + REST: loopback only (no auth)
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8191}:8191"     # MCP for agents: bearer tokens; expose via TLS proxy
+      # Godot integration API (disabled unless STUDIO_INTEGRATION_ENABLED=1): library-scoped bearer tokens.
+      # This mapping alone governs exposure; keep loopback, or a LAN address only behind a TLS proxy.
+      - "${INTEGRATION_BIND:-127.0.0.1}:${INTEGRATION_PORT:-8192}:8192"
+    environment:
+      STUDIO_INTEGRATION_ENABLED: ${STUDIO_INTEGRATION_ENABLED:-0}
+      STUDIO_INTEGRATION_ALLOW_INSECURE_LAN: ${STUDIO_INTEGRATION_ALLOW_INSECURE_LAN:-0}
+      STUDIO_MCP: ${STUDIO_MCP:-1}
+      STUDIO_MCP_PUBLIC_URL: ${STUDIO_MCP_PUBLIC_URL:-}
+      COMFY_URL: http://comfyui:8188
+      AUX_URL: http://aux:8001
+      WORKER3D_URL: ${WORKER3D_URL-http://worker3d:8003}   # set empty to disable 3D (GPU1 then only hosts aux)
+      STUDIO_ENGINE: ${STUDIO_ENGINE:-comfyui}
+      GPU_IMAGE_ID: ${GPU_IMAGE_ID:-0}
+      GPU_AUX_ID: ${GPU_AUX_ID:-1}
+    volumes:
+      - ${PROJECTS_DIR:-./projects}:/projects          # portable project roots (server-side paths)
+      - studio-instance:/data/instance                  # journal, index, staging: machine-local state
+      - ${MODELS_DIR:-./models}:/models:ro              # readiness verification only
+    networks: [internal, public]
+
+  comfyui:
+    <<: *gpu0
+    build: {context: ., dockerfile: comfyui/Dockerfile}
+    image: localhost/assetstudio-comfyui:dev
+    restart: unless-stopped
+    ports: ["127.0.0.1:${COMFYUI_PORT:-8188}:8188"]  # advanced UI: localhost only
+    environment: *offline
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - comfy-user:/comfy-user
+      - comfy-output:/comfy-output
+    networks: [internal, public]
+
+  aux:
+    <<: *gpu1
+    build: {context: ., dockerfile: services/prompt_service/Dockerfile}
+    image: localhost/assetstudio-aux:dev
+    restart: unless-stopped
+    shm_size: 2g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    networks: [internal]                             # no egress, no host port
+
+  worker3d:
+    <<: *gpu1
+    build:
+      context: .
+      dockerfile: services/worker3d/Dockerfile
+      args: {RESEARCH_EXPORTER: "${RESEARCH_EXPORTER:-0}"}
+    image: localhost/assetstudio-worker3d:${RESEARCH_EXPORTER_TAG:-dev}
+    restart: unless-stopped
+    shm_size: 8g
+    environment:
+      <<: *offline
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+      - worker3d-spool:/spool                        # finished results until the Studio acknowledges ingestion
+    networks: [internal]                             # no egress, no host port
+
+volumes:
+  studio-instance: {}
+  worker3d-spool: {}
+  comfy-user: {}
+  comfy-output: {}
+
+networks:
+  internal: {internal: true}
+  public: {}

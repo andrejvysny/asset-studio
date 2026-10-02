@@ -966,7 +966,11 @@ export interface paths {
         /** Families */
         get: operations["families_api_v1_projects__project_id__families_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Family Group
+         * @description Group existing same-kind assets into a family (created if new); repeating with more ids adds members.
+         */
+        post: operations["create_family_group_api_v1_projects__project_id__families_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2994,6 +2998,15 @@ export interface components {
             sha256: string;
             /** Size */
             size: number;
+        };
+        /** GroupAssets */
+        GroupAssets: {
+            /** Anchor Asset Id */
+            anchor_asset_id?: string | null;
+            /** Asset Ids */
+            asset_ids: string[];
+            /** Name */
+            name: string;
         };
         /** GroupCreate */
         GroupCreate: {
@@ -6103,6 +6116,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_family_group_api_v1_projects__project_id__families_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupAssets"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

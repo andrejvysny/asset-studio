@@ -34,8 +34,29 @@ BG = np.array([38, 39, 42], dtype=np.float32)
 MAX_CANDIDATES = 1 << 24
 
 
+def _unit_colors(raw: np.ndarray) -> np.ndarray:
+    """COLOR_0 as float32 RGBA 0..1 (glTF allows normalised uint8 / uint16 as well as float; RGB gets alpha 1)."""
+    arr = np.asarray(raw)
+    out = arr.astype(np.float32) / (np.iinfo(arr.dtype).max if arr.dtype.kind in "iu" else 1)
+    if out.shape[1] == 3:
+        out = np.concatenate([out, np.ones((len(out), 1), np.float32)], 1)
+    return np.clip(out, 0, 1)
+
+
+def _is_collision(name: str) -> bool:
+    """Godot import hints (-col, -convcol, -colonly, -convcolonly) mark physics shapes, not visible geometry."""
+    return name.lower().endswith(("-col", "-convcol", "-colonly", "-convcolonly"))
+
+
 def _load(data: bytes) -> list[trimesh.Trimesh]:
     scene = trimesh.load(io.BytesIO(data), file_type="glb", force="scene")
+    for name, geom in scene.geometry.items():
+        # trimesh keeps COLOR_0 of a textured/material mesh in visual.vertex_attributes, which dump() drops.
+        va = getattr(getattr(geom, "visual", None), "vertex_attributes", None)
+        if isinstance(geom, trimesh.Trimesh) and va is not None and "color" in va:
+            geom.vertex_attributes["color"] = _unit_colors(va["color"])
+        if _is_collision(str(geom.metadata.get("name", name))) or _is_collision(name):
+            geom.faces = geom.faces[:0]
     return [g for g in scene.dump(concatenate=False) if isinstance(g, trimesh.Trimesh) and len(g.faces)]
 
 

@@ -81,7 +81,7 @@ under `/api/runner/v1` with their own authentication (R3) and are the only CSRF 
 | Model readiness | Studio hashes `/models` | runner verifies the pinned catalog; Studio aggregates per operation |
 | Result durability | worker3d spool until Studio `ack` | runner spool until disposition receipt; worker3d acked after runner spool fsync |
 | Restart | running tasks requeued; handlers reconcile by engine ids | tasks with live attempts go to `reconciling`; never re-placed while uncertain |
-| Auth | CSRF header + Origin, loopback trust | + runner keys/tokens (R3); profile P adds Traefik + Authelia and roles (R16) |
+| Auth | CSRF header + Origin, loopback trust | + runner keys/tokens (R3); profile P adds an authenticating reverse proxy and roles (R16) |
 
 ## Cutover and rollback (R15)
 

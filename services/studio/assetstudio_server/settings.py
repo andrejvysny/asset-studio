@@ -87,7 +87,8 @@ class Settings:
     transfer_concurrency: int = field(default_factory=lambda: _int("STUDIO_TRANSFER_CONCURRENCY", 4))
     disk_floor_bytes: int = field(default_factory=lambda: _int("STUDIO_DISK_FLOOR_BYTES", 2 * 1024**3))
     # Operator identity (docs/modular/compute-runner.md R11, R16): "local" = loopback profile S, the local operator is
-    # owner; "proxy" = profile P behind Traefik + Authelia, identity headers trusted only with the shared secret.
+    # owner; "proxy" = profile P behind an authenticating reverse proxy, identity headers trusted only with the
+    # shared secret.
     auth_mode: str = field(default_factory=lambda: os.environ.get("STUDIO_AUTH_MODE", "local"))
     proxy_secret: str = field(default_factory=lambda: _secret("STUDIO_PROXY_SECRET"))
     proxy_user_header: str = "Remote-User"

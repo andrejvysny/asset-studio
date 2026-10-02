@@ -10,18 +10,29 @@ inference runs only on your machine (ComfyUI + local models). Nothing about a pa
 - **MCP** (:8191, in the Studio process): remote AI agents drive everything the UI can do, bearer-token auth
   (`assetstudio mcp create <name>`). See `docs/mcp.md`.
 
-## Quick start (Linux, 2 × 24 GB NVIDIA GPUs)
+## Quick start: Studio on any host (no GPU)
+
+```sh
+cp .env.example .env            # optional: ports, PROJECTS_DIR
+docker compose up -d --build    # Docker Compose >= 2.24.4; = `make build up`
+open http://127.0.0.1:8190      # create an empty project, define categories in Schema
+```
+
+Studio (UI + API) is CPU-only and listens on loopback without operator login. Generation needs GPU **runners** on
+other machines (`compose.node-remote.yml`, `docs/installation.md`); without runners Studio is a library/import/review
+tool. TLS, proxying and auth for real deployments live outside this repository.
+
+## Quick start: all-in-one GPU box (Linux, 2 × 24 GB NVIDIA GPUs)
 
 ```sh
 cp .env.example .env            # set HF_TOKEN; paths; GPU ids
 make models                     # explicit download from config/models.lock.yaml (never at runtime)
 make verify                     # dependency closure check (`make verify-full` = sha256)
-make build up                   # Docker. Podman: `make PODMAN=1 build up`
-open http://127.0.0.1:8190      # create an empty project, define categories in Schema
+make gpu-build gpu-up           # compose.gpu-local.yml. Podman (legacy): `make PODMAN=1 gpu-build gpu-up`
+open http://127.0.0.1:8190
 ```
 
-Library-only use (no GPUs/models): `STUDIO_ENGINE=none`. Demo/test mode with a clearly labelled
-**simulated** engine: `STUDIO_ENGINE=fake`.
+In this stack `STUDIO_ENGINE=none` gives library-only use; `STUDIO_ENGINE=fake` a clearly labelled **simulated** engine.
 
 ## Status of this release (Phases 0–2 + 5)
 

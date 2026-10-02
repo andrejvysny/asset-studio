@@ -345,7 +345,7 @@ topology (it inspects ComfyUI directly and assumes fixed gpu0/gpu1 lanes), hence
 | Studio restarted mid-generation | A07 | `GPU_NODES_CHAOS=1` | `docker compose restart studio`; exactly 8 executions, no generation 2 |
 | Two runners | A02, A04 | `GPU_NODES_RUNNER_B=1` | distinct device UUIDs even at index 0; an operation only one runner can serve lands on it |
 
-`NODES_COMPOSE` overrides the compose flags (default `docker compose -f compose.yml -f compose.nodes.yml`).
+`NODES_COMPOSE` overrides the compose flags (default `docker compose -f compose.gpu-local.yml -f compose.nodes.yml`).
 Results: **not yet run on hardware**.
 
 ## Known limitations (this release)

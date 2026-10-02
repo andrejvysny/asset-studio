@@ -1,7 +1,7 @@
 # Node mode, profile S (single machine): Studio without model weights + one runner that owns the GPUs and engines.
-#   docker compose -f compose.yml -f compose.nodes.yml up -d      (or: make runner-token up-nodes)
+#   docker compose -f compose.gpu-local.yml -f compose.nodes.yml up -d      (or: make runner-token up-nodes)
 # Needs Docker Compose >= 2.24.4 (`!override` / `!reset` tags; earlier 2.24.x mis-merged `!override`). Not supported by podman-compose (Makefile refuses).
-# Direct mode (compose.yml alone) stays the default.
+# Direct mode (compose.gpu-local.yml alone) is the all-in-one default until it is removed.
 
 services:
   studio:

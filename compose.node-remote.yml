@@ -1,7 +1,7 @@
 # A remote runner host (home box, node B): runner + engines only, no Studio. Registers over the internet with
 # the public Studio URL from config/runner.remote.yaml (docs/installation.md "Public Studio (VPS)").
 #   docker compose -f compose.node-remote.yml up -d
-# Needs Docker Compose >= 2.24.4. Standalone file (does not layer on compose.yml). Needs the image from `make build` (or a registry copy), the models
+# Needs Docker Compose >= 2.24.4. Standalone file (does not layer on compose.yml/compose.gpu-local.yml). Needs the image from `make build` (or a registry copy), the models
 # from `make models`, and secrets/runner_registration_token (minted in Studio: Runtime -> Compute runners).
 
 name: assetstudio-node

@@ -1,101 +1,48 @@
-# AssetStudio — Docker baseline (Linux + Docker + NVIDIA Container Toolkit).
-# Podman: `docker compose` -> `podman-compose -f compose.yml -f compose.podman.yml` (see Makefile COMPOSE).
-# GPU0: comfyui (image generation). GPU1: aux (text/VLM/segmentation) + worker3d (TRELLIS.2), time-shared under
-# Studio ownership (explicit unload acknowledgements).
-name: assetstudio
+# Studio only (default): web UI + API + coordinator. No GPU, no engines, no runner, no model weights.
+#   docker compose up -d            -> UI/REST on http://127.0.0.1:${STUDIO_PORT:-8190} (loopback, no operator auth)
+# GPU runners (separate machines) connect to Studio, see compose.node-remote.yml.
+# All-in-one GPU box: compose.gpu-local.yml (+ compose.nodes.yml). TLS/proxy/auth for real deployments: out of repo.
+# Image: `docker compose build` (this repo) or a registry copy via ASSETSTUDIO_IMAGE.
+# Needs Docker Compose >= 2.24.4 (the overlay files use `!reset`/`!override`). Not for podman-compose.
+# Ports are published on loopback by default. The UI has no login in this mode (STUDIO_AUTH_MODE=local): never bind it
+# to a reachable address; put an authenticating proxy in front (STUDIO_AUTH_MODE=proxy) outside this repo.
 
-x-gpu0: &gpu0
-  deploy:
-    resources:
-      reservations:
-        devices: [{driver: nvidia, device_ids: ["${GPU_IMAGE_ID:-0}"], capabilities: [gpu]}]
-x-gpu1: &gpu1
-  deploy:
-    resources:
-      reservations:
-        devices: [{driver: nvidia, device_ids: ["${GPU_AUX_ID:-1}"], capabilities: [gpu]}]
-x-offline: &offline
-  HF_HUB_OFFLINE: "1"
-  TRANSFORMERS_OFFLINE: "1"
-  DO_NOT_TRACK: "1"
+name: assetstudio-studio
 
 services:
   studio:
     build: {context: ., dockerfile: services/studio/Dockerfile}
-    image: localhost/assetstudio-studio:dev
+    image: ${ASSETSTUDIO_IMAGE:-localhost/assetstudio-studio:dev}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${STUDIO_PORT:-8190}:8190"              # UI + REST: loopback only (no auth)
-      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8191}:8191"     # MCP for agents: bearer tokens; expose via TLS proxy
+      - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8191}:8191"     # MCP for agents: bearer tokens
       # Godot integration API (disabled unless STUDIO_INTEGRATION_ENABLED=1): library-scoped bearer tokens.
-      # This mapping alone governs exposure; keep loopback, or a LAN address only behind a TLS proxy.
       - "${INTEGRATION_BIND:-127.0.0.1}:${INTEGRATION_PORT:-8192}:8192"
     environment:
-      STUDIO_INTEGRATION_ENABLED: ${STUDIO_INTEGRATION_ENABLED:-0}
-      STUDIO_INTEGRATION_ALLOW_INSECURE_LAN: ${STUDIO_INTEGRATION_ALLOW_INSECURE_LAN:-0}
+      STUDIO_EXECUTION: nodes
+      STUDIO_PUBLIC_URL: ${STUDIO_PUBLIC_URL:-http://studio:8190}   # audience runners sign; set to the URL runners use
       STUDIO_MCP: ${STUDIO_MCP:-1}
       STUDIO_MCP_PUBLIC_URL: ${STUDIO_MCP_PUBLIC_URL:-}
-      COMFY_URL: http://comfyui:8188
-      AUX_URL: http://aux:8001
-      WORKER3D_URL: ${WORKER3D_URL-http://worker3d:8003}   # set empty to disable 3D (GPU1 then only hosts aux)
-      STUDIO_ENGINE: ${STUDIO_ENGINE:-comfyui}
-      GPU_IMAGE_ID: ${GPU_IMAGE_ID:-0}
-      GPU_AUX_ID: ${GPU_AUX_ID:-1}
+      STUDIO_INTEGRATION_ENABLED: ${STUDIO_INTEGRATION_ENABLED:-0}
+      STUDIO_INTEGRATION_ALLOW_INSECURE_LAN: ${STUDIO_INTEGRATION_ALLOW_INSECURE_LAN:-0}
+      COMFY_URL: ""                            # Studio never talks to engines in node mode
+      AUX_URL: ""
+      WORKER3D_URL: ""
     volumes:
-      - ${PROJECTS_DIR:-./projects}:/projects          # portable project roots (server-side paths)
-      - studio-instance:/data/instance                  # journal, index, staging: machine-local state
-      - ${MODELS_DIR:-./models}:/models:ro              # readiness verification only
+      - ${PROJECTS_DIR:-./projects}:/projects
+      - studio-instance:/data/instance         # journal, index, staging: machine-local state
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8190/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks: [internal, public]
-
-  comfyui:
-    <<: *gpu0
-    build: {context: ., dockerfile: comfyui/Dockerfile}
-    image: localhost/assetstudio-comfyui:dev
-    restart: unless-stopped
-    ports: ["127.0.0.1:${COMFYUI_PORT:-8188}:8188"]  # advanced UI: localhost only
-    environment: *offline
-    volumes:
-      - ${MODELS_DIR:-./models}:/models:ro
-      - comfy-user:/comfy-user
-      - comfy-output:/comfy-output
-    networks: [internal, public]
-
-  aux:
-    <<: *gpu1
-    build: {context: ., dockerfile: services/prompt_service/Dockerfile}
-    image: localhost/assetstudio-aux:dev
-    restart: unless-stopped
-    shm_size: 2g
-    environment:
-      <<: *offline
-      IDLE_UNLOAD_S: "300"
-    volumes:
-      - ${MODELS_DIR:-./models}:/models:ro
-    networks: [internal]                             # no egress, no host port
-
-  worker3d:
-    <<: *gpu1
-    build:
-      context: .
-      dockerfile: services/worker3d/Dockerfile
-      args: {RESEARCH_EXPORTER: "${RESEARCH_EXPORTER:-0}"}
-    image: localhost/assetstudio-worker3d:${RESEARCH_EXPORTER_TAG:-dev}
-    restart: unless-stopped
-    shm_size: 8g
-    environment:
-      <<: *offline
-      IDLE_UNLOAD_S: "300"
-    volumes:
-      - ${MODELS_DIR:-./models}:/models:ro
-      - worker3d-spool:/spool                        # finished results until the Studio acknowledges ingestion
-    networks: [internal]                             # no egress, no host port
 
 volumes:
   studio-instance: {}
-  worker3d-spool: {}
-  comfy-user: {}
-  comfy-output: {}
 
 networks:
   internal: {internal: true}
-  public: {}
+  public: {}      # published ports need a non-internal network

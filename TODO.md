@@ -6,7 +6,7 @@ Evidence: docs/acceptance.md "Merge of feat/modular-arch into master".
 - [x] branch fixes: auth.sqlite 0600 before open (WAL held keys at 0644); cryptography pin 50.0.1 (no downgrade)
 - [x] master-written v3 journal + instance backup fixtures; upgrade/recovery/backup-compat tests
 - [x] merged tree: per-test-id parity (0 regressions), process, web, e2e, Godot, compose render, rehearsal, smoke
-- [ ] NOT RUN: GPU acceptance (direct + nodes), Studio image build/container smoke, mixed worker images, Traefik/Authelia
+- [ ] NOT RUN: GPU acceptance (direct + nodes), Studio image build/container smoke, mixed worker images
 - [ ] backup-restore.md: restore must re-register projects (projects.json not in instance backup) — pre-existing
 - [x] push master; Plane updated (page + ASSETSTUDI-36..38); merged branches deleted
 
@@ -56,7 +56,7 @@ Phase 2 — extract compute, single machine, public profile
 - [x] WP2.0 pin model hashes (already pinned; guard test) · [x] WP2.1 move execution code · [x] WP2.1b lease hardening · [x] WP2.2 runner runtime
 - [x] WP2.3 ExecutionBackend seam · [x] WP2.4 remote adapters · [x] WP2.5 continuations/placement · [x] WP2.5b fences
 - [x] WP2.6 readiness · [x] WP2.7 single-machine compose · [x] WP2.8 failure injection · [~] WP2.9 real acceptance (suite written; needs GPU box run)
-- [ ] WP2.10 remove direct mode (needs user confirmation) · [x] WP2.11 public profile (not validated on real Traefik/Authelia) · [x] WP2.12 ephemeral (simulated)
+- [ ] WP2.10 remove direct mode (needs user confirmation) · [x] WP2.11 public profile (proxy auth mode only; deployment lives outside this repo) · [x] WP2.12 ephemeral (simulated)
 
 Result (2026-09-30): P0–P2 implemented on feat/modular-arch (lint clean; 671 backend + 4 process + 27/30 e2e — the 3
 e2e failures need model files, same as baseline). Direct mode is still the default.
@@ -64,7 +64,6 @@ Open:
 - [ ] WP2.9 run `make acceptance-gpu-nodes` on the 2x4090 box (profile S via compose.nodes.yml), then node B
       (GPU_NODES_RUNNER_B=1, both slot layouts); record in docs/acceptance.md
 - [ ] WP2.10 remove direct mode — only after WP2.9 evidence + explicit user confirmation
-- [ ] validate compose.public.yml on real Traefik + Authelia (header stripping, router priorities, XFF handling)
 - [ ] Runtime UI: show runner_readiness + audit view; node-mode GPU usage shows as unknown, not idle
 - [ ] aux calls lose Studio execution_id reconciliation in node mode (attempt id is the identity instead)
 - [ ] research exporter in node mode depends on runner label `exporter-research` (untested on hardware)
@@ -84,8 +83,6 @@ Open:
       work before restart); pause read is cached 1 s, not checked at claim. Needs a durable switch/activation handshake
 - [ ] integration publication commits ignore admission_paused: freeze the integration listener during a mode switch
 - [ ] instance backup: include integration/ (server.json identity, client tokens) with auth, MCP and runner state
-- [ ] public profile (compose.public.yml) resets studio ports: integration API (and MCP) unreachable, no Traefik route
-- [ ] compose.public.yml layers on compose.nodes.yml without removing engines/runner: not a Studio-only VPS profile
 - [ ] runner host.lock lives in the per-project runner-state volume: not host-wide across compose projects
 - [ ] gpu_nodes chaos kills the container named `runner`, not the runner bound to the observed attempt
 

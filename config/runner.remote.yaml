@@ -1,5 +1,5 @@
 # Runner config for a remote host (compose.node-remote.yml). Mounted at /etc/assetstudio/runner.yaml.
-studio_url: https://studio.example.com   # EDIT: the public Studio URL (STUDIO_HOST); never an internal address
+studio_url: https://studio.example.com   # EDIT: the public Studio URL; never an internal address
 name: home-box                            # EDIT: unique per runner
 state_dir: /var/lib/assetstudio-runner/state
 host_lock: /var/lock/assetstudio-runner/host.lock

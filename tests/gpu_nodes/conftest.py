@@ -79,8 +79,22 @@ def drained(cl: httpx.Client) -> bool:
 
 
 def compose(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    base = shlex.split(os.environ.get("NODES_COMPOSE", "docker compose -f compose.yml -f compose.nodes.yml"))
+    base = shlex.split(os.environ.get("NODES_COMPOSE", "docker compose -f compose.gpu-local.yml -f compose.nodes.yml"))
     return subprocess.run([*base, *args], check=check, capture_output=True, text=True, timeout=600)
+
+
+def runner_service(active: list[dict], runner_id: str, mapping: str = "") -> str:
+    """Compose service of the runner that owns an attempt. `mapping` ("runner name=service,...", env
+    GPU_NODES_RUNNER_SERVICES) resolves several runners on one stack; a lone runner is the compose `runner` service.
+    Refuses to guess: killing a runner that does not own the attempt would make a chaos test pass vacuously."""
+    owner = next((r for r in active if r["id"] == runner_id), None)
+    assert owner is not None, f"runner {runner_id} owning the attempt is not active: {[r['id'] for r in active]}"
+    services = dict(p.split("=", 1) for p in mapping.split(",") if "=" in p)
+    if owner["name"] in services:
+        return services[owner["name"]]
+    assert len(active) == 1, (f"{len(active)} runners are active and {owner['name']!r} is not in "
+                              f"GPU_NODES_RUNNER_SERVICES (name=service,...)")
+    return "runner"
 
 
 def require_ready(cl: httpx.Client, ops: tuple[str, ...], recipe_id: str | None = None) -> dict:

@@ -47,7 +47,7 @@ def test_comfyui_port_reset() -> None:
 
 def test_runner_service() -> None:
     doc = _load("compose.nodes.yml")
-    base = _load("compose.yml")
+    base = _load("compose.gpu-local.yml")
     runner = doc["services"]["runner"]
     assert runner["image"] == base["services"]["studio"]["image"]
     assert runner["networks"] == ["internal"]

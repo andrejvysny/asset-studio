@@ -5,10 +5,19 @@ from typing import Any
 
 from assetstudio_core.canonical import pretty_json
 from assetstudio_core.domain import AssetFamily, AssetManifest, AssetVersion
+from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import descendants, resolve
 from assetstudio_core.kinds import KINDS, Kind
-from assetstudio_storage.families import family_key, list_families, update_family
+from assetstudio_storage.families import (
+    FamilyConflict,
+    attach_asset,
+    create_family,
+    family_key,
+    list_families,
+    update_family,
+)
 from assetstudio_storage.project import manifest_key, version_key
+from assetstudio_storage.repo import Conflict
 
 from ..errors import ApiError
 from ..registry import ProjectContext
@@ -141,3 +150,32 @@ def rename_family(ctx: ProjectContext, fid: str, expected_revision: int, name: s
     for asset_id in ctx.index.member_ids(fid):  # family_name is denormalised into each member's row + search text
         ctx.index.upsert(ctx.store.get(manifest_key(asset_id), AssetManifest)[0], fam.name)
     return family_detail(ctx, fid)
+
+
+def group_assets(ctx: ProjectContext, name: str, asset_ids: list[str], anchor_asset_id: str | None) -> dict[str, Any]:
+    """Create-or-reuse the family `name` (derived id, so a repeat adds members) and attach unassigned assets of its
+    kind. Assets already in another family are reported, never moved."""
+    name = name.strip()
+    fid = derived_id("fam", ctx.id, name.lower())
+    anchor_id = anchor_asset_id or asset_ids[0]
+    if anchor_id not in asset_ids:
+        raise ApiError(422, "invalid_anchor", "anchor_asset_id must be one of asset_ids")
+    anchor = ctx.store.get_opt(manifest_key(anchor_id), AssetManifest)[0]
+    if anchor is None or anchor.current_version_id is None:
+        raise ApiError(404, "not_found", f"asset {anchor_id} has no current version")
+    try:
+        fam = create_family(ctx.store, family_id=fid, name=name, kind=anchor.kind, anchor_asset_id=anchor_id,
+                            anchor_version_id=anchor.current_version_id, op_id=f"group:{name.lower()}")
+    except Conflict as e:
+        raise ApiError(409, "family_conflict", str(e)) from e
+    attached: list[str] = []
+    skipped: dict[str, str] = {}
+    for asset_id in asset_ids:
+        try:
+            manifest = attach_asset(ctx.store, asset_id=asset_id, family_id=fid, expected_manifest_revision=None)
+        except (FamilyConflict, Conflict) as e:
+            skipped[asset_id] = str(e)
+            continue
+        ctx.index.upsert(manifest, fam.name)
+        attached.append(asset_id)
+    return {"family_id": fid, "name": fam.name, "attached": attached, "skipped": skipped}

@@ -7,14 +7,26 @@
 - Disk: model closure ≈ 62 GB today (`make doctor` prints the remaining download size from the lock) + project data.
 - Library-only mode needs neither GPUs nor models.
 
-## Steps
+## Studio on any host (no GPU, no models)
+
+```sh
+cp .env.example .env            # optional: STUDIO_PORT, PROJECTS_DIR, MCP_BIND, INTEGRATION_BIND
+docker compose up -d --build    # compose.yml; image from this repo, or ASSETSTUDIO_IMAGE for a registry copy
+curl http://127.0.0.1:8190/api/health
+```
+
+Ports are published on loopback; the UI has no login in `STUDIO_AUTH_MODE=local`, so never bind it to a reachable
+address. Studio runs in nodes mode with no engines: it is a library/import/review tool until
+a GPU runner registers (see "Compute only"). State lives in the `studio-instance` volume and `PROJECTS_DIR`.
+
+## All-in-one GPU box (Studio + engines, direct mode)
 
 1. `cp .env.example .env` and set `HF_TOKEN`, `PROJECTS_DIR`, `MODELS_DIR`, GPU ids.
 2. `make models` — downloads exactly the files pinned in `config/models.lock.yaml` (repo + revision + file list).
    Gated repos (DINOv3) report `PENDING` until your Hugging Face access request is approved; dependent recipes stay
    disabled with the exact missing files shown on the Runtime screen.
 3. `make verify` (sizes) / `make verify-full` (sha256, cached per file identity). README-only or partial downloads fail.
-4. `make build up` (Docker) or `make PODMAN=1 build up`.
+4. `make gpu-build gpu-up` (Docker) or `make PODMAN=1 gpu-build gpu-up` (legacy podman; `compose.gpu-local.yml`).
 5. Open `http://127.0.0.1:8190`, create a project (it starts empty), add categories under **Schema**.
 
 ## Single machine with a compute runner (node mode)
@@ -25,10 +37,10 @@ Studio runs without model weights; a `runner` container owns the GPUs and engine
 Prerequisites: Docker Compose >= 2.24.4 (`!override`/`!reset` tags; earlier 2.24.x mis-merges `!override`; `make PODMAN=1` is refused) and the NVIDIA Container
 Toolkit. The models from `make models` must already be on this host.
 
-1. `make build`
+1. `make gpu-build`
 2. `make runner-token` — creates the `local` runner group and writes its registration token to
    `secrets/runner_registration_token` (0600, gitignored).
-3. `make up-nodes` — `docker compose -f compose.yml -f compose.nodes.yml up -d`.
+3. `make up-nodes` — `docker compose -f compose.gpu-local.yml -f compose.nodes.yml up -d`.
 4. Open **Runtime → Compute runners**: `gpu-box` should be fresh with two slots (`image`, `aux3d`) and verified models.
 5. Activate node execution: `make switch-nodes` (`assetstudio execution switch --to nodes`). This command arrives with
    WP2.5b; until then the target fails with an argparse error and Studio stays on the compose-set mode.
@@ -40,7 +52,7 @@ Changes vs direct mode: Studio has no `/models` mount and no engine URLs; ComfyU
 submits prompts); the runner alone sees the GPUs (`utility` capability for UUID discovery; the engines keep compute).
 GPU ids are taken from `GPU_IMAGE_ID`/`GPU_AUX_ID` and appear in the runner as `index:0`/`index:1` in `config/runner.single.yaml`.
 
-Rollback: `make down-nodes && make up`, only while no node work is in flight. After WP2.5b use
+Rollback: `make down-nodes && make gpu-up`, only while no node work is in flight. After WP2.5b use
 `assetstudio execution switch --to direct` first.
 
 Troubleshooting:
@@ -52,64 +64,29 @@ Troubleshooting:
 
 | Topology | Files | Command |
 |---|---|---|
-| Studio only (VPS, no GPU/engines/runner) | `compose.studio.yml` | `docker compose -f compose.studio.yml up -d` |
-| Studio only, public behind Traefik | `compose.studio.yml` + `compose.public.yml` | `docker compose -f compose.studio.yml -f compose.public.yml up -d` |
+| Studio only (any host, no GPU/engines/runner) | `compose.yml` | `docker compose up -d` |
 | Compute only (remote runner host) | `compose.node-remote.yml` | `docker compose -f compose.node-remote.yml up -d` |
-| Combined development (one machine) | `compose.yml` (+ `compose.nodes.yml`) | `make up` / `make up-nodes` |
+| All-in-one GPU box (one machine) | `compose.gpu-local.yml` (+ `compose.nodes.yml`) | `make gpu-up` / `make up-nodes` |
 
 All need Docker Compose >= 2.24.4 for the overlays (`!override`/`!reset`); `make up-nodes` and friends check it.
 The runner host lock is a host path (`RUNNER_HOST_LOCK_DIR`, default `/var/lock/assetstudio-runner`), so two Compose
 project names on one machine cannot run two runners. Create it once on every runner host:
 `sudo install -d -o 1000 -g 1000 -m 0755 /var/lock/assetstudio-runner`.
 
-## Public Studio (VPS) with home runners
+## Remote runners
 
-Profile P (`docs/modular/compute-runner.md` R11, R14, R16): Studio on a VPS behind Traefik + Authelia; GPU runners
-stay at home and connect outbound. Traefik and Authelia are external to these files. `compose.public.yml` is an
-overlay over `compose.studio.yml` (no GPU services, no model mounts, no host ports).
+Studio is a plain service: TLS, public DNS, reverse proxy and authentication are handled outside this repository.
+Whatever fronts Studio must forward `/api/runner/*` to port 8190 and give runners an HTTPS `studio_url`.
+Studio listens on 8190 (UI + operator REST), 8191 (MCP) and 8192 (Godot integration). `STUDIO_AUTH_MODE=local`
+has no login and must stay on loopback. `STUDIO_AUTH_MODE=proxy` trusts identity headers from an authenticating proxy
+only when it also sends `STUDIO_PROXY_SECRET`; without the secret Studio refuses to start.
 
-Steps:
-1. Secrets on the VPS: `mkdir -p secrets && openssl rand -hex 32 > secrets/studio_proxy_secret && chmod 600 secrets/*`.
-   Export the same value for the Traefik labels: `export STUDIO_PROXY_SECRET=$(cat secrets/studio_proxy_secret)`.
-2. Set `STUDIO_HOST=studio.example.com` (and optionally `MCP_PUBLIC_HOST`, `INTEGRATION_PUBLIC_HOST`, default
-   `mcp.$STUDIO_HOST` / `integration.$STUDIO_HOST`; `TRAEFIK_CERTRESOLVER`, `TRAEFIK_ENTRYPOINT`,
-   `AUTHELIA_MIDDLEWARE`, `PROXY_NETWORK`); the Traefik container must share the `proxy` network. DNS and certificates
-   are needed for all three hosts. Set `STUDIO_MCP=0` / `STUDIO_INTEGRATION_ENABLED=0` to disable a listener.
-3. Start: `docker compose -f compose.studio.yml -f compose.public.yml up -d`.
-4. Authelia access control (groups match `STUDIO_ROLE_GROUPS`; owner/reviewer/viewer map to `assetstudio-owners`,
-   `assetstudio-reviewers`, `assetstudio-viewers`). Only the operator host goes through Authelia; the MCP and
-   integration hosts must not be routed through forward-auth:
-   ```yaml
-   access_control:
-     rules:
-       - {domain: studio.example.com, resources: ['^/api/runner/.*$'], policy: bypass}
-       - {domain: studio.example.com, policy: two_factor, subject: ['group:assetstudio-owners', 'group:assetstudio-reviewers', 'group:assetstudio-viewers']}
-   ```
-   Forward-auth must pass `Remote-User` and `Remote-Groups` (`authResponseHeaders`). Do not let Traefik trust
-   `X-Forwarded-For` from the internet (the default) or per-IP limits can be spoofed.
-5. Register a home runner: as an owner open Runtime -> Compute runners, create a runner group and a registration token,
-   put the token in `secrets/runner_registration_token` on the runner host, edit `studio_url`, `name` and GPU
+Register a runner (GPU host, outbound connection only, `dispatch: pull`):
+1. As an owner open Runtime -> Compute runners, create a runner group and a registration token.
+2. On the runner host put the token in `secrets/runner_registration_token`, edit `studio_url`, `name` and GPU
    indices in `config/runner.remote.yaml`, then `docker compose -f compose.node-remote.yml up -d`.
-   The runner connects outbound only (`dispatch: pull`).
-
-Routes (all TLS; Studio publishes no host port; the integration listener binds `0.0.0.0` inside the container via
-`STUDIO_INTEGRATION_CONTAINER_BIND=1`, TLS ends at Traefik):
-
-| Host / path | Listener | Auth | Traefik middlewares |
-|---|---|---|---|
-| `$STUDIO_HOST` | 8190 UI + operator REST | Authelia, role per group; proxy secret stamped | `assetstudio-headers`, Authelia |
-| `$STUDIO_HOST/api/runner/*` | 8190 runner protocol | runner signatures, single-use registration tokens | headers, per-IP rate limit, in-flight limits |
-| `$MCP_PUBLIC_HOST` (`/mcp`, `/files/`) | 8191 MCP | MCP bearer tokens; no Authelia, no proxy secret | `assetstudio-strip`, rate limit, 64 MiB body cap |
-| `$INTEGRATION_PUBLIC_HOST` (`/api/integration/v1`) | 8192 Godot integration | library-scoped bearer tokens; no Authelia, no proxy secret | `assetstudio-strip`, rate limit, 512 MiB body cap |
-
-`assetstudio-strip` blanks `Remote-User`, `Remote-Groups`, `X-AssetStudio-Proxy-Secret`, `X-AssetStudio-Internal`,
-`X-AssetStudio-Actor` and `X-AssetStudio-Agent-Scope`, so a client cannot spoof them on the token-authenticated hosts.
 
 Security notes:
-- Never expose Studio without the proxy secret: without it `STUDIO_AUTH_MODE=proxy` refuses to start, and requests
-  that reach Studio without the secret get 401. Never run `STUDIO_AUTH_MODE=local` on a reachable address.
-- The secret sits in Traefik labels (visible to anyone who can inspect Docker); keep the VPS Docker socket private.
-  Rotate it by changing both places and recreating Studio and Traefik routers.
 - Registration tokens are single-use and short-lived (<= 1 h); access tokens are short-lived; rotate by revoking.
 - Lost or stolen runner host: Runtime -> runner -> Revoke (or `assetstudio runners revoke <id>`); declare its
   uncertain attempts lost. The audit view (owners): `GET /api/v1/audit?limit=200&runner_id=`.
@@ -124,7 +101,7 @@ Security notes:
 | `uv run assetstudio project create/list/register` | project roots (server paths under `STUDIO_PROJECT_ROOTS`) |
 | `uv run assetstudio storage verify <project>` | every published artifact re-hashed against its blob |
 | `uv run assetstudio storage reindex <project>` | rebuild the search index from manifests |
-| `make logs` / `make down` | service logs / stop |
+| `make logs` / `make down` (Studio) · `make gpu-logs` / `make gpu-down` (all-in-one) | service logs / stop |
 
 Inside containers use `docker compose exec studio assetstudio …` (Podman: `podman exec assetstudio_studio_1 …`).
 

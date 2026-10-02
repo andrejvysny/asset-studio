@@ -47,6 +47,26 @@ def families(ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
     return lib.families_list(ctx)
 
 
+class GroupAssets(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    asset_ids: list[str] = Field(min_length=1, max_length=500)
+    anchor_asset_id: str | None = None
+
+
+@router.post("/families")
+def create_family_group(req: GroupAssets, ctx: ProjectContext = Depends(project),
+                        s: Studio = Depends(studio)) -> dict[str, Any]:
+    """Group existing same-kind assets into a family (created if new); repeating with more ids adds members."""
+    ctx.require_writable()
+    for a in req.asset_ids:
+        validate_id(a, "ast")
+    if req.anchor_asset_id:
+        validate_id(req.anchor_asset_id, "ast")
+    out = lib.group_assets(ctx, req.name, req.asset_ids, req.anchor_asset_id)
+    s.events.publish("library", project_id=ctx.id)
+    return out
+
+
 @router.get("/families/{family_id}")
 def family(family_id: str, ctx: ProjectContext = Depends(project)) -> dict[str, Any]:
     validate_id(family_id, "fam")

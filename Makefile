@@ -1,20 +1,22 @@
-# Docker is the baseline. Podman: `make COMPOSE="podman-compose -f compose.yml -f compose.podman.yml" up`
-# or `make PODMAN=1 up`.
+# Docker is the baseline: `make up` = Studio only (compose.yml). All-in-one GPU box: `make gpu-up` (compose.gpu-local.yml).
+# Podman (legacy, gpu-local only): `make PODMAN=1 gpu-up`.
 ifeq ($(PODMAN),1)
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
-COMPOSE ?= podman-compose -f compose.yml -f compose.podman.yml
+GPU_COMPOSE ?= podman-compose -f compose.gpu-local.yml -f compose.podman.yml
+COMPOSE ?= docker compose
 NODE_RUN = podman run --rm -v "$$PWD/web":/web:Z -w /web docker.io/library/node:22.20-slim
 else
+GPU_COMPOSE ?= docker compose -f compose.gpu-local.yml
 COMPOSE ?= docker compose
 NODE_RUN = docker run --rm -v "$$PWD/web":/web -w /web docker.io/library/node:22.20-slim
 endif
 PY = uv run
 # Node mode (profile S) uses `!override`/`!reset` compose tags (Compose >= 2.24.4); podman-compose lacks them and would
 # silently keep mounting ./models into Studio, so the nodes targets refuse PODMAN=1.
-NODES = -f compose.yml -f compose.nodes.yml
+NODES = -f compose.gpu-local.yml -f compose.nodes.yml
 
-.PHONY: help doctor build up down logs ps models verify verify-full test lint web-build web-types \
+.PHONY: help doctor build up down logs ps gpu-build gpu-up gpu-down gpu-logs gpu-ps models verify verify-full test lint web-build web-types \
         e2e test-process acceptance-cpu acceptance-gpu acceptance-gpu-nodes acceptance-offline lock-comfyui \
         runner-token up-nodes down-nodes switch-nodes
 
@@ -25,6 +27,12 @@ up:           ; $(COMPOSE) up -d
 down:         ; $(COMPOSE) down
 logs:         ; $(COMPOSE) logs -f --tail=200
 ps:           ; $(COMPOSE) ps
+# All-in-one GPU box (compose.gpu-local.yml: Studio + ComfyUI + aux + worker3d on this machine).
+gpu-build:    ; $(GPU_COMPOSE) build
+gpu-up:       ; $(GPU_COMPOSE) up -d
+gpu-down:     ; $(GPU_COMPOSE) down
+gpu-logs:     ; $(GPU_COMPOSE) logs -f --tail=200
+gpu-ps:       ; $(GPU_COMPOSE) ps
 # Explicit, resumable model download from config/models.lock.yaml. Never at container start.
 models:       ; set -a; [ -f .env ] && . ./.env; set +a; uv run --script scripts/download_models.py $(ARGS)
 verify:       ; $(PY) assetstudio models verify
@@ -48,7 +56,7 @@ acceptance-gpu-nodes: ; STUDIO_URL=http://127.0.0.1:$${STUDIO_PORT:-8190} $(PY) 
 acceptance-offline: ; ./scripts/offline-check.sh
 # Freeze ComfyUI's transitive deps from the built image into comfyui/constraints.txt.
 lock-comfyui:
-	$(COMPOSE) run --rm --no-deps comfyui pip freeze --exclude-editable \
+	$(GPU_COMPOSE) run --rm --no-deps comfyui pip freeze --exclude-editable \
 	  | grep -v -E '^(torch|torchvision|torchaudio|nvidia-|triton)' > comfyui/constraints.txt
 # worker3d unit tests (raw schema, UV rasterizer) inside the worker image, CPU tensors, no network.
 test-worker3d: ; podman run --rm --network none -v "$$PWD":/src:ro,Z -w /src \
@@ -64,8 +72,8 @@ endif
 	  [ -n "$$v" ] && [ "$$(printf '%s\n2.24.4\n' "$$v" | sort -V | head -n1)" = "2.24.4" ] \
 	  || { echo "node mode needs Docker Compose >= 2.24.4 (found: $${v:-none})" >&2; exit 1; }
 runner-token: nodes-guard
-	mkdir -p secrets && $(COMPOSE) run --rm studio assetstudio runners group-create --name local --projects '*' --operations '*' 2>/dev/null || true; \
-	$(COMPOSE) run --rm studio assetstudio runners token --group local > secrets/runner_registration_token && chmod 600 secrets/runner_registration_token
+	mkdir -p secrets && $(COMPOSE) -f compose.gpu-local.yml run --rm studio assetstudio runners group-create --name local --projects '*' --operations '*' 2>/dev/null || true; \
+	$(COMPOSE) -f compose.gpu-local.yml run --rm studio assetstudio runners token --group local > secrets/runner_registration_token && chmod 600 secrets/runner_registration_token
 up-nodes: nodes-guard ; $(COMPOSE) $(NODES) up -d
 down-nodes: nodes-guard ; $(COMPOSE) $(NODES) down
 # Waits until nothing is in flight, then records the mode; restart Studio with STUDIO_EXECUTION=nodes afterwards.

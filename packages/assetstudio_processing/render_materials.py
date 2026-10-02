@@ -106,7 +106,9 @@ def material_of(mesh: trimesh.Trimesh) -> MeshMaterial:
     raw = getattr(mat, "diffuse", None) if raw is None else raw
     factor = _unit_rgba(raw) if raw is not None else np.ones(4, np.float32)
     vertex = None
-    if mat is None and getattr(vis, "kind", None) == "vertex":
+    if "color" in mesh.vertex_attributes:  # float 0..1, set by render._load for textured/material meshes
+        vertex = np.asarray(mesh.vertex_attributes["color"], dtype=np.float32)
+    elif mat is None and getattr(vis, "kind", None) == "vertex":
         vertex = np.asarray(vis.vertex_colors, dtype=np.float32) / 255
     mode = str(getattr(mat, "alphaMode", None) or "OPAQUE").upper()
     cutoff = getattr(mat, "alphaCutoff", None)

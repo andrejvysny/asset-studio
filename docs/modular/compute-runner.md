@@ -30,7 +30,7 @@ The protocol and authentication are identical in every profile.
 | Profile | Topology | Dispatch | Notes |
 |---|---|---|---|
 | **S** single machine (first target) | Studio, runner and engines on one host (compose) | pull over the internal network (default) or direct push | Studio has no `/models` mount; the runner owns the GPUs |
-| **P** public Studio, NAT runners | Studio on a VPS behind Traefik + Authelia; runners at home | pull only (outbound 443; `HTTPS_PROXY` honoured) | direct push needs an inbound path, which NAT runners do not have |
+| **P** public Studio, NAT runners | Studio on a VPS behind an authenticating reverse proxy (deployed outside this repository); runners at home | pull only (outbound 443; `HTTPS_PROXY` honoured) | direct push needs an inbound path, which NAT runners do not have |
 | **R** reachable runner (optional) | runner on LAN, VPN or public IP | direct push allowed | push URL registered by the operator only |
 | **E** ephemeral | autoscaled / cloud GPU from a pre-provisioned image | pull, at most one attempt, then deregister | no model downloads during an attempt |
 
@@ -243,8 +243,8 @@ substituted silently (A04, A05).
 
 ## R11 Public exposure (profile P)
 
-- Traefik routes `/api/runner/v1/*` around forward-auth (runner authentication only); every other path requires
-  Authelia forward-auth.
+- The reverse proxy routes `/api/runner/v1/*` around operator authentication (runner authentication only); every other
+  path requires operator authentication.
 - Studio listens only on the proxy network. Identity headers (`Remote-User`, `Remote-Groups`) are trusted only
   together with a proxy shared-secret header; the proxy strips client-supplied identity headers. The CSRF header and
   Origin check stay in place.
@@ -271,7 +271,7 @@ GPU usage is not carried by the inventory or heartbeat, so the Runtime payload r
 
 ## R14 Resource budgets on a public endpoint
 
-- Unauthenticated endpoints (`register`, `token/challenge`, `token`): per-IP rate limits in Traefik and an in-app
+- Unauthenticated endpoints (`register`, `token/challenge`, `token`): per-IP rate limits in the reverse proxy and an in-app
   token bucket per (endpoint, IP) (`STUDIO_RATELIMIT_PER_MIN`=10, `STUDIO_RATELIMIT_BURST`=5; 429 `resource_exhausted`
   with `Retry-After`; LRU of 10k buckets); outstanding nonces are capped; `register_refused`/`token_refused` audit rows
   are aggregated to one row per (event, IP) per minute with a `count`. The client IP is the socket peer, or the first
@@ -285,7 +285,7 @@ GPU usage is not carried by the inventory or heartbeat, so the Runtime payload r
 - CPU and memory: semaphores bound concurrent finalize/hash work and in-flight remote-result bytes (remote adapters
   still return bytes to stage code). An oversize result blocks its task with a reason instead of exhausting memory.
 - Control-plane isolation: heartbeat, acquire and accept are async and never queue behind transfers. Transfers use a
-  separate Traefik router with in-flight limits and a bounded threadpool in Studio.
+  separate proxy route with in-flight limits and a bounded threadpool in Studio.
 
 ## R15 Execution-mode fence
 

@@ -1,4 +1,4 @@
-# Podman override (rootless, CDI GPU names). podman-compose 1.0.x ignores deploy.resources, so GPUs come from
+# Podman override for compose.gpu-local.yml only (legacy; compose.yml needs Docker Compose >= 2.24.4) (rootless, CDI GPU names). podman-compose 1.0.x ignores deploy.resources, so GPUs come from
 # CDI `devices`; keep-id makes bind-mounted project files owned by the host user.
 services:
   studio:

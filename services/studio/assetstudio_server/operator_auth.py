@@ -1,8 +1,8 @@
 """Operator identity and roles (docs/modular/compute-runner.md R11, R16).
 
-Local mode (profile S): the local operator is owner. Proxy mode (profile P): Traefik + Authelia authenticate and
-set `Remote-User`/`Remote-Groups`; Studio trusts them only with the proxy shared secret, so a request that reaches
-Studio around the proxy cannot claim an identity. Mutating routes are classified in ROLE_RULES; a mutating route
+Local mode (profile S): the local operator is owner. Proxy mode (profile P): an authenticating reverse
+proxy sets `Remote-User`/`Remote-Groups`; Studio trusts them only with the proxy shared secret, so a request that
+reaches Studio around the proxy cannot claim an identity. Mutating routes are classified in ROLE_RULES; a mutating route
 that matches no rule needs `owner`. The MCP loopback authorizes as an agent principal derived from the MCP token
 (read -> viewer, full -> owner minus AGENT_DENY), in both modes, never as a blanket owner (H15).
 """
@@ -55,6 +55,7 @@ ROLE_RULES: list[tuple[str, str, Role]] = [
     ("*", r"^/api/v1/runtime/lanes/[^/:]+:reset$", "owner"),
     ("*", r"^/api/v[12]/(?:operations|tasks)/[^/:]+:(?:cancel|retry)$", "owner"),
     ("*", rf"{_P}/(?:families|assets)/[^/:]+(?::set-current)?$", "owner"),
+    ("POST", rf"{_P}/families$", "owner"),  # group existing assets into a family
     ("*", rf"{_P}/(?:imports:(?:preview|preview-set|commit)|shot-list(?::preview-import|:commit-import)?|"
           r"references:upload|media:upload)$", "owner"),
     ("*", rf"{_P}/media/[^/:]+(?::archive|:restore)?$", "owner"),
