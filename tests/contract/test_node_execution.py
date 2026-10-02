@@ -201,7 +201,7 @@ def test_enhance_blocks_without_a_runner_then_completes_once_one_registers(
     api = node_api
     pid = setup_project(api)
     assert api.get("/api/v1/projects")  # the library works with no GPUs and no runners
-    bid = create(api, pid, ["Tavern"], "node-norunner-1")["batch"]["id"]
+    bid = create(api, pid, ["Tavern"], "node-norunner-1", candidate_count=1)["batch"]["id"]
     wait_for(lambda: any(t.state == "blocked" for t in api.studio.journal.tasks.list()))
     (task,) = api.studio.journal.tasks.list()
     assert task.stage == "enhance" and task.error and "no eligible runner" in task.error["message"]

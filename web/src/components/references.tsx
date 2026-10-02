@@ -111,21 +111,22 @@ function LibraryPicker({ project, onPick, onClose }:
 }
 
 /** Reference-image cards + "Upload image" / "From library" (max 4). Guidance only. */
-export function ReferenceEditor({ project, refs, onChange }:
-  { project: string; refs: RefDraft[]; onChange: (next: RefDraft[]) => void }) {
+export function ReferenceEditor({ project, refs, onChange, source }:
+  { project: string; refs: RefDraft[]; onChange: (next: RefDraft[]) => void; source?: boolean }) {
   const act = useAction();
   const file = useRef<HTMLInputElement>(null);
   const [picking, setPicking] = useState(false);
   const [pickingMedia, setPickingMedia] = useState(false);
-  const full = refs.length >= MAX_REFS;
+  const max = source ? 1 : MAX_REFS;
+  const full = refs.length >= max;
   const patch = (k: string, p: Partial<RefDraft>) => onChange(refs.map((r) => (r.key === k ? { ...r, ...p } : r)));
   const add = (r: Omit<RefDraft, "key" | "note" | "crop">, note = "") =>
     onChange([...refs, { ...r, key: crypto.randomUUID(), note, crop: null }]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
-        <span className="muted" style={{ fontSize: 12 }}>Reference images · optional</span>
-        <span className="sub">guidance only · {refs.length}/{MAX_REFS}</span>
+        <span className="muted" style={{ fontSize: 12 }}>{source ? "Source image · required" : "Reference images · optional"}</span>
+        <span className="sub">{source ? "used as given" : "guidance only"} · {refs.length}/{max}</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
         {refs.map((r) => (
@@ -151,8 +152,9 @@ export function ReferenceEditor({ project, refs, onChange }:
           </div>)}
       </div>
       <ErrorLine error={act.error} />
-      <span className="dim" style={{ fontSize: 11.5 }}>The text model describes each reference into the prompt, using your note to
-        decide what matters. QA then compares every candidate against them. References are not passed to the image model.</span>
+      <span className="dim" style={{ fontSize: 11.5 }}>{source
+        ? "This image is passed unchanged to the build step. No prompt is enhanced and no preview image is generated."
+        : "The text model describes each reference into the prompt, using your note to decide what matters. QA then compares every candidate against them. References are not passed to the image model."}</span>
       {pickingMedia && <MediaPicker project={project} onClose={() => setPickingMedia(false)} onPick={(m) => {
         setPickingMedia(false);
         add({ origin: "media", label: m.name, artifact_id: m.artifact_id, media_id: m.id }, m.note);

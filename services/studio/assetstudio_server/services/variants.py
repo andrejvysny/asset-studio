@@ -82,6 +82,13 @@ def _source_style_sha(ctx: ProjectContext, version: AssetVersion) -> str | None:
     return sha256_json(style) if style is not None else None
 
 
+def require_active(ctx: ProjectContext, asset_id: str) -> None:
+    """New work may not start from an archived asset (existing drafts and plans keep their frozen source)."""
+    manifest = ctx.store.get_opt(manifest_key(asset_id), AssetManifest)[0]
+    if manifest is not None and manifest.archived_at is not None:
+        raise ApiError(409, "asset_archived", f"asset {asset_id} is archived; restore it first")
+
+
 def resolve_source(ctx: ProjectContext, asset_id: str, version_id: str, verify: bool = True) -> SourceBinding:
     manifest, version = _load_source(ctx, asset_id, version_id)
     refs: list[SourceArtifactRef] = []
@@ -262,6 +269,7 @@ def save_draft(ctx: ProjectContext, draft: VariantDraft, token: str) -> VariantD
 def _plan_draft(ctx: ProjectContext, req: CreateDraft, cid: str) -> dict[str, Any]:
     validate_id(req.asset_id, "ast")
     validate_id(req.version_id, "ver")
+    require_active(ctx, req.asset_id)
     source = resolve_source(ctx, req.asset_id, req.version_id)
     ok, why = static_capability(source.kind, req.method)
     if not ok:

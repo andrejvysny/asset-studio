@@ -60,7 +60,7 @@ def test_ephemeral_runner_runs_one_attempt_then_deregisters_and_is_never_used_ag
         assert runner.agent.state.get_identity("ephemeral") == "1"  # RegisterResponse.ephemeral was True
         assert api.get("/api/v1/runner-groups")["groups"][0]["ephemeral"] is True
         pid = setup_project(api)
-        bid = create(api, pid, ["Tavern"], "eph-enhance")["batch"]["id"]
+        bid = create(api, pid, ["Tavern"], "eph-enhance", candidate_count=1)["batch"]["id"]
         # the single attempt (enhance) runs and commits, the receipt is delivered, then the agent deregisters
         wait_for(lambda: _runner_row(api, rid)["state"] == "revoked")
         assert runner.agent.stopped

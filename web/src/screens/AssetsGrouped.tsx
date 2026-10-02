@@ -6,7 +6,7 @@ import { useChanges } from "../lib/hooks";
 import { type AssetQuery, listAssetsGrouped } from "../lib/variantsApi";
 
 export interface Grouped {
-  groups: AssetGroupItem[]; matchingAssets: number; allAssets: number; nextCursor: string | null;
+  groups: AssetGroupItem[]; matchingAssets: number; allAssets: number; archivedTotal: number; nextCursor: string | null;
   loading: boolean; error: string | null; more: () => void; loadingMore: boolean;
 }
 
@@ -45,6 +45,7 @@ export function useGroupedAssets(project: string, query: AssetQuery, enabled: bo
   }, [project, queryKey, limit, data, loadingMore]);
 
   return { groups: enabled ? groups : [], matchingAssets: data?.matching_asset_count ?? 0, allAssets: data?.all_assets_total ?? 0,
+    archivedTotal: data?.archived_total ?? 0,
     nextCursor: enabled ? data?.next_cursor ?? null : null, loading: enabled && !data && !error, error: enabled ? error : null,
     more, loadingMore };
 }
@@ -81,15 +82,17 @@ export function FamilyTile({ project, g, filtered, onOpen }:
 }
 
 /** Flat asset card shared by the flat and family-filtered views. */
-export function AssetCard({ project, a }: { project: string; a: AssetRow }) {
-  return (
-    <Link to={`/p/${project}/assets/${a.asset_id}`} className="card">
+export function AssetCard({ project, a, selecting, selected, onToggle }:
+  { project: string; a: AssetRow; selecting?: boolean; selected?: boolean; onToggle?: () => void }) {
+  const body = (
+    <>
       <div className="media checker">
         {a.preview_artifact_id
           ? <img src={artifactUrl(project, a.preview_artifact_id)} alt={a.display_name} loading="lazy" />
           : <span className="sub">{a.kind === "model3d" ? "GLB · open to view" : "no preview"}</span>}
         <span className="corner" style={{ left: 7 }}>{a.kind_label}{a.origin === "imported" ? " · imp" : ""}</span>
         <span className="corner" style={{ right: 7, fontWeight: 600, color: "var(--text)" }}>v{a.display_version}</span>
+        {a.archived === 1 && <span className="corner" style={{ top: 28, right: 7 }}>archived</span>}
         {a.family_name && <span className="corner" style={{ top: "auto", bottom: 7, left: 7, maxWidth: "calc(100% - 14px)" }}
           title={`family · ${a.family_name}`}><span className="ellipsis" style={{ display: "block" }}>family · {a.family_name}</span></span>}
       </div>
@@ -97,6 +100,17 @@ export function AssetCard({ project, a }: { project: string; a: AssetRow }) {
         <span className="ellipsis" style={{ fontWeight: 500 }}>{a.display_name}</span>
         <span className="sub ellipsis" style={{ fontSize: 10 }}>{a.name_id}</span>
       </div>
-    </Link>
+    </>
   );
+  if (selecting) {
+    return (
+      <button className="card" role="checkbox" aria-checked={!!selected} aria-label={`select ${a.display_name}`}
+        onClick={onToggle} style={{ textAlign: "left", color: "inherit", outline: selected ? "2px solid var(--text)" : undefined }}>
+        {body}
+        <span className="corner" style={{ top: 7, left: 7, background: selected ? "var(--text)" : undefined,
+          color: selected ? "var(--bg)" : undefined }}>{selected ? "✓ selected" : "select"}</span>
+      </button>
+    );
+  }
+  return <Link to={`/p/${project}/assets/${a.asset_id}`} className="card">{body}</Link>;
 }

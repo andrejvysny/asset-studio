@@ -186,6 +186,8 @@ def _commit_staged(ctx: ProjectContext, d: Path, req: CommitImport) -> dict[str,
         raise ApiError(422, "unknown_category", f"unknown category {req.category_id}")
     if req.target_asset_id:
         manifest, _ = ctx.store.get(manifest_key(req.target_asset_id), AssetManifest)
+        if manifest.archived_at is not None:
+            raise ApiError(409, "asset_archived", f"asset {manifest.asset_id} is archived; restore it first")
         if manifest.kind != req.kind:
             raise ApiError(422, "kind_mismatch", f"target asset is {manifest.kind.value}")
     provenance = {"import_id": req.import_id, "source_name": meta["filename"], "source_uri": req.source_uri,

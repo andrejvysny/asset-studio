@@ -6,6 +6,7 @@ import hashlib
 import os
 import tempfile
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO
 
@@ -120,6 +121,25 @@ class LocalBackend:
             self._path(key).unlink()
         except FileNotFoundError as e:
             raise NotFound(key) from e
+
+    def scan_keys(self) -> Iterator[str]:
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            if Path(dirpath) == self.root:
+                dirnames[:] = [d for d in dirnames if d != "blobs"]
+            for name in sorted(filenames):
+                if not name.startswith(".tmp-"):
+                    yield str((Path(dirpath) / name).relative_to(self.root))
+
+    def delete_blob(self, sha256: str) -> bool:
+        self._check_writable()
+        p = self._blob_path(sha256)
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            return False
+        self._verified.pop(sha256, None)
+        _fsync_dir(p.parent)
+        return True
 
     def list_keys(self, prefix: str, cursor: str | None = None, limit: int = 1000) -> tuple[list[str], str | None]:
         base = self._path(prefix.rstrip("/")) if prefix.strip("/") else self.root

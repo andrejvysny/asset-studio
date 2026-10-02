@@ -32,6 +32,10 @@ class NameTaken(Conflict):
     code = "name_taken"
 
 
+class AssetArchived(Conflict):
+    code = "asset_archived"
+
+
 class RoleContractViolation(StorageError):
     code = "role_contract"
 
@@ -129,6 +133,8 @@ def publish(store: ProjectStore, req: PublishRequest) -> PublishResult:
                 return PublishResult(asset_id, done.version_id, done.display_version, False)
             if req.new_asset is not None:
                 raise Conflict(f"asset {asset_id} already exists")
+            if manifest.archived_at is not None:
+                raise AssetArchived(f"asset {asset_id} is archived; restore it before publishing a new version")
             if manifest.current_version_id != req.expected_current_version:
                 raise StalePointer(
                     f"current version is {manifest.current_version_id}, expected {req.expected_current_version}")
@@ -209,6 +215,8 @@ def set_current(store: ProjectStore, asset_id: str, version_id: str, expected_cu
             return manifest
         if manifest.version(version_id) is None:
             raise NotFound(f"version {version_id} of {asset_id}")
+        if manifest.archived_at is not None:
+            raise AssetArchived(f"asset {asset_id} is archived; restore it first")
         if manifest.current_version_id != expected_current:
             raise StalePointer(f"current version is {manifest.current_version_id}, expected {expected_current}")
         manifest.pointer_log.append(PointerChange(from_version=manifest.current_version_id, to_version=version_id,
@@ -233,6 +241,21 @@ def update_metadata(store: ProjectStore, asset_id: str, expected_revision: int, 
             manifest.category_id = category_id
         if tags is not None:
             manifest.tags = sorted(set(tags))
+        manifest.revision += 1
+        store.replace(manifest_key(asset_id), manifest, token)
+        return manifest
+
+
+def set_archived(store: ProjectStore, asset_id: str, expected_revision: int, archived: bool) -> AssetManifest:
+    """Archive hides an asset from active views; versions, files and relationships are untouched. Idempotent:
+    repeating the current state returns the manifest unchanged (no revision bump, no stale-revision error)."""
+    with store.lock:
+        manifest, token = store.get(manifest_key(asset_id), AssetManifest)
+        if (manifest.archived_at is not None) == archived:
+            return manifest
+        if manifest.revision != expected_revision:
+            raise Conflict(f"asset changed (revision {manifest.revision})")
+        manifest.archived_at = now_iso() if archived else None
         manifest.revision += 1
         store.replace(manifest_key(asset_id), manifest, token)
         return manifest

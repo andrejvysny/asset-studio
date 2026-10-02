@@ -2,10 +2,12 @@ import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { OutputView } from "../components/outputs";
-import { bytes, ErrorLine, Loading, OK, relTime } from "../components/ui";
-import { type AssetDetail as Detail, artifactUrl, type Derivation, key, P, send, type VariantMethod } from "../lib/api";
+import { bytes, Dialog, ErrorLine, Loading, OK, relTime } from "../components/ui";
+import { ApiError, type AssetDetail as Detail, artifactUrl, type Derivation, key, P, send, type VariantMethod } from "../lib/api";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
+import { archiveAsset, deleteAssetPermanently, restoreAsset } from "../lib/variantsApi";
+import { MoveToCategory } from "./MoveToCategory";
 
 const FACT_LABEL: Record<string, string> = {
   kind: "Asset type", recipe_id: "Pipeline", naming: "Naming rule", budget: "Budget", build_profile: "Build profile",
@@ -66,6 +68,11 @@ export function AssetDetail() {
   const d = useApi<Detail>(`${P(id)}/assets/${assetId}${shown ? `?version=${shown}` : ""}`, { project: id });
   const act = useAction();
   const [copied, setCopied] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [recategorizing, setRecategorizing] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [blockers, setBlockers] = useState<{ type: string; key: string; reason: string }[]>([]);
   if (!d.data) return d.error ? <div className="content"><ErrorLine error={d.error} /></div> : <Loading what="asset" />;
   const { manifest: m, shown_version: v } = d.data;
   const lic = v.licence.status;
@@ -76,6 +83,25 @@ export function AssetDetail() {
   const lineage = new Map(d.data.versions.map((x) => [x.version_id, x.derivation]));
   const variantsUrl = (count: number) => `/p/${id}/assets/${m.asset_id}/variants?version=${v.version_id}&count=${count}`;
   const shownManifest = manifestText(d.data.manifest_json, v.derivation);
+  const archived = m.archived_at !== null;
+  const doArchive = () => void act.run(async () => {
+    await archiveAsset(id, m.asset_id, m.revision);
+    nav(`/p/${id}/assets`);
+  });
+  const doDelete = () => void act.run(async () => {
+    setBlockers([]);
+    try {
+      await deleteAssetPermanently(id, m.asset_id, m.revision, typed);
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "asset_in_use") setBlockers(e.detail as typeof blockers);
+      throw e;
+    }
+    nav(`/p/${id}/assets`);
+  });
+  const doRestore = () => void act.run(async () => {
+    await restoreAsset(id, m.asset_id, m.revision);
+    d.reload();
+  });
   return (
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 420px", minHeight: "100%" }}>
       <section className="content">
@@ -87,9 +113,12 @@ export function AssetDetail() {
           </div>
           <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
             <span className="tag">{d.data.kind_label}</span>
+            <span className="tag" aria-label="category">category · {d.data.category_label ?? "Uncategorized"}</span>
+            <button className="tag" onClick={() => setRecategorizing(true)}>Change category…</button>
             <span className="tag">{m.origin}</span>
             <span className="pill ok">current v{m.versions.find((x) => x.version_id === m.current_version_id)?.display_version}</span>
             <span className="tag">{m.versions.length} versions</span>
+            {archived && <span className="pill warn" title={`archived ${m.archived_at}`}>archived</span>}
             {d.data.family_id && <Link className="tag" style={{ borderColor: "var(--line-3)", color: "var(--text)", textDecoration: "none" }}
               to={`/p/${id}/assets?family=${d.data.family_id}`} title="Open the family in the library">
               family · {d.data.family_name ?? d.data.family_id}</Link>}
@@ -175,7 +204,46 @@ export function AssetDetail() {
             New version…</button>
           <button className="btn" disabled title="Export targets arrive in Phase 4">Export current</button>
           <button className="btn" onClick={() => downloadAll(id, d.data?.files ?? [])}>Download files</button>
+          {archived
+            ? <><button className="btn" disabled={act.busy} onClick={doRestore}>Restore</button>
+                <button className="btn btn-danger" disabled={act.busy}
+                  onClick={() => { setTyped(""); setBlockers([]); act.clear(); setDeleting(true); }}>Delete permanently…</button></>
+            : <button className="btn" disabled={act.busy} onClick={() => setConfirmArchive(true)}>Archive</button>}
         </div>
+        {archived && <div className="banner note">This asset is archived: it is hidden from the library, search and pickers.
+          Versions and files are kept. Restore it to publish new versions or use it as a source.</div>}
+        <ErrorLine error={act.error} />
+        {recategorizing && <MoveToCategory project={id} assetIds={[m.asset_id]} current={m.category_id}
+          onClose={() => setRecategorizing(false)} onDone={() => { setRecategorizing(false); d.reload(); }} />}
+        {deleting && (
+          <Dialog title="Delete asset permanently" onClose={() => setDeleting(false)}>
+            <p><b>This cannot be undone.</b> <b>{m.display_name}</b>, all {m.versions.length} version(s) and every file
+              no other asset uses will be erased. To keep it recoverable, leave it archived.</p>
+            <label className="field"><span>Type <span className="mono">{m.name_id}</span> to confirm</span>
+              <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="confirm name" /></label>
+            {blockers.length > 0 && (
+              <div className="banner bad">Not deleted: other records still refer to this asset.
+                <ul>{blockers.map((b) => <li key={b.key}>{b.reason} <span className="mono">{b.key}</span></li>)}</ul></div>
+            )}
+            <ErrorLine error={act.error} />
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn-danger" disabled={act.busy || typed !== m.name_id} onClick={doDelete}>
+                Delete permanently</button>
+              <button className="btn" onClick={() => setDeleting(false)}>Cancel</button>
+            </div>
+          </Dialog>
+        )}
+        {confirmArchive && (
+          <Dialog title="Archive asset" onClose={() => setConfirmArchive(false)}>
+            <p>Archive <b>{m.display_name}</b>? It disappears from the library and pickers, nothing is deleted,
+              and you can restore it later from the Archived view.</p>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn btn-primary" disabled={act.busy} onClick={() => { setConfirmArchive(false); doArchive(); }}>
+                Archive</button>
+              <button className="btn" onClick={() => setConfirmArchive(false)}>Cancel</button>
+            </div>
+          </Dialog>
+        )}
       </section>
       <aside style={{ borderLeft: "1px solid var(--line)", background: "var(--panel)", display: "flex", flexDirection: "column", minHeight: 0 }}>
         <div className="row" style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)" }}>

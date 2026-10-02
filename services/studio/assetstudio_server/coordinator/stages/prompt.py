@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from assetstudio_core.domain import Job, JobItem
+from assetstudio_core.domain import Job, JobItem, PromptRevision
 from assetstudio_core.ids import derived_id
 from assetstudio_core.kinds import KINDS, Kind
 from assetstudio_storage.repo import IntegrityError, NotFound
@@ -11,7 +11,8 @@ from assetstudio_storage.repo import IntegrityError, NotFound
 from ...adapters.base import EngineRejected
 from ...services.edit_templates import edit_template
 from ...services.promptrev import make_revision
-from ...services.records import load_item, load_job, mutate_item
+from ...services.promptvariants import variant_count, variation_brief
+from ...services.records import load_item, load_job, mutate_item, prompt_key
 from ...services.reference_bindings import ENHANCER_MAX_IMAGES, Selection, reference_images, resolve_references
 from ...services.variant_gen import SourceIntegrityError, VariantSource, primary_bytes, variant_source
 from ..errors import Blocked, ItemFailed
@@ -53,43 +54,62 @@ def _bindings(item: JobItem, vs: VariantSource | None, mode: str, res: dict[str,
             **{k: res.get(k) or [] for k in ("facts", "additions", "assumptions", "reference_cues")}}
 
 
+def _enhance_variant(env: TaskEnv, aux: Any, snap: dict[str, Any], args: dict[str, Any], index: int) -> dict[str, Any]:
+    """One enhancer call. Variant 0 keeps the legacy call key / execution id (replay-compatible)."""
+    t = env.task
+    call_args = {**args, "brief": variation_brief(args["brief"], index)} if args["mode"] == "t2i" else args
+    parts = (t.id, str(t.attempts)) if index == 0 else (t.id, str(t.attempts), f"v{index}")
+    try:
+        with env.call("enhance" if index == 0 else f"enhance.v{index}"):
+            res = aux.enhance(kind=KINDS[Kind(snap["recipe"]["kind"])].label,
+                              style_guide=(snap.get("style") or {}).get("guide", ""), epoch=env.epoch("aux"),
+                              execution_id=derived_id("att", *parts), **call_args)
+    except EngineRejected as e:
+        raise ItemFailed(f"enhancer rejected the brief (prompt {index + 1}): {e}"[:300], "input_invalid") from e
+    description = res.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ItemFailed(f"enhancer returned no description (prompt {index + 1})", "output_invalid")
+    return res
+
+
 def enhance(env: TaskEnv) -> dict[str, Any]:
+    """Writes one prompt revision per candidate slot (see promptvariants). Each revision is stored as soon as it
+    exists, so a retry after a failed variant calls the enhancer only for the missing ones."""
     aux = env.aux
     if aux is None:
         raise Blocked("no aux service configured (library-only mode)", "aux_unconfigured", operator=True)
-    t = env.task
-    job, _ = load_job(env.ctx.store, t.job_id)
-    item, _ = load_item(env.ctx.store, t.job_id, t.item_id)
+    t, store = env.task, env.ctx.store
+    job, _ = load_job(store, t.job_id)
+    item, _ = load_item(store, t.job_id, t.item_id)
     if _locked(item, bool(t.inputs.get("rounds", True))):
         return {"skipped": "candidates exist; the prompt is locked"}
     if item.current_prompt != t.inputs.get("from_prompt"):
         return {"skipped": "the prompt was edited after enhancement was requested"}
-    snap = env.ctx.store.read_snapshot(item.snapshot_sha)
+    snap = store.read_snapshot(item.snapshot_sha)
     vs = variant_source(env.ctx, job)
     args, sel = _call_args(env, job, item, snap, vs)
-    try:
-        with env.call("enhance"):
-            res = aux.enhance(kind=KINDS[Kind(snap["recipe"]["kind"])].label,
-                              style_guide=(snap.get("style") or {}).get("guide", ""), epoch=env.epoch("aux"),
-                              execution_id=derived_id("att", t.id, str(t.attempts)), **args)
-    except EngineRejected as e:
-        raise ItemFailed(f"enhancer rejected the brief: {e}"[:300], "input_invalid") from e
-    description = res.get("description")
-    if not isinstance(description, str) or not description.strip():
-        raise ItemFailed("enhancer returned no description", "output_invalid")
-    meta = res.get("meta") or {}
-    enhancer = {"raw": meta.get("raw"), "model": meta.get("model"), "seconds": meta.get("seconds"),
-                "short_title": res.get("short_title"), "tags": res.get("tags", []), "simulated": aux.simulated,
-                "task_id": t.id, "residency": t.residency}
-    rev_id = derived_id("prm", t.id)
-    bindings = _bindings(item, vs, args["mode"], res, sel)
+    n = variant_count(snap, vs)
+    numbering = item.model_copy(deep=True)  # revision numbers count the siblings written so far
+    ids: list[str] = []
+    for i in range(n):
+        rid = derived_id("prm", t.id) if i == 0 else derived_id("prm", t.id, f"v{i}")
+        if store.get_opt(prompt_key(t.job_id, rid), PromptRevision)[0] is None:
+            res = _enhance_variant(env, aux, snap, args, i)
+            meta = res.get("meta") or {}
+            enhancer = {"raw": meta.get("raw"), "model": meta.get("model"), "seconds": meta.get("seconds"),
+                        "short_title": res.get("short_title"), "tags": res.get("tags", []), "simulated": aux.simulated,
+                        "task_id": t.id, "residency": t.residency}
+            bindings = _bindings(item, vs, args["mode"], res, sel) | ({"variant_index": i, "variant_count": n}
+                                                                      if n > 1 else {})
+            make_revision(store, numbering, rid=rid, origin="enhanced", description=res["description"],
+                          enhancer=enhancer, bindings=bindings)
+        numbering.prompt_revisions.append(rid)
+        ids.append(rid)
 
     def apply(x: JobItem) -> None:
-        rev = make_revision(env.ctx.store, x, rid=rev_id, origin="enhanced", description=description,
-                            enhancer=enhancer, bindings=bindings)
-        if rev.id not in x.prompt_revisions:
-            x.prompt_revisions.append(rev.id)
-        x.current_prompt = rev.id
+        x.prompt_revisions += [r for r in ids if r not in x.prompt_revisions]
+        x.current_prompt = ids[0]
+        x.prompt_variants = ids if n > 1 else []
         x.prompt_confirmed = None
     mutate_item(env.studio, env.ctx, t.job_id, t.item_id, apply)
-    return {"prompt_revision_id": rev_id}
+    return {"prompt_revision_id": ids[0], "variants": n}

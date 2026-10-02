@@ -6,7 +6,7 @@
 import {
   P, get, key, send,
   type AnalyzeSourceResult, type AssetList, type Capabilities, type CompareSelectionResult, type CreateJobsResult,
-  type DiversityStatusView, type Family, type GroupedAssets, type Kind, type Origin, type ReferenceSet, type RowIn,
+  type DiversityStatusView, type Family, type GroupedAssets, type Kind, type Manifest, type Origin, type ReferenceSet, type RowIn,
   type SourceAnalysis, type VariantDraft, type VariantDraftDetail, type VariantIntent, type VariantMethod, type Constraint,
 } from "./api";
 
@@ -20,6 +20,8 @@ const qs = (params: object): string => {
 // --- Library: families -----------------------------------------------------------------------------------------
 export interface AssetQuery {
   category_id?: string; kind?: Kind; origin?: Origin; q?: string; limit?: number; family_id?: string;
+  /** true = archived assets only; default (omitted) = active only. */
+  archived?: boolean;
 }
 /** Flat list (optionally `family_id`-filtered). Rows carry family_id / family_name. */
 export const listAssets = (project: string, query: AssetQuery & { offset?: number; planned?: boolean } = {}) =>
@@ -28,6 +30,18 @@ export const listAssets = (project: string, query: AssetQuery & { offset?: numbe
  *  (a changed query or library revision gives 409 `stale_cursor`: restart from the top). */
 export const listAssetsGrouped = (project: string, query: AssetQuery & { cursor?: string } = {}) =>
   get<GroupedAssets>(`${P(project)}/assets${qs({ ...query, group_by: "family" })}`);
+/** Archive hides an asset from active views (nothing is deleted); restore brings it back with the same id.
+ *  `expected_revision` = Manifest.revision; 409 on conflict. */
+export const archiveAsset = (project: string, assetId: string, expectedRevision: number) =>
+  send<Manifest>("POST", `${P(project)}/assets/${assetId}:archive`, { expected_revision: expectedRevision });
+export const restoreAsset = (project: string, assetId: string, expectedRevision: number) =>
+  send<Manifest>("POST", `${P(project)}/assets/${assetId}:restore`, { expected_revision: expectedRevision });
+/** IRREVERSIBLE. Archived assets only; `confirmName` must equal the asset's name_id. 409 `asset_in_use` carries
+ *  `detail: [{type, key, reason}]` (the records that still refer to the asset). */
+export const deleteAssetPermanently = (project: string, assetId: string, expectedRevision: number, confirmName: string) =>
+  send<{ asset_id: string; versions: number; artifacts_deleted: number; artifacts_kept: number;
+    blobs_deleted: number; blobs_kept: number }>("POST", `${P(project)}/assets/${assetId}:delete`,
+    { expected_revision: expectedRevision, confirm_name: confirmName });
 export const listFamilies = (project: string) => get<{ families: Family[] }>(`${P(project)}/families`);
 export const getFamily = (project: string, familyId: string) => get<Family>(`${P(project)}/families/${familyId}`);
 /** Rename / describe a family (`expected_revision` = Family.revision; 409 on conflict). */
@@ -98,3 +112,10 @@ export const compareSelection = (project: string, planId: string, idempotencyKey
     { idempotency_key: idempotencyKey });
 export const getDiversity = (project: string, planId: string) =>
   get<DiversityStatusView>(`${P(project)}/variant-plans/${planId}/diversity`);
+
+// --- Library: categories -----------------------------------------------------------------------------------------
+export interface SetCategoryResult { category_id: string | null; changed: number;
+  results: { asset_id: string; ok: boolean; changed?: boolean; revision?: number; code?: string; message?: string }[] }
+/** Move assets to one category in one call; `categoryId` null = Uncategorized. Metadata only; per-asset results. */
+export const setAssetsCategory = (project: string, assetIds: string[], categoryId: string | null) =>
+  send<SetCategoryResult>("POST", `${P(project)}/assets:set-category`, { asset_ids: assetIds, category_id: categoryId });

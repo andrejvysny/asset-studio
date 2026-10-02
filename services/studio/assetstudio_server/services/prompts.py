@@ -33,6 +33,7 @@ class ItemRef(BaseModel):
 
 class EditPrompt(ItemRef):
     description: str = Field(min_length=1, max_length=4000)
+    variant_index: int | None = Field(default=None, ge=0, le=7)  # preview slot to edit; None = the primary prompt
 
 
 class EditPrompts(BaseModel):
@@ -76,12 +77,37 @@ def job_of(unit: ItemRef, job_id: str | None) -> str:
     return jid
 
 
+def require_prompt_mode(item: JobItem) -> None:
+    if item.generation_mode == "image":
+        raise ApiError(409, "image_mode", f"{item.name} starts from a source image: it has no prompt to change")
+
+
 def prompt_open(item: JobItem, rounds: bool = True) -> bool:
     """Rounds: every candidate set is kept, so a prompt stays editable until a build is accepted. Legacy (v1
     batches API): the prompt locks once candidates exist, unless regeneration was requested."""
     if rounds:
         return item.accepted_build is None
     return item.current_set is None or item.regen_requested
+
+
+def variant_ids(item: JobItem) -> list[str]:
+    """Prompt revision per candidate slot (a single-prompt item has exactly one)."""
+    return list(item.prompt_variants) or ([item.current_prompt] if item.current_prompt else [])
+
+
+_BINDING_KEYS = ("preset", "mode", "references_revision", "reference_ids", "references_excluded")
+
+
+def _rebound(ctx: ProjectContext, job_id: str, item: JobItem, rid: str, fresh: dict[str, Any]) -> str:
+    """A slot prompt written against older references, re-bound (same text) to what the item holds now."""
+    old = load_prompt(ctx.store, job_id, rid)
+    if old.bindings.get("references_revision") == item.references_revision:
+        return rid
+    bound = {**old.bindings, **{k: fresh[k] for k in _BINDING_KEYS if k in fresh}}
+    rev = make_revision(ctx.store, item, rid=new_id("prm"), origin=old.origin, description=old.description,
+                        enhancer=old.enhancer, bindings=bound)
+    item.prompt_revisions.append(rev.id)
+    return rev.id
 
 
 def edit_bindings(ctx: ProjectContext, job_id: str, item: JobItem, refresh: bool = True) -> dict[str, Any]:
@@ -116,14 +142,25 @@ def edit_prompts(studio: Studio, ctx: ProjectContext, job_id: str | None, req: E
         tasks = item_tasks(studio, ctx.id, load_item(ctx.store, jid, e.item_id)[0])
 
         def apply(item: JobItem, e: EditPrompt = e, tasks: Any = tasks, jid: str = jid) -> None:
+            require_prompt_mode(item)
             if not prompt_open(item, rounds):
                 raise ApiError(409, "prompts_locked", "candidates exist: use Regenerate to change this prompt")
             if busy(tasks, "enhance", "generate"):
                 raise ApiError(409, "busy", "enhancement or generation is running for this item")
+            slot = e.variant_index or 0
+            if slot >= max(1, len(item.prompt_variants)):
+                raise ApiError(422, "unknown_variant", f"this item has {max(1, len(item.prompt_variants))} prompt(s)")
+            bindings = edit_bindings(ctx, jid, item) | ({"variant_index": slot} if item.prompt_variants else {})
             rev = make_revision(ctx.store, item, rid=new_id("prm"), origin="edited", description=e.description,
-                                bindings=edit_bindings(ctx, jid, item))
+                                bindings=bindings)
             item.prompt_revisions.append(rev.id)
-            item.current_prompt = rev.id
+            if item.prompt_variants:
+                item.prompt_variants = [*item.prompt_variants[:slot], rev.id, *item.prompt_variants[slot + 1:]]
+            if slot == 0:
+                item.current_prompt = rev.id
+                if item.prompt_variants:  # an edit answers changed references for every slot, not just the first
+                    item.prompt_variants = [rev.id, *(_rebound(ctx, jid, item, r, bindings)
+                                                      for r in item.prompt_variants[1:])]
             item.prompt_confirmed = None
         results.append(outcome(studio, ctx, jid, e.item_id, apply, e.expected_item_revision))
     return results
@@ -138,7 +175,9 @@ def plan_enhance(studio: Studio, ctx: ProjectContext, units: list[tuple[str, str
     for jid, iid in units:
         item, _ = load_item(ctx.store, jid, iid)
         tasks = item_tasks(studio, ctx.id, item)
-        if not prompt_open(item, rounds) or busy(tasks, "enhance", "generate"):
+        if item.generation_mode == "image":
+            skipped.append({"job_id": jid, "item_id": iid, "reason": "source image: no prompt stage"})
+        elif not prompt_open(item, rounds) or busy(tasks, "enhance", "generate"):
             skipped.append({"job_id": jid, "item_id": iid, "reason": "prompt locked or busy"})
         elif item.prompt_confirmed == item.current_prompt and item.prompt_confirmed is not None and not (
                 rounds and item.current_set is not None):  # a new round may deliberately re-enhance
@@ -220,6 +259,7 @@ def _confirm_units(studio: Studio, ctx: ProjectContext, job_id: str | None, item
         try:
             jid = job_of(c, job_id)
             item, _ = load_item(ctx.store, jid, c.item_id)
+            require_prompt_mode(item)
             if item.revision != c.expected_item_revision and item.prompt_confirmed != c.prompt_revision_id:
                 raise ApiError(409, "stale_item", f"{item.name} changed (revision {item.revision}); reload")
             if not prompt_open(item, rounds):
@@ -228,14 +268,16 @@ def _confirm_units(studio: Studio, ctx: ProjectContext, job_id: str | None, item
                 raise ApiError(409, "busy", "enhancement or generation is running")
             if item.current_prompt != c.prompt_revision_id:
                 raise ApiError(409, "stale_prompt", "the prompt changed since you reviewed it; reload")
-            check_instruction_fresh(ctx, jid, item, c.prompt_revision_id)
+            for rid in variant_ids(item):
+                check_instruction_fresh(ctx, jid, item, rid)
             res = generation_residency(studio, ctx, item)
         except ApiError as e:
             results.append({"job_id": c.job_id or job_id, "item_id": c.item_id, "ok": False, "code": e.code,
                             "message": e.message})
             continue
         units.append({"job_id": jid, "item_id": c.item_id, "prompt_revision_id": c.prompt_revision_id,
-                      "residency": res, "run_id": run_id or active_run_for(studio, ctx, jid)})
+                      "prompt_revision_ids": variant_ids(item), "residency": res,
+                      "run_id": run_id or active_run_for(studio, ctx, jid)})
         results.append({"job_id": jid, "item_id": c.item_id, "ok": True})
     return {"units": units, "results": results}
 
@@ -243,13 +285,17 @@ def _confirm_units(studio: Studio, ctx: ProjectContext, job_id: str | None, item
 def _generate_task(studio: Studio, ctx: ProjectContext, u: dict[str, Any], wave_id: str | None, cid: str) -> Any:
     """Generation for a confirmed prompt. A cancelled attempt is never resurrected (its engine prompt ids belong to
     it), so re-confirming after a cancel starts a NEW task keyed by this command; replays stay idempotent."""
+    ids = u.get("prompt_revision_ids") or [u["prompt_revision_id"]]
+
     def make(key: str) -> Any:
         return new_task(studio, STAGES["generate"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
-                        input_key=key, inputs={"prompt_revision_id": u["prompt_revision_id"]},
+                        input_key=key, inputs={"prompt_revision_id": u["prompt_revision_id"],
+                                               "prompt_revision_ids": ids},
                         run_id=u["run_id"], wave_id=wave_id, resident=u["residency"])
-    first = make(u["prompt_revision_id"])
+    base = "|".join(ids) if len(ids) > 1 else u["prompt_revision_id"]  # edited variants need a new task identity
+    first = make(base)
     prior = studio.journal.tasks.get(first.id)
-    return make(f"{u['prompt_revision_id']}|{cid}") if prior is not None and prior.state == "cancelled" else first
+    return make(f"{base}|{cid}") if prior is not None and prior.state == "cancelled" else first
 
 
 @commands.replayable("confirm_and_generate")
@@ -259,7 +305,8 @@ def _confirm_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], 
     tasks = []
     for u in plan["units"]:
         def bind(x: JobItem, u: dict[str, Any] = u) -> None:
-            if x.current_prompt != u["prompt_revision_id"]:
+            if x.current_prompt != u["prompt_revision_id"] or variant_ids(x) != (
+                    u.get("prompt_revision_ids") or [u["prompt_revision_id"]]):
                 raise ApiError(409, "stale_prompt", "the prompt changed before confirmation was applied")
             x.prompt_confirmed = u["prompt_revision_id"]
         r = outcome(studio, ctx, u["job_id"], u["item_id"], bind, None)
@@ -314,6 +361,7 @@ def _regen_units(studio: Studio, ctx: ProjectContext, job_id: str | None, req: R
         try:
             jid = job_of(r, job_id)
             item, _ = load_item(ctx.store, jid, r.item_id)
+            require_prompt_mode(item)
             if item.revision != r.expected_item_revision:
                 raise ApiError(409, "stale_item", f"{item.name} changed (revision {item.revision}); reload")
             if item.current_set is None:
@@ -324,8 +372,9 @@ def _regen_units(studio: Studio, ctx: ProjectContext, job_id: str | None, req: R
             base = r.description or (load_prompt_desc(ctx, jid, item.current_prompt) if item.current_prompt else "")
             if not base:
                 raise ApiError(409, "no_prompt", "no prompt to regenerate from")
-            if not r.description and item.current_prompt:
-                check_instruction_fresh(ctx, jid, item, item.current_prompt)  # same prompt: same bindings
+            if not r.description:
+                for rid in variant_ids(item):  # same prompts: same bindings
+                    check_instruction_fresh(ctx, jid, item, rid)
             res = generation_residency(studio, ctx, item)
         except ApiError as e:
             results.append({"job_id": r.job_id or job_id, "item_id": r.item_id, "ok": False, "code": e.code,
@@ -356,12 +405,17 @@ def _regen_effects(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], ci
             if rev.id not in item.prompt_revisions:
                 item.prompt_revisions.append(rev.id)
             item.current_prompt = item.prompt_confirmed = rev.id
+            if item.prompt_variants:  # the primary is rewritten; the other slots keep their prompts
+                item.prompt_variants = [rev.id, *item.prompt_variants[1:]]
         r = outcome(studio, ctx, u["job_id"], u["item_id"], apply, None)
         if not r["ok"]:
             results[(u["job_id"], u["item_id"])] = r
             continue
+        ids = variant_ids(load_item(ctx.store, u["job_id"], u["item_id"])[0])
         t = new_task(studio, STAGES["generate"], project_id=ctx.id, job_id=u["job_id"], item_id=u["item_id"],
-                     input_key=rid, inputs={"prompt_revision_id": rid}, run_id=u["run_id"], resident=u["residency"])
+                     input_key="|".join(ids) if len(ids) > 1 else rid,
+                     inputs={"prompt_revision_id": rid, "prompt_revision_ids": ids}, run_id=u["run_id"],
+                     resident=u["residency"])
         try:
             tasks += studio.journal.tasks.create([t], cid)
         except Busy as e:

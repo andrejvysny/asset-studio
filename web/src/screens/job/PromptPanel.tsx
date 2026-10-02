@@ -1,4 +1,4 @@
-import { type RefObject } from "react";
+import { type RefObject, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { ErrorLine, INFO, WARN } from "../../components/ui";
@@ -40,6 +40,33 @@ export function promptView(item: ItemView, draft: string | null): PromptView {
     progress: last?.generating ? last.progress ?? item.tasks.generate?.progress ?? null : item.tasks.generate?.progress ?? null };
 }
 
+/** The other preview slots' prompts (slot 1 is the main prompt above). Each is editable on its own. */
+function VariantPrompts({ item, readOnly, onSave }:
+  { item: ItemView; readOnly: boolean; onSave: (index: number, text: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <button className="jw-link" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Hide" : "Show"} the other {item.prompt_variants.length - 1} preview prompts</button>
+      {open && item.prompt_variants.slice(1).map((v, k) => {
+        const i = k + 1;
+        const text = drafts[i] ?? v.description;
+        const dirty = text.trim() !== v.description.trim();
+        return (
+          <div key={v.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span className="sub">Preview {i + 1} prompt{v.origin === "edited" ? " · edited" : ""}</span>
+            <textarea className={`jw-textarea${dirty ? " dirty" : ""}`} rows={3} aria-label={`prompt for preview ${i + 1}`}
+              value={text} readOnly={readOnly} onChange={(e) => setDrafts({ ...drafts, [i]: e.target.value })} />
+            {dirty && !readOnly && <div className="row" style={{ gap: 8 }}>
+              <button className="btn" onClick={() => { onSave(i, text.trim()); setDrafts(({ [i]: _, ...rest }) => rest); }}>Save prompt {i + 1}</button>
+              <button className="btn-link" onClick={() => setDrafts(({ [i]: _, ...rest }) => rest)}>Discard</button></div>}
+          </div>);
+      })}
+    </div>
+  );
+}
+
 const methodLabel = { image_edit_reconstruct: "Structural reconstruction", image_edit: "Image edit",
   direct_transform: "Direct transform" } as const;
 const intentLabel = { subtle: "Subtle", related: "Related", exploratory: "Exploratory" } as const;
@@ -72,11 +99,36 @@ interface Props {
   reload: () => void; area: RefObject<HTMLTextAreaElement | null>; onGenerated: () => void;
 }
 
+/** Image mode: the source image is the first candidate; there is no prompt to review. */
+function SourceImageCard({ job, item, reload }: { job: JobDetail; item: ItemView; reload: () => void }) {
+  const { id } = useProject();
+  const a = useAction();
+  const src = item.source_image;
+  const started = item.rounds.length > 0 || isBusy(item, "generate");
+  const origin = src?.origin === "media" ? "Media Library" : src?.origin === "library" ? "library asset" : "upload";
+  return (
+    <div className="jw-col">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+        <span className="label">Source image</span><span className="tag">from image</span></div>
+      {src && <img src={`/api/v1/projects/${id}/artifacts/${src.artifact_id}/content`} alt="source image" className="jw-thumb"
+        style={{ width: "100%", maxHeight: 260, objectFit: "contain" }} />}
+      <span className="sub">{src?.label ?? "source image"} · {origin}
+        {src?.library ? ` · ${src.library.asset_id}` : src?.media_id ? ` · ${src.media_id}` : ""}</span>
+      <span className="muted" style={{ fontSize: 11.5 }}>Used as given. Prompt enhancement and preview generation are skipped:
+        this image is round 1, goes through QA and approval, then the build step.</span>
+      {!started && <button className="btn btn-primary jw-cta" disabled={a.busy || !!job.active_run}
+        onClick={() => void a.run(async () => { await act.runEnhance(id, job.id); reload(); })}>Run · use source image</button>}
+      <ErrorLine error={a.error} />
+    </div>
+  );
+}
+
 /** Prompt block, references and the run / confirm / iterate action stack (hidden for direct transforms). */
 export function PromptPanel({ job, item, pv, draft, setDraft, reload, area, onGenerated }: Props) {
   const { id } = useProject();
   const a = useAction();
   const run = (fn: () => Promise<unknown>, after?: () => void) => void a.run(async () => { await fn(); reload(); after?.(); });
+  if (item.generation_mode === "image") return <SourceImageCard job={job} item={item} reload={reload} />;
   const rounds = item.rounds.length;
   const enhanceFailed = item.tasks.enhance?.state === "failed" || item.tasks.enhance?.state === "blocked";
   const gen = job.recipe.generation_available;
@@ -98,6 +150,8 @@ export function PromptPanel({ job, item, pv, draft, setDraft, reload, area, onGe
         <textarea ref={area} className={`jw-textarea${pv.dirty ? " dirty" : ""}`} rows={7} aria-label="prompt" value={pv.text}
           readOnly={pv.readOnly} placeholder={pv.hasPrompt ? "" : "The prompt is written from the brief when you press Run."}
           onChange={(e) => setDraft(e.target.value)} />
+        {item.prompt_variants.length > 1 && (
+          <VariantPrompts item={item} readOnly={pv.readOnly} onSave={(i, text) => run(() => act.editVariant(id, job.id, item.id, i, text))} />)}
         {enhanceFailed && <span className="error">Enhancement {item.tasks.enhance?.state}: {item.tasks.enhance?.error ?? ""}</span>}
         <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
           <div className="jw-seg" role="group" aria-label="enhancement preset">

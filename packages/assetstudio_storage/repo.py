@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 
@@ -73,6 +74,10 @@ class Repository(Protocol):
     def stat_object(self, key: str) -> dict | None: ...
 
     def delete_object(self, key: str) -> None: ...
+
+    def scan_keys(self) -> Iterator[str]: ...  # every record key; never blobs
+
+    def delete_blob(self, sha256: str) -> bool: ...  # False when absent; caller proved no record references it
 
     def write_blob(self, stream: BinaryIO, expected_sha256: str | None = None) -> BlobRef: ...
 

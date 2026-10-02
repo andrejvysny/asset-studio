@@ -45,17 +45,18 @@ def register(mcp: FastMCP, deps: Deps) -> None:
                             category_id: str | None = None, kind: str | None = None, origin: str | None = None,
                             family_id: str | None = None, group_by: Literal["family"] | None = None,
                             planned: bool = True, limit: int = 60, offset: int = 0,
-                            cursor: str | None = None) -> dict[str, Any]:
+                            cursor: str | None = None, archived: bool = False) -> dict[str, Any]:
         """Search published assets (and planned shot-list entries when `planned`). `q` is free text over names,
         tags and family names; `category_id` includes sub-categories; `kind` e.g. model3d, sprite, icon, material,
         concept_art, sprite_sheet, vfx_flipbook; `origin` generated or imported. Offset paging returns `items`
         and `total`; group_by='family' returns `groups` and `next_cursor` (pass it back as `cursor`
-        with the same filters until it is null)."""
+        with the same filters until it is null). Archived assets are hidden unless `archived=true` (then only
+        archived ones are returned)."""
         c = deps.client(ctx)
         pid = await deps.project_id(c, project_id)
         return await c.get(f"/api/v1/projects/{pid}/assets", q=q, category_id=category_id, kind=kind, origin=origin,
                            family_id=family_id, group_by=group_by, planned=planned, limit=limit, offset=offset,
-                           cursor=cursor)
+                           cursor=cursor, archived=archived)
 
     @mcp.tool(annotations=READ)
     async def get_asset(ctx: Context, asset_id: str, project_id: str | None = None, version_id: str | None = None,
@@ -85,6 +86,34 @@ def register(mcp: FastMCP, deps: Deps) -> None:
         body = {"expected_revision": rev, "display_name": display_name, "tags": tags, "category_id": category_id,
                 "set_category": set_category}
         return await c.patch(f"/api/v1/projects/{pid}/assets/{asset_id}", body)
+
+    @mcp.tool(annotations=WRITE)
+    async def move_assets(ctx: Context, asset_ids: list[str], category_id: str | None = None,
+                          project_id: str | None = None) -> dict[str, Any]:
+        """Move up to 500 assets to one category in a single call (category_id=null returns them to
+        Uncategorized). Metadata only. Returns a per-asset result; unchanged assets are reported, not rewritten."""
+        c = deps.client(ctx, write=True)
+        pid = await deps.project_id(c, project_id)
+        return await c.post(f"/api/v1/projects/{pid}/assets:set-category",
+                            {"asset_ids": asset_ids, "category_id": category_id})
+
+    @mcp.tool(annotations=WRITE)
+    async def archive_asset(ctx: Context, asset_id: str, project_id: str | None = None,
+                            expected_revision: int | None = None) -> dict[str, Any]:
+        """Archive an asset: hidden from the library, search and pickers, nothing deleted; restore_asset undoes it."""
+        c = deps.client(ctx, write=True)
+        pid = await deps.project_id(c, project_id)
+        rev = expected_revision if expected_revision is not None else await _asset_revision(c, pid, asset_id)
+        return await c.post(f"/api/v1/projects/{pid}/assets/{asset_id}:archive", {"expected_revision": rev})
+
+    @mcp.tool(annotations=WRITE)
+    async def restore_asset(ctx: Context, asset_id: str, project_id: str | None = None,
+                            expected_revision: int | None = None) -> dict[str, Any]:
+        """Restore an archived asset to the active library (same id, versions and files)."""
+        c = deps.client(ctx, write=True)
+        pid = await deps.project_id(c, project_id)
+        rev = expected_revision if expected_revision is not None else await _asset_revision(c, pid, asset_id)
+        return await c.post(f"/api/v1/projects/{pid}/assets/{asset_id}:restore", {"expected_revision": rev})
 
     @mcp.tool(annotations=WRITE)
     async def set_current_version(ctx: Context, asset_id: str, version_id: str, project_id: str | None = None,

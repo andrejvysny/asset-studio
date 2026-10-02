@@ -8,7 +8,7 @@ from assetstudio_core.domain import AssetManifest
 from assetstudio_core.ids import derived_id, validate_id
 from assetstudio_storage.local import LocalBackend
 from assetstudio_storage.project import manifest_key
-from assetstudio_storage.publication import set_current, update_metadata
+from assetstudio_storage.publication import set_archived, set_current, update_metadata
 from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -35,11 +35,13 @@ def assets(ctx: ProjectContext = Depends(project), category_id: str | None = Non
            origin: str | None = None, q: str | None = Query(default=None, max_length=200),
            planned: bool = True, limit: int = Query(default=60, ge=1, le=500),
            offset: int = Query(default=0, ge=0), family_id: str | None = None,
-           group_by: Literal["family"] | None = None, cursor: str | None = None) -> dict[str, Any]:
+           group_by: Literal["family"] | None = None, cursor: str | None = None,
+           archived: bool = False) -> dict[str, Any]:
     if family_id:
         validate_id(family_id, "fam")
     return lib.list_assets(ctx, category_id=category_id, kind=kind, origin=origin, q=q, show_planned=planned,
-                           limit=limit, offset=offset, family_id=family_id, group_by=group_by, cursor=cursor)
+                           limit=limit, offset=offset, family_id=family_id, group_by=group_by, cursor=cursor,
+                           archived=archived)
 
 
 @router.get("/families")
@@ -123,6 +125,67 @@ def patch_asset(asset_id: str, req: PatchAsset, ctx: ProjectContext = Depends(pr
     ctx.index.upsert(m)
     s.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="metadata")
     return m.model_dump(mode="json")
+
+
+class SetCategory(BaseModel):
+    asset_ids: list[str] = Field(min_length=1, max_length=500)
+    category_id: str | None = None  # null = back to Uncategorized
+
+
+@router.post("/assets:set-category")
+def set_category(req: SetCategory, ctx: ProjectContext = Depends(project),
+                 s: Studio = Depends(studio)) -> dict[str, Any]:
+    """Assign, move or clear the category of one or many assets in one call (per-asset results)."""
+    ctx.require_writable()
+    for a in req.asset_ids:
+        validate_id(a, "ast")
+    out = lib.set_category_bulk(ctx, req.asset_ids, req.category_id)
+    if out["changed"]:
+        s.events.publish("library", project_id=ctx.id, change="category")
+    return out
+
+
+class ArchiveAsset(BaseModel):
+    expected_revision: int
+
+
+def _set_archived(asset_id: str, req: ArchiveAsset, ctx: ProjectContext, s: Studio, archived: bool) -> dict[str, Any]:
+    ctx.require_writable()
+    validate_id(asset_id, "ast")
+    m = set_archived(ctx.store, asset_id, req.expected_revision, archived)
+    ctx.index.upsert(m)
+    s.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="archived" if archived else "restored")
+    return m.model_dump(mode="json")
+
+
+@router.post("/assets/{asset_id}:archive")
+def archive_asset(asset_id: str, req: ArchiveAsset, ctx: ProjectContext = Depends(project),
+                  s: Studio = Depends(studio)) -> dict[str, Any]:
+    """Hide the asset from active views; nothing is deleted and the asset can be restored with the same id."""
+    return _set_archived(asset_id, req, ctx, s, True)
+
+
+@router.post("/assets/{asset_id}:restore")
+def restore_asset(asset_id: str, req: ArchiveAsset, ctx: ProjectContext = Depends(project),
+                  s: Studio = Depends(studio)) -> dict[str, Any]:
+    return _set_archived(asset_id, req, ctx, s, False)
+
+
+class DeleteAsset(BaseModel):
+    expected_revision: int
+    confirm_name: str = Field(min_length=1, max_length=200)  # must equal the asset's name_id: deliberate, not a click
+
+
+@router.post("/assets/{asset_id}:delete")
+def delete_asset_permanently(asset_id: str, req: DeleteAsset, ctx: ProjectContext = Depends(project),
+                             s: Studio = Depends(studio)) -> dict[str, Any]:
+    """IRREVERSIBLE. Removes an archived asset, its versions and every file nothing else uses. 409 asset_not_archived
+    unless archived; 409 asset_in_use (detail = blocking records) while jobs, families or deliveries refer to it."""
+    ctx.require_writable()
+    validate_id(asset_id, "ast")
+    out = lib.delete_permanently(ctx, asset_id, req.expected_revision, req.confirm_name)
+    s.events.publish("library", project_id=ctx.id, asset_id=asset_id, change="deleted")
+    return out
 
 
 class SetCurrent(BaseModel):

@@ -89,7 +89,7 @@ def test_two_runners_work_in_parallel(node_api: Api, runner_factory: Callable[..
     coord = coordinator(api)
     wait_for(lambda: len(coord._pool.keys("gpu1")) == 2)
     pid = setup_project(api)
-    create(api, pid, ["one", "two", "three", "four"], "sched-parallel")
+    create(api, pid, ["one", "two", "three", "four"], "sched-parallel", candidate_count=1)
     api.wait_ops(timeout=60)
     enhance = [a for a in api.studio.journal.attempts.list() if a["operation"] == "aux.enhance"]
     assert len(enhance) == 4 and len({a["runner_id"] for a in enhance}) == 2
@@ -129,7 +129,7 @@ def test_a_stale_runner_leaves_the_target_without_thread_churn(
     wait_for(lambda: coord._pool.keys("gpu1") == ["gpu1#0"], timeout=10)
     assert {t.name for t in threading.enumerate() if t.name.startswith("lane-")} <= before
     pid = setup_project(api)
-    create(api, pid, ["still works"], "sched-stale-1")
+    create(api, pid, ["still works"], "sched-stale-1", candidate_count=1)
     api.wait_ops()
     enhance = [a for a in api.studio.journal.attempts.list() if a["operation"] == "aux.enhance"]
     assert len(enhance) == 1 and enhance[0]["state"] in ("ingested", "committed")

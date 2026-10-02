@@ -55,6 +55,8 @@ ROLE_RULES: list[tuple[str, str, Role]] = [
     ("*", r"^/api/v1/runtime/lanes/[^/:]+:reset$", "owner"),
     ("*", r"^/api/v[12]/(?:operations|tasks)/[^/:]+:(?:cancel|retry)$", "owner"),
     ("*", rf"{_P}/(?:families|assets)/[^/:]+(?::set-current)?$", "owner"),
+    ("POST", rf"{_P}/assets/[^/:]+:(?:archive|restore|delete)$", "owner"),
+    ("POST", rf"{_P}/assets:set-category$", "owner"),
     ("POST", rf"{_P}/families$", "owner"),  # group existing assets into a family
     ("*", rf"{_P}/(?:imports:(?:preview|preview-set|commit)|shot-list(?::preview-import|:commit-import)?|"
           r"references:upload|media:upload)$", "owner"),

@@ -20,7 +20,7 @@ from ..actor import OPERATOR
 from ..errors import ApiError
 from ..registry import ProjectContext
 from ..studio import Studio
-from ..taskstore import TASK_ACTIVE
+from ..taskstore import TASK_ACTIVE, Busy
 from . import commands
 from .records import load_item, load_items, load_job
 
@@ -171,6 +171,8 @@ def _classify(studio: Studio, ctx: ProjectContext, item: JobItem, direct: bool =
         return "done", "published"
     if direct:  # never enhanced or generated: waits for the human "run transform" gate
         return "at_gate", "direct transform (no model stages)"
+    if item.generation_mode == "image" and item.current_set is None:
+        return "adopt", "source image: prompt enhancement and previews are skipped"
     if item.current_set is not None and not item.regen_requested:
         return "at_gate", "candidates awaiting review or later stages"
     if item.prompt_confirmed is not None and item.prompt_confirmed == item.current_prompt:
@@ -225,6 +227,7 @@ def plan_run(studio: Studio, ctx: ProjectContext, batch_id: str | None, job_ids:
 def _plan_counts(jobs: list[dict[str, Any]]) -> dict[str, int]:
     items = [e for j in jobs for e in j["items"]]
     return {"jobs": len(jobs), "items": len(items), "enhance": sum(e["action"] == "enhance" for e in items),
+            "adopt": sum(e["action"] == "adopt" for e in items),
             "at_gate": sum(e["action"] == "at_gate" for e in items),
             "excluded": sum(e["action"] == "excluded" for e in items),
             "done": sum(e["action"] == "done" for e in items)}
@@ -294,8 +297,32 @@ def _run_start(studio: Studio, ctx: ProjectContext, plan: dict[str, Any], cid: s
                                  "run_id": run_id})
     # Keyed by the run (not the command): starting the same plan again never enhances twice.
     res = _enhance_effects(studio, ctx, {"eligible": eligible, "skipped": []}, run_id)
+    adopted = _adopt_effects(studio, ctx, p, run_id, cid)
     studio.events.publish("run", project_id=ctx.id, run_id=run_id, batch_id=p["batch_id"])
-    return {"run_id": run_id, "tasks": res["tasks"], "skipped": res["skipped"]}
+    return {"run_id": run_id, "tasks": [*res["tasks"], *adopted], "skipped": res["skipped"]}
+
+
+def _adopt_effects(studio: Studio, ctx: ProjectContext, p: dict[str, Any], run_id: str, cid: str) -> list[str]:
+    """Image-mode items skip enhancement and generation: one CPU task turns the source image into the item's
+    first (single-candidate) round, whose QA tasks then follow like any generation's."""
+    from ..coordinator.stages import STAGES, new_task
+
+    out: list[str] = []
+    for j in p["jobs"]:
+        for e in j["items"]:
+            if e["action"] != "adopt":
+                continue
+            item, _ = load_item(ctx.store, j["job_id"], e["item_id"])
+            if item.current_set is not None:
+                continue
+            t = new_task(studio, STAGES["generate"], project_id=ctx.id, job_id=j["job_id"], item_id=item.id,
+                         input_key=f"source|{item.id}", inputs={"source_image": True}, run_id=run_id,
+                         lane="cpu", resident="cpu")
+            try:
+                out += studio.journal.tasks.create([t], cid)
+            except Busy:
+                continue
+    return out
 
 
 def run_task_ids(studio: Studio, ctx: ProjectContext, run_id: str, states: tuple[str, ...] = TASK_ACTIVE

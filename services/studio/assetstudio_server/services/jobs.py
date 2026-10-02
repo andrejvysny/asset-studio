@@ -2,7 +2,7 @@
 inference starts only through an explicit run (standalone or as part of a Batch)."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from assetstudio_core.canonical import now_iso, sha256_json
 from assetstudio_core.domain import AssetFamily, BuildRun, Job, JobItem, ShotItem
@@ -21,7 +21,7 @@ from ..studio import Studio
 from . import commands
 from .jobviews import item_view
 from .records import item_key, load_build, load_items, load_job
-from .references import NewReference, Preset, resolve_new
+from .references import NewReference, Preset, SourceImage, resolve_new, resolve_source_image
 from .taskview import item_tasks
 
 
@@ -34,6 +34,10 @@ class NewItem(BaseModel):
     target_asset_id: str | None = None
     references: list[NewReference] = []
     enhance_preset: Preset | None = None  # None: the Job's default
+    # prompt: today's flow. image: start from `source_image`, no enhancement or previews. prompt_image: reserved,
+    # refused until a generator accepts text plus an image (see _plan_create).
+    generation_mode: Literal["prompt", "image", "prompt_image"] = "prompt"
+    source_image: SourceImage | None = None
 
 
 class CreateJob(BaseModel):
@@ -72,6 +76,28 @@ def active_shot_claims(ctx: ProjectContext) -> dict[str, tuple[str, str]]:
     return claims
 
 
+def _check_mode(it: NewItem, snap: dict[str, Any], row: int) -> None:
+    err = _mode_error(it, snap)
+    if err is not None:
+        raise ApiError(422, err[0], err[1], [{"row": row, "name": it.name}])
+
+
+def _mode_error(it: NewItem, snap: dict[str, Any]) -> tuple[str, str] | None:
+    if it.generation_mode == "prompt_image":
+        return ("unsupported_generation_mode", "no generator takes a prompt together with a source image yet; "
+                "use 'image' (the image alone) or 'prompt' with reference images")
+    if it.generation_mode == "image":
+        if it.source_image is None:
+            return "source_image_required", "image mode needs a source image"
+        recipe = RECIPES[snap["recipe"]["id"]]
+        if recipe.generation is None or recipe.build is None:  # needs an image-in step after the (skipped) generation
+            return ("unsupported_generation_mode", f"{recipe.label} cannot start from a source image: it has no "
+                    "build step that takes an image as input")
+    elif it.source_image is not None:
+        return "source_image_unexpected", "a source image needs generation_mode 'image'"
+    return None
+
+
 def _plan_create(ctx: ProjectContext, req: CreateJob, cid: str) -> dict[str, Any]:
     cfg, _ = ctx.config()
     shots = {s.id: s for s in ctx.store.read_shotlist()[0].items}
@@ -95,6 +121,8 @@ def _plan_create(ctx: ProjectContext, req: CreateJob, cid: str) -> dict[str, Any
     if len(recipes) != 1:
         by = {r: [req.items[i].name for i, s in enumerate(snapshots) if s["recipe"]["id"] == r] for r in recipes}
         raise ApiError(422, "mixed_kinds", "a Job holds one output kind/recipe; split the selection into Jobs", by)
+    for i, it in enumerate(req.items):
+        _check_mode(it, snapshots[i], i)
     claims = active_shot_claims(ctx)
     taken = [{"shot_id": it.shot_id, "name": it.name, "job_id": claims[it.shot_id][0]}
              for it in req.items if it.shot_id in claims]
@@ -109,7 +137,9 @@ def _plan_create(ctx: ProjectContext, req: CreateJob, cid: str) -> dict[str, Any
                       "enhance_preset": it.enhance_preset or req.enhance_preset,
                       "brief": it.brief or (shot.brief if shot else ""), "category_id": snap["category_id"],
                       "shot_id": it.shot_id, "target_asset_id": it.target_asset_id or (
-                          shot.target_asset_id if shot else None), "snapshot": snap})
+                          shot.target_asset_id if shot else None), "snapshot": snap,
+                      "generation_mode": it.generation_mode,
+                      "source_image": resolve_source_image(ctx, item_id, it.source_image) if it.source_image else None})
     return {"job_id": job_id, "recipe_id": recipes.pop(), "title": req.title, "category_id": req.category_id,
             "seed_family": req.seed_family if req.seed_family is not None else _seed(), "source": req.source,
             "config_revision": cfg.revision, "items": items}
@@ -137,7 +167,8 @@ def write_job(ctx: ProjectContext, plan: dict[str, Any]) -> None:
                            target_asset_id=it["target_asset_id"], snapshot_sha=snap["sha256"], created_at=now,
                            updated_at=now, references=it.get("references", []),
                            references_revision=1 if it.get("references") else 0,
-                           enhance_preset=it.get("enhance_preset", "conservative"))
+                           enhance_preset=it.get("enhance_preset", "conservative"),
+                           generation_mode=it.get("generation_mode", "prompt"), source_image=it.get("source_image"))
             if ctx.store.repo.stat_object(item_key(job_id, item.id)) is None:
                 ctx.store.create(item_key(job_id, item.id), item)
         recipe = RECIPES[plan["recipe_id"]]

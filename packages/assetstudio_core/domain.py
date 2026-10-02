@@ -77,6 +77,7 @@ class AssetManifest(Record):
     pointer_log: list[PointerChange] = []
     revision: int = 1
     family_id: str | None = None  # the ONLY family-membership authority (at most one family per asset)
+    archived_at: str | None = None  # set = archived (hidden from active views, fully recoverable)
 
     def version(self, version_id: str) -> VersionRef | None:
         return next((v for v in self.versions if v.version_id == version_id), None)
@@ -271,6 +272,12 @@ class JobItem(JobScoped):
     prompt_revisions: list[str] = []
     current_prompt: str | None = None
     prompt_confirmed: str | None = None
+    # One enhanced prompt per candidate slot, in slot order; [0] == current_prompt. Empty for single-prompt items.
+    prompt_variants: list[str] = []
+    # "image": the item starts from `source_image` (a JobReference-shaped dict) and skips prompt enhancement and
+    # preview generation: that image becomes the single candidate of its first round.
+    generation_mode: Literal["prompt", "image"] = "prompt"
+    source_image: dict[str, Any] | None = None
     candidate_sets: list[str] = []
     current_set: str | None = None
     qa: dict[str, str] = {}  # candidate id -> qa evaluation id (current set)
@@ -318,6 +325,7 @@ class Candidate(BaseModel):
     width: int
     height: int
     engine: dict[str, Any] = {}
+    prompt_revision_id: str | None = None  # the exact prompt this candidate was generated from (None: the set's prompt)
 
 
 class CandidateSet(Record):

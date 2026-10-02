@@ -188,7 +188,7 @@ def patch_config(body: PatchConfig, ctx: ProjectContext = Depends(project), s: S
         if cfg.project.id != current.project.id:
             raise ApiError(422, "invalid_config", "project.id cannot change")
         removed = {c.id for c in current.categories} - {c.id for c in cfg.categories}
-        used = {c for c in removed if ctx.index.query(categories={c}, limit=1)[1] or any(
+        used = {c for c in removed if ctx.index.query(categories={c}, limit=1, archived=None)[1] or any(
             x["category_id"] == c and x["status"] != "archived" for x in shot_statuses(ctx))}
         if used:
             raise ApiError(409, "category_in_use", "archive or reclassify first: categories still referenced",

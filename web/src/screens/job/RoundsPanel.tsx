@@ -66,10 +66,19 @@ export function RoundsPanel({ job, item, ri, focusIdx, sourceThumb, busy, error,
           <span className="sub">{meta}</span>
           <span className="sub" style={{ color: WARN }}>{prev?.prompt ? (addN ? `${addN} words added vs R${prev.number}` : `same prompt as R${prev.number}`) : ""}</span>
         </div>
-        <div style={{ fontSize: 12.5, lineHeight: 1.6, display: "flex", flexWrap: "wrap", columnGap: 4 }}>
-          {tokens.map((t, i) => <span key={i} style={{ color: t.added ? WARN : "var(--text-2)", borderRadius: 3,
-            background: t.added ? "var(--warn-bg)" : "transparent" }}>{t.w}</span>)}
-        </div>
+        {cand?.prompt_revision_id && r.prompts && Object.keys(r.prompts).length > 1 && (
+          <div role="note" aria-label={`prompt of candidate ${candidateKey(cand)}`}
+            style={{ fontSize: 12, lineHeight: 1.55, borderLeft: "2px solid var(--line-3)", paddingLeft: 8 }}>
+            <span className="sub">Prompt behind candidate {candidateKey(cand)}
+              {r.prompts[cand.prompt_revision_id]?.variant_index != null ? ` · variant ${(r.prompts[cand.prompt_revision_id]?.variant_index ?? 0) + 1}` : ""}</span>
+            <div>{r.prompts[cand.prompt_revision_id]?.positive}</div>
+          </div>)}
+        {item.generation_mode === "image"
+          ? <div className="sub">Source image used as given · no prompt, no generated preview</div>
+          : <div style={{ fontSize: 12.5, lineHeight: 1.6, display: "flex", flexWrap: "wrap", columnGap: 4 }}>
+            {tokens.map((t, i) => <span key={i} style={{ color: t.added ? WARN : "var(--text-2)", borderRadius: 3,
+              background: t.added ? "var(--warn-bg)" : "transparent" }}>{t.w}</span>)}
+          </div>}
       </div>
       <div className="jw-cands" role="list" aria-label={`candidates of round ${r.number}`}>
         {r.generating || r.candidates.length === 0

@@ -49,8 +49,12 @@ def register(mcp: FastMCP, deps: Deps) -> None:
                          enhance_preset: Literal["conservative", "creative"] = "conservative", run: bool = True,
                          idempotency_key: str | None = None, project_id: str | None = None) -> dict[str, Any]:
         """Create a Job: one asset per item. `items`: [{name, brief, category_id?, kind?, enhance_preset?,
-        references?: [{artifact_id | media_id, note?, label?}]}]. Give `category_id` (from config_get) or `kind`.
-        run=true also starts prompt enhancement (no other inference); then wait_for_job(until='prompts').
+        references?: [{artifact_id | media_id, note?, label?}], generation_mode?: 'prompt' (default) | 'image',
+        source_image?: {artifact_id | media_id | library: {asset_id, version_id}}}]. Give `category_id` (from
+        config_get) or `kind`. run=true also starts prompt enhancement (no other inference); then
+        wait_for_job(until='prompts'). generation_mode='image' (needs source_image; for kinds with an image-in build
+        such as model3d) skips enhancement and preview generation: the image itself is round 1, so run=true leads
+        straight to QA and approval (wait_for_job(until='candidates')); 'prompt_image' is refused.
         Retrying with the same idempotency_key returns the same Job."""
         c = deps.client(ctx, write=True)
         pid = await deps.project_id(c, project_id)

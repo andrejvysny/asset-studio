@@ -52,13 +52,15 @@ def register(mcp: FastMCP, deps: Deps) -> None:
 
     @mcp.tool(annotations=WRITE)
     async def edit_prompt(ctx: Context, job_id: str, item_id: str, description: str,
-                          project_id: str | None = None) -> dict[str, Any]:
+                          variant_index: int | None = None, project_id: str | None = None) -> dict[str, Any]:
         """Replace an item's prompt with your own description (a new prompt revision, not yet confirmed).
+        Items enhanced into several prompt variants (one per candidate slot, see the item's `prompt_variants`)
+        take `variant_index` to edit that slot only; without it the first prompt is edited.
         Follow with confirm_prompts. Refused once candidates exist: use regenerate(description=...) then."""
         c, pid = await _ctx(ctx, project_id)
         job = await fetch_job(c, pid, job_id)
         it = views.select_items(job, "enhance", [item_id])[0]
-        body = {"items": [{**views.item_ref(it), "description": description}]}
+        body = {"items": [{**views.item_ref(it), "description": description, "variant_index": variant_index}]}
         return await finish(c, pid, job_id, await c.post(f"{base(pid)}/jobs/{job_id}:edit-prompts", body))
 
     @mcp.tool(annotations=WRITE)

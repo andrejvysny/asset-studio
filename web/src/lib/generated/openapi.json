@@ -405,6 +405,19 @@
         "title": "ApproveItem",
         "type": "object"
       },
+      "ArchiveAsset": {
+        "properties": {
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision"
+        ],
+        "title": "ArchiveAsset",
+        "type": "object"
+      },
       "AttemptReport": {
         "additionalProperties": false,
         "properties": {
@@ -1338,6 +1351,26 @@
         "title": "Crop",
         "type": "object"
       },
+      "DeleteAsset": {
+        "properties": {
+          "confirm_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Confirm Name",
+            "type": "string"
+          },
+          "expected_revision": {
+            "title": "Expected Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_revision",
+          "confirm_name"
+        ],
+        "title": "DeleteAsset",
+        "type": "object"
+      },
       "Device": {
         "additionalProperties": false,
         "properties": {
@@ -1485,6 +1518,19 @@
               }
             ],
             "title": "Job Id"
+          },
+          "variant_index": {
+            "anyOf": [
+              {
+                "maximum": 7.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Index"
           }
         },
         "required": [
@@ -2392,6 +2438,16 @@
             ],
             "title": "Enhance Preset"
           },
+          "generation_mode": {
+            "default": "prompt",
+            "enum": [
+              "prompt",
+              "image",
+              "prompt_image"
+            ],
+            "title": "Generation Mode",
+            "type": "string"
+          },
           "kind": {
             "anyOf": [
               {
@@ -2426,6 +2482,16 @@
               }
             ],
             "title": "Shot Id"
+          },
+          "source_image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceImage"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "target_asset_id": {
             "anyOf": [
@@ -4013,6 +4079,35 @@
         "title": "SessionSummary",
         "type": "object"
       },
+      "SetCategory": {
+        "properties": {
+          "asset_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Asset Ids",
+            "type": "array"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          }
+        },
+        "required": [
+          "asset_ids"
+        ],
+        "title": "SetCategory",
+        "type": "object"
+      },
       "SetCurrent": {
         "properties": {
           "expected_current_version": {
@@ -4285,6 +4380,45 @@
           "loaded_residency"
         ],
         "title": "SlotSummary",
+        "type": "object"
+      },
+      "SourceImage": {
+        "description": "Primary image input of an image-driven item: an upload, a Media Library image or a library asset.",
+        "properties": {
+          "artifact_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifact Id"
+          },
+          "library": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LibraryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "media_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Media Id"
+          }
+        },
+        "title": "SourceImage",
         "type": "object"
       },
       "StartRun": {
@@ -6515,6 +6649,16 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Archived",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -6780,6 +6924,188 @@
         ]
       }
     },
+    "/api/v1/projects/{project_id}/assets/{asset_id}:archive": {
+      "post": {
+        "description": "Hide the asset from active views; nothing is deleted and the asset can be restored with the same id.",
+        "operationId": "archive_asset_api_v1_projects__project_id__assets__asset_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveAsset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Archive Asset Api V1 Projects  Project Id  Assets  Asset Id  Archive Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Asset"
+      }
+    },
+    "/api/v1/projects/{project_id}/assets/{asset_id}:delete": {
+      "post": {
+        "description": "IRREVERSIBLE. Removes an archived asset, its versions and every file nothing else uses. 409 asset_not_archived\nunless archived; 409 asset_in_use (detail = blocking records) while jobs, families or deliveries refer to it.",
+        "operationId": "delete_asset_permanently_api_v1_projects__project_id__assets__asset_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAsset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Asset Permanently Api V1 Projects  Project Id  Assets  Asset Id  Delete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Asset Permanently"
+      }
+    },
+    "/api/v1/projects/{project_id}/assets/{asset_id}:restore": {
+      "post": {
+        "operationId": "restore_asset_api_v1_projects__project_id__assets__asset_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveAsset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Restore Asset Api V1 Projects  Project Id  Assets  Asset Id  Restore Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Asset"
+      }
+    },
     "/api/v1/projects/{project_id}/assets/{asset_id}:set-current": {
       "post": {
         "operationId": "set_current_version_api_v1_projects__project_id__assets__asset_id__set_current_post",
@@ -6838,6 +7164,58 @@
           }
         },
         "summary": "Set Current Version"
+      }
+    },
+    "/api/v1/projects/{project_id}/assets:set-category": {
+      "post": {
+        "description": "Assign, move or clear the category of one or many assets in one call (per-asset results).",
+        "operationId": "set_category_api_v1_projects__project_id__assets_set_category_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCategory"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Category Api V1 Projects  Project Id  Assets Set Category Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Category"
       }
     },
     "/api/v1/projects/{project_id}/batches": {

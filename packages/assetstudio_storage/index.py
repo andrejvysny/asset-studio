@@ -17,12 +17,12 @@ from .project import ProjectStore, manifest_key
 
 _COLUMNS = ("asset_id", "name_id", "display_name", "kind", "origin", "category_id", "tags", "current_version_id",
             "display_version", "version_count", "preview_artifact_id", "updated_at", "search", "family_id",
-            "family_name")
+            "family_name", "archived")
 _DDL = """CREATE TABLE IF NOT EXISTS {t} (
   asset_id TEXT PRIMARY KEY, name_id TEXT NOT NULL, display_name TEXT NOT NULL, kind TEXT NOT NULL,
   origin TEXT NOT NULL, category_id TEXT, tags TEXT NOT NULL, current_version_id TEXT, display_version INTEGER,
   version_count INTEGER NOT NULL, preview_artifact_id TEXT, updated_at TEXT NOT NULL, search TEXT NOT NULL,
-  family_id TEXT, family_name TEXT)"""
+  family_id TEXT, family_name TEXT, archived INTEGER NOT NULL DEFAULT 0)"""
 _PLACEHOLDERS = ",".join("?" * len(_COLUMNS))
 PREVIEW_MEMBERS = 4
 
@@ -33,7 +33,7 @@ def _row(m: AssetManifest, family_name: str | None = None) -> tuple[Any, ...]:
     return (m.asset_id, m.name_id, m.display_name, m.kind.value, m.origin.value, m.category_id, json.dumps(m.tags),
             m.current_version_id, cur.display_version if cur else None, len(m.versions),
             cur.preview_artifact_id if cur else None, now_iso(), search, m.family_id,
-            family_name if m.family_id else None)
+            family_name if m.family_id else None, 1 if m.archived_at else 0)
 
 
 _ORDER = "display_name COLLATE NOCASE, asset_id"
@@ -45,9 +45,14 @@ def _out(r: sqlite3.Row) -> dict[str, Any]:
 
 
 def _filter(categories: set[str] | None, kind: str | None, origin: str | None, q: str | None,
-            family_id: str | None, tags: list[str] | None = None) -> tuple[str, list[Any]]:
+            family_id: str | None, tags: list[str] | None = None,
+            archived: bool | None = False) -> tuple[str, list[Any]]:
+    """`archived`: False = active assets only (the default everywhere), True = archived only, None = both."""
     where: list[str] = ["current_version_id IS NOT NULL"]
     args: list[Any] = []
+    if archived is not None:
+        where.append("archived = ?")
+        args.append(1 if archived else 0)
     if categories is not None:
         where.append(f"category_id IN ({','.join('?' * len(categories))})")
         args += sorted(categories)
@@ -87,7 +92,7 @@ class AssetIndex:
         self.path = path
         self._lock = threading.Lock()
         self._rebuild_lock = threading.Lock()
-        self._pending: dict[str, tuple[Any, ...]] | None = None  # upserts that land while a rebuild is collecting
+        self._pending: dict[str, tuple[Any, ...] | None] | None = None  # upserts (None = delete) landing mid-rebuild
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         self._db.execute("PRAGMA journal_mode=WAL")
@@ -98,6 +103,8 @@ class AssetIndex:
             self._db.execute("ALTER TABLE assets ADD COLUMN family_id TEXT")
             self._db.execute("ALTER TABLE assets ADD COLUMN family_name TEXT")
             self._db.execute("INSERT OR REPLACE INTO meta VALUES ('needs_rebuild', '1')")
+        if "archived" not in cols:  # manifests without archived_at are active: the default 0 is already correct
+            self._db.execute("ALTER TABLE assets ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
 
     def close(self) -> None:
         self._db.close()
@@ -131,6 +138,13 @@ class AssetIndex:
                 self._pending[manifest.asset_id] = row
             self._bump()
 
+    def delete(self, asset_id: str) -> None:
+        with self._lock:
+            self._db.execute("DELETE FROM assets WHERE asset_id = ?", (asset_id,))
+            if self._pending is not None:  # a rebuild is collecting: its snapshot may still hold the row
+                self._pending[asset_id] = None
+            self._bump()
+
     def _collect(self, store: ProjectStore) -> tuple[list[tuple[Any, ...]], list[str]]:
         names: dict[str, str] = {}
         for fid in store.list_ids("families"):
@@ -153,7 +167,10 @@ class AssetIndex:
         self._db.execute("DROP TABLE IF EXISTS assets_new")
         self._db.execute(_DDL.format(t="assets_new"))
         self._db.executemany(insert, rows)
-        self._db.executemany(insert, list((self._pending or {}).values()))
+        gone = [a for a, r in (self._pending or {}).items() if r is None]
+        self._db.executemany(insert, [r for r in (self._pending or {}).values() if r is not None])
+        if gone:
+            self._db.executemany("DELETE FROM assets_new WHERE asset_id = ?", [(a,) for a in gone])
         self._db.execute("BEGIN")
         try:
             self._db.execute("DROP TABLE assets")
@@ -181,27 +198,30 @@ class AssetIndex:
                     self._pending = None
         return {"indexed": len(rows), "errors": len(failed), "error_ids": failed[:100]}
 
-    def count(self) -> int:
+    def count(self, archived: bool | None = False) -> int:
+        clause, args = _filter(None, None, None, None, None, archived=archived)
         with self._lock:
-            return int(self._db.execute("SELECT COUNT(*) FROM assets").fetchone()[0])
+            return int(self._db.execute(f"SELECT COUNT(*) FROM assets WHERE {clause}", args).fetchone()[0])
 
     def query(self, *, categories: set[str] | None = None, kind: str | None = None, origin: str | None = None,
               q: str | None = None, family_id: str | None = None, limit: int = 60,
-              offset: int = 0, tags: list[str] | None = None) -> tuple[list[dict[str, Any]], int]:
+              offset: int = 0, tags: list[str] | None = None,
+              archived: bool | None = False) -> tuple[list[dict[str, Any]], int]:
         if categories is not None and not categories:
             return [], 0
         rows, total, _ = self.query_at_revision(categories=categories, kind=kind, origin=origin, q=q,
-                                                family_id=family_id, limit=limit, offset=offset, tags=tags)
+                                                family_id=family_id, limit=limit, offset=offset, tags=tags,
+                                                archived=archived)
         return rows, total
 
     def query_at_revision(self, *, categories: set[str] | None = None, kind: str | None = None,
                           origin: str | None = None, q: str | None = None, family_id: str | None = None,
-                          limit: int = 60, offset: int = 0, tags: list[str] | None = None
-                          ) -> tuple[list[dict[str, Any]], int, int]:
+                          limit: int = 60, offset: int = 0, tags: list[str] | None = None,
+                          archived: bool | None = False) -> tuple[list[dict[str, Any]], int, int]:
         """(rows, total, revision) read under one lock: a page cursor names exactly the snapshot it came from."""
         if categories is not None and not categories:
             return [], 0, self.revision()
-        clause, args = _filter(categories, kind, origin, q, family_id, tags)
+        clause, args = _filter(categories, kind, origin, q, family_id, tags, archived)
         with self._lock:
             rev = self._revision_locked()
             total = int(self._db.execute(f"SELECT COUNT(*) FROM assets WHERE {clause}", args).fetchone()[0])
@@ -212,12 +232,12 @@ class AssetIndex:
 
     def query_grouped(self, *, categories: set[str] | None = None, kind: str | None = None,
                       origin: str | None = None, q: str | None = None, family_id: str | None = None,
-                      limit: int = 60, cursor: str | None = None) -> dict[str, Any]:
+                      limit: int = 60, cursor: str | None = None, archived: bool | None = False) -> dict[str, Any]:
         """Filter first, then group: units are families (matching members only) or single ungrouped assets,
         ordered by their best matching member and paginated as units, so a family never splits across pages."""
         qhash = hashlib.sha256(json.dumps([sorted(categories) if categories is not None else None, kind, origin, q,
-                                           family_id]).encode()).hexdigest()[:16]
-        clause, args = _filter(categories, kind, origin, q, family_id)
+                                           family_id, archived]).encode()).hexdigest()[:16]
+        clause, args = _filter(categories, kind, origin, q, family_id, archived=archived)
         unit = "COALESCE(family_id, 'a:' || asset_id)"
         with self._lock:  # one critical section: the cursor revision must belong to the page it accompanies
             rev = self._revision_locked()
@@ -265,13 +285,14 @@ class AssetIndex:
     def _member_counts(self, fids: list[str]) -> dict[str, int]:
         marks = ",".join("?" * len(fids))
         return {r[0]: int(r[1]) for r in self._db.execute(
-            f"SELECT family_id, COUNT(*) FROM assets WHERE current_version_id IS NOT NULL AND family_id IN ({marks}) "
+            f"SELECT family_id, COUNT(*) FROM assets WHERE current_version_id IS NOT NULL AND archived = 0 "
+            f"AND family_id IN ({marks}) "
             "GROUP BY family_id", fids)}
 
     def family_member_counts(self) -> dict[str, int]:
         with self._lock:
             rows = self._db.execute("SELECT family_id, COUNT(*) FROM assets WHERE current_version_id IS NOT NULL "
-                                    "AND family_id IS NOT NULL GROUP BY family_id").fetchall()
+                                    "AND archived = 0 AND family_id IS NOT NULL GROUP BY family_id").fetchall()
         return {r[0]: int(r[1]) for r in rows}
 
     def member_ids(self, family_id: str) -> list[str]:
@@ -282,7 +303,7 @@ class AssetIndex:
     def counts_by_category(self) -> dict[str | None, int]:
         with self._lock:
             rows = self._db.execute("SELECT category_id, COUNT(*) FROM assets WHERE current_version_id IS NOT NULL "
-                                    "GROUP BY category_id").fetchall()
+                                    "AND archived = 0 GROUP BY category_id").fetchall()
         return {r[0]: int(r[1]) for r in rows}
 
     def name_ids(self) -> set[str]:

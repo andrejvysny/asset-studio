@@ -8,6 +8,7 @@ from assetstudio_core.domain import AssetFamily, AssetManifest, AssetVersion
 from assetstudio_core.ids import derived_id
 from assetstudio_core.inheritance import descendants, resolve
 from assetstudio_core.kinds import KINDS, Kind
+from assetstudio_storage.deletion import AssetInUse, delete_asset
 from assetstudio_storage.families import (
     FamilyConflict,
     attach_asset,
@@ -17,7 +18,8 @@ from assetstudio_storage.families import (
     update_family,
 )
 from assetstudio_storage.project import manifest_key, version_key
-from assetstudio_storage.repo import Conflict
+from assetstudio_storage.publication import update_metadata
+from assetstudio_storage.repo import Conflict, NotFound
 
 from ..errors import ApiError
 from ..registry import ProjectContext
@@ -47,7 +49,7 @@ def category_tree(ctx: ProjectContext) -> list[dict[str, Any]]:
 
 def list_assets(ctx: ProjectContext, *, category_id: str | None, kind: str | None, origin: str | None,
                 q: str | None, show_planned: bool, limit: int, offset: int, family_id: str | None = None,
-                group_by: str | None = None, cursor: str | None = None) -> dict[str, Any]:
+                group_by: str | None = None, cursor: str | None = None, archived: bool = False) -> dict[str, Any]:
     cfg, _ = ctx.config()
     cats = descendants(cfg, category_id) if category_id else None
     if category_id and cfg.category(category_id) is None:
@@ -55,18 +57,18 @@ def list_assets(ctx: ProjectContext, *, category_id: str | None, kind: str | Non
     if group_by == "family":  # planned cards are shot-list entries with no family: grouped mode is assets only
         try:
             out = ctx.index.query_grouped(categories=cats, kind=kind, origin=origin, q=q, family_id=family_id,
-                                          limit=limit, cursor=cursor)
+                                          limit=limit, cursor=cursor, archived=archived)
         except ValueError as e:
             raise ApiError(409, "stale_cursor", "the library changed or the query differs; restart from the top") from e
         for g in out["groups"]:
             row = g.get("asset")
             for r in ([row] if row else g.get("member_preview", [])):
                 r["kind_label"] = KINDS[Kind(r["kind"])].label
-        return {**out, "all_assets_total": ctx.index.count()}
+        return {**out, "all_assets_total": ctx.index.count(), "archived_total": ctx.index.count(archived=True)}
     rows, total = ctx.index.query(categories=cats, kind=kind, origin=origin, q=q, family_id=family_id,
-                                  limit=limit, offset=offset)
+                                  limit=limit, offset=offset, archived=archived)
     planned: list[dict[str, Any]] = []
-    if show_planned and origin in (None, "generated"):
+    if show_planned and not archived and origin in (None, "generated"):
         needle = (q or "").lower()
         for s in shot_statuses(ctx):
             if s["status"] not in ("planned", "in_batch"):
@@ -79,7 +81,8 @@ def list_assets(ctx: ProjectContext, *, category_id: str | None, kind: str | Non
                 continue
             planned.append(s)
     return {"items": [{**r, "kind_label": KINDS[Kind(r["kind"])].label} for r in rows], "total": total,
-            "planned": planned, "planned_total": len(planned), "all_assets_total": ctx.index.count()}
+            "planned": planned, "planned_total": len(planned), "all_assets_total": ctx.index.count(),
+            "archived_total": ctx.index.count(archived=True)}
 
 
 def asset_detail(ctx: ProjectContext, asset_id: str, version_id: str | None) -> dict[str, Any]:
@@ -113,6 +116,56 @@ def asset_detail(ctx: ProjectContext, asset_id: str, version_id: str | None) -> 
         "facts": facts,
         "files": [{"role": role, **ref} for role, ref in version.artifacts.items()],
     }
+
+
+def set_category_bulk(ctx: ProjectContext, asset_ids: list[str], category_id: str | None) -> dict[str, Any]:
+    """Move assets to one category (None = Uncategorized). Metadata only: identity, versions and files are untouched.
+    Per-asset outcome so one stale or missing asset never blocks the rest; unchanged assets are reported,
+    not rewritten."""
+    if category_id is not None:
+        cat = ctx.config()[0].category(category_id)
+        if cat is None:
+            raise ApiError(422, "unknown_category", f"category {category_id} does not exist")
+        if cat.archived:
+            raise ApiError(422, "category_archived", f"category {category_id} is archived")
+    results: list[dict[str, Any]] = []
+    for aid in dict.fromkeys(asset_ids):
+        try:
+            m, _ = ctx.store.get(manifest_key(aid), AssetManifest)
+            if m.category_id == category_id:
+                results.append({"asset_id": aid, "ok": True, "changed": False, "revision": m.revision})
+                continue
+            m = update_metadata(ctx.store, aid, m.revision, category_id=category_id, set_category=True)
+            ctx.index.upsert(m)
+            results.append({"asset_id": aid, "ok": True, "changed": True, "revision": m.revision})
+        except NotFound:
+            results.append({"asset_id": aid, "ok": False, "code": "not_found", "message": "asset does not exist"})
+        except Conflict as e:  # changed between read and write
+            results.append({"asset_id": aid, "ok": False, "code": "conflict", "message": str(e)})
+    return {"category_id": category_id, "results": results, "changed": sum(1 for r in results if r.get("changed"))}
+
+
+_BLOCKER_LABELS = {
+    "families": "family anchor", "jobs": "Job history", "batches": "Job history", "execution_batches": "Batch history",
+    "deliveries": "Godot delivery", "descriptors": "Godot descriptor", "delivery_index": "Godot delivery",
+    "delivery_artifacts": "Godot delivery", "integration_ops": "Godot source publication",
+    "variants": "variant plan", "artifacts": "variant lineage", "media": "media library",
+}
+
+
+def delete_permanently(ctx: ProjectContext, asset_id: str, expected_revision: int, confirm_name: str) -> dict[str, Any]:
+    """Irreversible. Archived assets only; refuses (409 asset_in_use + blockers) while anything still refers to it."""
+    manifest, _ = ctx.store.get(manifest_key(asset_id), AssetManifest)
+    if confirm_name != manifest.name_id:
+        raise ApiError(422, "confirmation_mismatch", f"type the asset name id '{manifest.name_id}' to confirm")
+    try:
+        res = delete_asset(ctx.store, asset_id, expected_revision)
+    except AssetInUse as e:
+        blockers = [{**b, "reason": _BLOCKER_LABELS.get(b["type"], "other record")} for b in e.blockers]
+        raise ApiError(409, "asset_in_use", f"{asset_id} is still referenced; the asset was not deleted",
+                       blockers) from e
+    ctx.index.delete(asset_id)
+    return res.as_dict()
 
 
 def _derivation(ctx: ProjectContext, asset_id: str, version_id: str, loaded: AssetVersion | None) -> dict | None:

@@ -62,6 +62,19 @@ class NewReference(BaseModel):
         return self
 
 
+class SourceImage(BaseModel):
+    """Primary image input of an image-driven item: an upload, a Media Library image or a library asset."""
+    artifact_id: str | None = None
+    media_id: str | None = None
+    library: LibraryRef | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self) -> SourceImage:
+        if sum(v is not None for v in (self.artifact_id, self.media_id, self.library)) != 1:
+            raise ValueError("give exactly one of artifact_id / media_id / library")
+        return self
+
+
 class AddReference(BaseModel):
     artifact_id: str | None = None
     library: LibraryRef | None = None
@@ -108,8 +121,9 @@ def _image_artifact(ctx: ProjectContext, artifact_id: str) -> Artifact:
 
 
 def _library_artifact(ctx: ProjectContext, lib: LibraryRef) -> Artifact:
-    from .variants import resolve_source
+    from .variants import require_active, resolve_source
 
+    require_active(ctx, lib.asset_id)
     src = resolve_source(ctx, lib.asset_id, lib.version_id)
     roles = (lib.role,) if lib.role else LIBRARY_ROLES
     ref = next((a for r in roles if (a := src.artifact(r)) is not None), None)
@@ -133,6 +147,12 @@ def new_reference(ctx: ProjectContext, item_id: str, seq: int, *, artifact_id: s
     if origin == "media":  # key only for media so existing record shapes stay byte-identical
         ref["media_id"] = media_id
     return ref
+
+
+def resolve_source_image(ctx: ProjectContext, item_id: str, src: SourceImage) -> dict[str, Any]:
+    """The frozen record of an item's source image (same shape as a reference, id seeded apart from them)."""
+    return new_reference(ctx, item_id, 0, artifact_id=src.artifact_id, library=src.library, note="", crop=None,
+                         label="source image", media_id=src.media_id)
 
 
 def resolve_new(ctx: ProjectContext, item_id: str, refs: list[NewReference]) -> list[dict[str, Any]]:

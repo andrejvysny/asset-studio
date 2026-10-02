@@ -57,6 +57,8 @@ textarea, input, select, button { font-family: inherit; font-size: inherit; colo
 .btn-primary:hover:not(:disabled) { background: #fff; }
 .btn-link { cursor: pointer; border: 0; background: none; color: var(--muted); padding: 8px 6px; }
 .btn-link:hover { color: #fff; }
+.btn-danger { border-color: var(--bad); color: var(--bad); }
+.btn-danger:hover:not(:disabled) { background: var(--bad-bg); }
 
 .seg { display: flex; background: #1a1b1d; border: 1px solid #2a2c2f; border-radius: 6px; padding: 2px; }
 .seg button { cursor: pointer; border: 0; background: transparent; color: var(--muted); padding: 4px 10px;

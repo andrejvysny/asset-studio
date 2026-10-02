@@ -12,11 +12,13 @@ from assetstudio_core.domain import Candidate, CandidateSet, JobItem
 from assetstudio_core.ids import derived_id
 from assetstudio_core.seeds import derive_seed
 from assetstudio_processing.images import ImageRejected, inspect_image
+from assetstudio_storage.repo import IntegrityError, NotFound
 
 from ...adapters.base import EngineRejected, ImageEditRequest, ImageEngine, LoraUse, T2IRequest, engine_prompt_id
 from ...adapters.comfyui import graph_sha256
 from ...models import load_lock
 from ...provenance import licence_summary
+from ...services.promptrev import make_revision
 from ...services.records import cset_key, load_item, load_job, load_prompt, mutate_item
 from ...services.variant_gen import SourceIntegrityError, VariantSource, primary_bytes, variant_source
 from ..errors import Blocked, ItemFailed
@@ -221,7 +223,45 @@ def _make_artifact(env: TaskEnv, engine: ImageEngine, plan: _Plan, req: T2IReque
     env.progress(engine=state, done=sum(1 for r in state.values() if "artifact_id" in r))
 
 
+def _adopt_source_image(env: TaskEnv) -> dict[str, Any]:
+    """Image mode: the item's source image IS its first round: one candidate that points at the source artifact
+    (no copy, no engine call, no enhancement), under a 'brief' prompt revision that records the optional text."""
+    t, store = env.task, env.ctx.store
+    item, _ = load_item(store, t.job_id, t.item_id)
+    src = item.source_image
+    if item.generation_mode != "image" or src is None:
+        raise ItemFailed("this item has no source image", "input_invalid")
+    try:
+        art = store.verify_artifact(src["artifact_id"])
+    except (IntegrityError, NotFound) as e:
+        raise ItemFailed(f"source image failed verification: {e}"[:300], "source_integrity_failed") from e
+    provenance = {k: src.get(k) for k in ("artifact_id", "sha256", "origin", "media_id", "library") if src.get(k)}
+    rev = make_revision(store, item, rid=derived_id("prm", t.id), origin="brief", description=item.brief or item.name,
+                        bindings={"mode": "image", "source_image": provenance})
+    cs_id = derived_id("cs", t.id)
+    cand = Candidate(id=derived_id("cnd", cs_id, "0"), index=0, artifact_id=art.id, sha256=art.sha256, seed=0,
+                     width=int(art.meta.get("width", 0)), height=int(art.meta.get("height", 0)),
+                     engine={"source_image": provenance}, prompt_revision_id=rev.id)
+    number = (item.candidate_sets.index(cs_id) if cs_id in item.candidate_sets else len(item.candidate_sets)) + 1
+    cset = CandidateSet(id=cs_id, item_id=item.id, number=number, prompt_revision_id=rev.id, created_at=now_iso(),
+                        op_id=t.id, requested=1, candidates=[cand],
+                        generation={"mode": "image", "engine": None, "source_image": provenance,
+                                    "note": "source image used as given: no prompt enhancement, no generated preview"})
+    if store.repo.stat_object(cset_key(t.job_id, cs_id)) is None:
+        store.create(cset_key(t.job_id, cs_id), cset)
+
+    def apply(x: JobItem) -> None:
+        if rev.id not in x.prompt_revisions:
+            x.prompt_revisions.append(rev.id)
+        x.current_prompt = x.prompt_confirmed = rev.id
+        _finish(x, cs_id)
+    mutate_item(env.studio, env.ctx, t.job_id, item.id, apply)
+    return {"candidate_set_id": cs_id, "candidates": 1, "requested": 1}
+
+
 def generate(env: TaskEnv) -> dict[str, Any]:
+    if env.task.inputs.get("source_image"):
+        return _adopt_source_image(env)
     engine = env.engine
     if engine is None:
         raise Blocked("no image engine configured (library-only mode)", "engine_unconfigured", operator=True)
@@ -231,7 +271,9 @@ def generate(env: TaskEnv) -> dict[str, Any]:
     prompt_id = t.inputs["prompt_revision_id"]
     if item.prompt_confirmed != prompt_id:
         raise ItemFailed("the prompt changed after confirmation; confirm the current revision", "stale_input")
-    prompt = load_prompt(store, t.job_id, prompt_id)
+    # One prompt per candidate slot (prompt variants); a single-prompt item generates every slot from its one prompt.
+    prompts = [load_prompt(store, t.job_id, p) for p in t.inputs.get("prompt_revision_ids") or [prompt_id]]
+    prompt = prompts[0]
     snap = store.read_snapshot(item.snapshot_sha)
     params = snap["parameters"]
     plan = _prepare(env, engine, job, snap)
@@ -247,12 +289,13 @@ def generate(env: TaskEnv) -> dict[str, Any]:
         # Seeds derive from the item, its candidate-set number and index: never from Batch position or order.
         seed = derive_seed(job.seed_family, item.id, str(set_number), key)
         rec = state.get(key) or {"prompt_id": engine_prompt_id(t.id, key), "seed": seed}
+        slot = prompts[idx % len(prompts)]
         req: T2IRequest | ImageEditRequest = (
-            _edit_request(env, prompt, plan.vs, plan.image, rec, seed, plan.edit_params) if plan.vs is not None
-            else _t2i_request(env, prompt, params, plan.over, rec, seed, plan.style, plan.speed))
+            _edit_request(env, slot, plan.vs, plan.image, rec, seed, plan.edit_params) if plan.vs is not None
+            else _t2i_request(env, slot, params, plan.over, rec, seed, plan.style, plan.speed))
         if "artifact_id" not in rec:
             try:
-                _make_artifact(env, engine, plan, req, rec, state, key, prompt.id)
+                _make_artifact(env, engine, plan, req, rec, state, key, slot.id)
             except (EngineRejected, ImageRejected) as e:
                 state[key] = {**rec, "error": str(e)[:300]}
                 env.progress(engine=state)
@@ -260,7 +303,7 @@ def generate(env: TaskEnv) -> dict[str, Any]:
         r = state[key]
         candidates.append(Candidate(id=derived_id("cnd", cs_id, key), index=idx, artifact_id=r["artifact_id"],
                                     sha256=r["sha256"], seed=r["seed"], width=r["width"], height=r["height"],
-                                    engine={"prompt_id": r["prompt_id"]}))
+                                    engine={"prompt_id": r["prompt_id"]}, prompt_revision_id=slot.id))
     if not candidates:
         errors = "; ".join(sorted({v.get("error", "") for v in state.values()}))[:300]
         raise ItemFailed(errors or "no candidates produced", "output_invalid")

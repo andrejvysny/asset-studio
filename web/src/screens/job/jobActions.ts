@@ -29,6 +29,16 @@ async function saveDescription(pid: string, jobId: string, it: ItemView, descrip
   if (bad) throw bad;
 }
 
+/** Rewrites one preview slot's prompt (variant 0 is the main prompt; the others only change that slot). */
+export const editVariant = (pid: string, jobId: string, itemId: string, index: number, description: string) =>
+  guard(async () => {
+    const it = await freshItem(pid, jobId, itemId);
+    const res = await send<{ results: ItemOutcome[] }>("POST", `${J(pid)}/${jobId}:edit-prompts`, {
+      items: [{ item_id: it.id, description, variant_index: index, expected_item_revision: it.revision }] });
+    const bad = firstFailure(res);
+    if (bad) throw bad;
+  });
+
 const changed = (it: ItemView, draft: string | null): draft is string =>
   draft !== null && draft.trim() !== "" && draft.trim() !== (it.prompt?.description ?? "").trim();
 

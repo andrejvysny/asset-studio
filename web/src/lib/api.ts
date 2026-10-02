@@ -30,6 +30,8 @@ export interface AssetRow {
   preview_artifact_id: string | null; kind_label: string;
   /** Library index row extras. `family_*` are null for ungrouped assets. `search` is the server's search text. */
   updated_at: string; search: string; family_id: string | null; family_name: string | null;
+  /** 1 when archived (hidden from active views). */
+  archived: number;
 }
 export interface ShotRow {
   id: string; name: string; category_id: string | null; kind: Kind | null; brief: string;
@@ -38,13 +40,13 @@ export interface ShotRow {
   membership: { batch_id: string; batch_alias: string; item_id: string; published: Published | null } | null;
 }
 export interface AssetList { items: AssetRow[]; total: number; planned: ShotRow[]; planned_total: number;
-  all_assets_total: number }
+  all_assets_total: number; archived_total: number }
 export interface VersionRef { version_id: string; display_version: number; published_at: string;
   publication_op: string; preview_artifact_id: string | null; note: string }
 export interface Manifest {
   asset_id: string; name_id: string; display_name: string; kind: Kind; origin: Origin; category_id: string | null;
   tags: string[]; created_at: string; current_version_id: string | null; versions: VersionRef[]; revision: number;
-  schema_version: number; family_id: string | null;
+  schema_version: number; family_id: string | null; archived_at: string | null;
   pointer_log: { from_version: string | null; to_version: string; at: string; op: string; reason: string }[];
 }
 export interface FileRef { role: string; artifact_id: string; sha256: string; size: number; mime: string }
@@ -88,7 +90,9 @@ export interface QaView { id: string; status: QaStatus; coverage: { completed: n
     status?: QaStatus; not_evaluated?: boolean; coverage?: { completed: number; applicable: number };
     minor_fail_limit?: number } }
 export interface CandidateView { id: string; index: number; artifact_id: string; sha256: string; seed: number;
-  width: number; height: number; qa: QaView | null; engine?: Record<string, Json> }
+  width: number; height: number; qa: QaView | null; engine?: Record<string, Json>;
+  /** The exact prompt revision this candidate was generated from (see Round.prompts); null on older candidates. */
+  prompt_revision_id?: string | null }
 export interface PromptRev { id: string; number: number; origin: string; description: string; template: string;
   positive: string; negative: string; original_brief: string; enhancer: Record<string, Json> | null;
   item_id: string; parent_id: string | null; created_at: string; style_sha: string | null; snapshot_sha: string;
@@ -127,6 +131,12 @@ export interface ItemView {
   tasks: Record<string, Task>; qa: Record<string, string>;
   stage: { stage: string; state: string; waiting_on_user: boolean; busy: boolean; failed: boolean };
   prompt: PromptRev | null; prompt_locked: boolean;
+  /** One enhanced prompt per candidate slot, in slot order ([0] is `prompt`); empty for single-prompt items. */
+  prompt_variants: PromptRev[];
+  /** "image": starts from `source_image` (no prompt enhancement, no preview generation). */
+  generation_mode: "prompt" | "image";
+  source_image: { id: string; artifact_id: string; sha256: string; origin: "upload" | "library" | "media";
+    media_id?: string | null; label: string | null; library: { asset_id: string; version_id: string } | null } | null;
   candidate_set: { id: string; number: number; prompt_revision_id: string; requested: number;
     generation: Record<string, Json>; candidates: CandidateView[] } | null;
   approval_detail: ApprovalDetail | null;
@@ -320,7 +330,7 @@ export interface FamilyGroup {
 export type AssetGroupItem = FamilyGroup | AssetGroup;
 export interface GroupedAssets {
   group_by: "family"; matching_asset_count: number; matching_group_count: number; query_revision: number;
-  groups: AssetGroupItem[]; next_cursor: string | null; all_assets_total: number;
+  groups: AssetGroupItem[]; next_cursor: string | null; all_assets_total: number; archived_total: number;
 }
 /** `AssetDetail.derived_from`: snapshot of the exact source at publication time. */
 export interface DerivedFrom {
@@ -499,6 +509,8 @@ export interface JobReference {
 export interface PromptBindings {
   preset?: EnhancePreset; mode?: "t2i" | "edit"; references_revision?: number; reference_ids?: string[];
   facts?: string[]; additions?: string[]; assumptions?: string[]; reference_cues?: { index: number; cue: string }[];
+  /** Prompt variants (one enhanced prompt per candidate slot): this prompt's slot and the slot count. */
+  variant_index?: number; variant_count?: number;
   /** Variant (edit mode) prompts only. */
   plan_id?: string; plan_sha256?: string; reference_set_id?: string; primary_reference_sha256?: string;
 }
@@ -510,6 +522,8 @@ export interface Round {
   prompt: { positive: string; origin: string; preset: EnhancePreset | null; references_revision: number | null;
     additions: string[]; reference_count: number } | null;
   created_at: string | null; requested: number | null; generating: boolean;
+  /** Prompt text behind each candidate of this round, by revision id (prompt variants: one per slot). */
+  prompts?: Record<string, { positive: string; description: string; origin: string; variant_index: number | null }>;
   /** In-flight placeholder only. */
   progress?: Task["progress"] | null;
   candidates: RoundCandidate[];

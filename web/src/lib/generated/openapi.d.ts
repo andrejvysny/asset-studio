@@ -610,6 +610,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{project_id}/assets/{asset_id}:archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Asset
+         * @description Hide the asset from active views; nothing is deleted and the asset can be restored with the same id.
+         */
+        post: operations["archive_asset_api_v1_projects__project_id__assets__asset_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/{asset_id}:delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Asset Permanently
+         * @description IRREVERSIBLE. Removes an archived asset, its versions and every file nothing else uses. 409 asset_not_archived
+         *     unless archived; 409 asset_in_use (detail = blocking records) while jobs, families or deliveries refer to it.
+         */
+        post: operations["delete_asset_permanently_api_v1_projects__project_id__assets__asset_id__delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets/{asset_id}:restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Asset */
+        post: operations["restore_asset_api_v1_projects__project_id__assets__asset_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{project_id}/assets/{asset_id}:set-current": {
         parameters: {
             query?: never;
@@ -621,6 +679,26 @@ export interface paths {
         put?: never;
         /** Set Current Version */
         post: operations["set_current_version_api_v1_projects__project_id__assets__asset_id__set_current_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{project_id}/assets:set-category": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Category
+         * @description Assign, move or clear the category of one or many assets in one call (per-asset results).
+         */
+        post: operations["set_category_api_v1_projects__project_id__assets_set_category_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2527,6 +2605,11 @@ export interface components {
             /** Qa Evaluation Id */
             qa_evaluation_id: string | null;
         };
+        /** ArchiveAsset */
+        ArchiveAsset: {
+            /** Expected Revision */
+            expected_revision: number;
+        };
         /** AttemptReport */
         AttemptReport: {
             /** Attempt Id */
@@ -2879,6 +2962,13 @@ export interface components {
             /** Y */
             y: number;
         };
+        /** DeleteAsset */
+        DeleteAsset: {
+            /** Confirm Name */
+            confirm_name: string;
+            /** Expected Revision */
+            expected_revision: number;
+        };
         /** Device */
         Device: {
             /**
@@ -2934,6 +3024,8 @@ export interface components {
             item_id: string;
             /** Job Id */
             job_id?: string | null;
+            /** Variant Index */
+            variant_index?: number | null;
         };
         /** EditPrompts */
         EditPrompts: {
@@ -3244,6 +3336,12 @@ export interface components {
             category_id?: string | null;
             /** Enhance Preset */
             enhance_preset?: ("conservative" | "creative") | null;
+            /**
+             * Generation Mode
+             * @default prompt
+             * @enum {string}
+             */
+            generation_mode: "prompt" | "image" | "prompt_image";
             kind?: components["schemas"]["Kind"] | null;
             /** Name */
             name: string;
@@ -3254,6 +3352,7 @@ export interface components {
             references: components["schemas"]["NewReference"][];
             /** Shot Id */
             shot_id?: string | null;
+            source_image?: components["schemas"]["SourceImage"] | null;
             /** Target Asset Id */
             target_asset_id?: string | null;
         };
@@ -3758,6 +3857,13 @@ export interface components {
             /** Protocol Version */
             protocol_version: number;
         };
+        /** SetCategory */
+        SetCategory: {
+            /** Asset Ids */
+            asset_ids: string[];
+            /** Category Id */
+            category_id?: string | null;
+        };
         /** SetCurrent */
         SetCurrent: {
             /** Expected Current Version */
@@ -3852,6 +3958,17 @@ export interface components {
             slot_id: string;
             /** State */
             state: string;
+        };
+        /**
+         * SourceImage
+         * @description Primary image input of an image-driven item: an upload, a Media Library image or a library asset.
+         */
+        SourceImage: {
+            /** Artifact Id */
+            artifact_id?: string | null;
+            library?: components["schemas"]["LibraryRef"] | null;
+            /** Media Id */
+            media_id?: string | null;
         };
         /** StartRun */
         StartRun: {
@@ -5138,6 +5255,7 @@ export interface operations {
                 family_id?: string | null;
                 group_by?: "family" | null;
                 cursor?: string | null;
+                archived?: boolean;
             };
             header?: never;
             path: {
@@ -5312,6 +5430,120 @@ export interface operations {
             };
         };
     };
+    archive_asset_api_v1_projects__project_id__assets__asset_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveAsset"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_asset_permanently_api_v1_projects__project_id__assets__asset_id__delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteAsset"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_asset_api_v1_projects__project_id__assets__asset_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveAsset"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_current_version_api_v1_projects__project_id__assets__asset_id__set_current_post: {
         parameters: {
             query?: never;
@@ -5325,6 +5557,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SetCurrent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_category_api_v1_projects__project_id__assets_set_category_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetCategory"];
             };
         };
         responses: {

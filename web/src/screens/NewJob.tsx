@@ -38,6 +38,8 @@ export function NewJob() {
   const [title, setTitle] = useState(target ? `New version of ${sp.get("name") ?? ""}` : "");
   const [brief, setBrief] = useState("");
   const [refs, setRefs] = useState<RefDraft[]>([]);
+  const [mode, setMode] = useState<"prompt" | "image">("prompt");
+  const [source, setSource] = useState<RefDraft[]>([]);
   const [preset, setPreset] = useState<EnhancePreset>("conservative");
   const act = useAction();
   const idem = useState(key)[0];
@@ -60,7 +62,10 @@ export function NewJob() {
   const eff = cat ? cfg.data?.effective[cat] : undefined;
   const effectiveKind: Kind = (cat ? catKindOf(cat) : null) ?? kind;
   const recipe = caps.data?.recipes.find((r) => r.kind === effectiveKind);
-  const blocked = recipe && !["ready", "experimental"].includes(recipe.generation.state);
+  const imageMode = mode === "image";
+  // Image mode never generates, so a missing image model does not block it (the build step decides).
+  const blocked = !imageMode && recipe && !["ready", "experimental"].includes(recipe.generation.state);
+  const needSource = imageMode && source.length === 0;
   if (!cfg.data) return <Loading what="configuration" />;
 
   const pickKind = (k: Kind) => {
@@ -86,14 +91,19 @@ export function NewJob() {
   const submit = (run: boolean) => void act.run(async () => {
     let st = pending.current;
     if (!st) {
-      const direct = refs.filter((r) => r.origin !== "library");
+      const direct = imageMode ? [] : refs.filter((r) => r.origin !== "library");
+      const src = source[0];
+      const sourceImage = !imageMode || !src ? {} : { generation_mode: "image", source_image:
+        src.origin === "library" ? { library: src.library } : src.origin === "media" ? { media_id: src.media_id }
+          : { artifact_id: src.artifact_id } };
       const out = await send<{ job: { id: string } }>("POST", J(id), {
         title: title.trim(), category_id: cat, kind: (cat && catKindOf(cat)) ? null : kind, enhance_preset: preset,
         idempotency_key: idem, source: target ? "new version" : "manual",
-        items: [{ name: title.trim(), brief: brief.trim() || title.trim(), target_asset_id: target, enhance_preset: preset,
+        items: [{ name: title.trim(), brief: imageMode ? brief.trim() : brief.trim() || title.trim(), target_asset_id: target,
+          enhance_preset: preset, ...sourceImage,
           references: direct.map((r) => ({ ...(r.origin === "media" ? { media_id: r.media_id } : { artifact_id: r.artifact_id }),
             note: r.note, crop: r.crop, label: r.label })) }] });
-      st = { jobId: out.job.id, lib: refs.filter((r) => r.origin === "library") };
+      st = { jobId: out.job.id, lib: imageMode ? [] : refs.filter((r) => r.origin === "library") };
       pending.current = st;
     }
     for (let r = st.lib[0]; r; r = st.lib[0]) {
@@ -138,10 +148,24 @@ export function NewJob() {
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           <label className="field"><span>Name</span>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-          <label className="field"><span>Brief · what you want, in your words</span>
+          <div className="field"><span>Start from</span>
+            <div className="seg" role="group" aria-label="generation mode" style={{ alignSelf: "flex-start" }}>
+              <button className={mode === "prompt" ? "on" : ""} aria-pressed={mode === "prompt"}
+                onClick={() => setMode("prompt")}>From prompt</button>
+              <button className={mode === "image" ? "on" : ""} aria-pressed={mode === "image"}
+                onClick={() => setMode("image")}>From image</button>
+              <button disabled title="No generator takes a prompt together with an image yet" aria-pressed="false">
+                Prompt + image</button>
+            </div>
+            <span className="dim" style={{ fontSize: 11.5 }}>{imageMode
+              ? "The image itself becomes the first candidate. Prompt enhancement and preview generation are skipped."
+              : "The text model writes the prompt, then one preview image is generated per prompt."}</span>
+          </div>
+          <label className="field"><span>{imageMode ? "Note · optional, kept with the Job" : "Brief · what you want, in your words"}</span>
             <textarea className="input" rows={3} value={brief} onChange={(e) => setBrief(e.target.value)}
               style={{ font: "400 12.5px/1.55 var(--sans)" }} /></label>
-          <ReferenceEditor project={id} refs={refs} onChange={setRefs} />
+          {imageMode ? <ReferenceEditor project={id} refs={source} onChange={setSource} source />
+            : <ReferenceEditor project={id} refs={refs} onChange={setRefs} />}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14, minWidth: 0 }}>
           <div className="field"><span>Category · spec is inherited</span>
@@ -150,14 +174,14 @@ export function NewJob() {
               {shownCats.map((c) => <button key={c.id} className={`chip mono${cat === c.id ? " on" : ""}`}
                 aria-pressed={cat === c.id} onClick={() => setCat(c.id)}>{c.path}</button>)}
             </div></div>
-          <div className="field"><span>Prompt enhancement</span>
+          {!imageMode && <div className="field"><span>Prompt enhancement</span>
             <div className="seg" role="group" aria-label="prompt enhancement" style={{ alignSelf: "flex-start" }}>
               {PRESETS.map(([k, label]) => (
                 <button key={k} className={preset === k ? "on" : ""} aria-pressed={preset === k}
                   onClick={() => setPreset(k)}>{label}</button>))}
             </div>
             <span className="dim" style={{ fontSize: 11.5 }}>{PRESETS.find(([k]) => k === preset)?.[2]}</span>
-          </div>
+          </div>}
           <div className="table">
             {params.map(([k, v, src]) => (
               <div key={k} className="td" style={{ gridTemplateColumns: "130px minmax(0,1fr)", padding: "7px 12px" }}>
@@ -171,10 +195,11 @@ export function NewJob() {
         </div>
       </div>
       <div className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 16, gap: 10, flexWrap: "wrap" }}>
-        <button className="btn btn-primary" disabled={act.busy || !title.trim()} onClick={() => submit(false)}>Save Job</button>
-        <button className="btn" disabled={act.busy || !title.trim() || !!blocked} onClick={() => submit(true)}>Save and run</button>
-        <span className="dim" style={{ fontSize: 12 }}>Save keeps it as a draft for a Batch. Save and run enhances the prompt now,
-          then stops for you to confirm it.</span>
+        <button className="btn btn-primary" disabled={act.busy || !title.trim() || needSource} onClick={() => submit(false)}>Save Job</button>
+        <button className="btn" disabled={act.busy || !title.trim() || !!blocked || needSource} onClick={() => submit(true)}>Save and run</button>
+        <span className="dim" style={{ fontSize: 12 }}>{imageMode
+          ? "Save keeps it as a draft. Save and run puts the image straight into QA and approval."
+          : "Save keeps it as a draft for a Batch. Save and run enhances the prompt now, then stops for you to confirm it."}</span>
       </div>
       <ErrorLine error={act.error} />
     </div>

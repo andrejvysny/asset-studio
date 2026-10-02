@@ -84,6 +84,20 @@ revision, QA evaluation, item revision) → build run (attached to the item when
 result** (structural validation mandatory) → publication (per asset, idempotent, derived ids, receipt). Regeneration
 creates a new prompt revision and candidate set for selected rows only; history is never overwritten.
 
+**Prompt variants.** A text-to-image item is enhanced once per candidate slot (`candidate_count`, default 4): the
+enhancer runs per slot with a different creative direction (composition, silhouette, secondary details, material…),
+each result is its own prompt revision (`JobItem.prompt_variants`, slot order; `current_prompt` is slot 0). The
+human confirms the whole set; generation then makes exactly one candidate per prompt and each `Candidate` stores the
+`prompt_revision_id` it came from. Editing one slot (`variant_index`) replaces only that revision; a failed enhancement
+keeps the revisions already written, so a retry calls the enhancer only for the missing slots. Source-conditioned edits
+(variants) keep a single instruction. In node mode every enhancer call is its own runner attempt.
+
+**Image mode.** An item with `generation_mode: "image"` and a `source_image` (upload, Media Library image or library
+asset) skips enhancement and generation: starting the run creates a CPU `generate` task that registers one candidate
+pointing at the source artifact (no copy, provenance kept in `Candidate.engine.source_image`) under a `brief` prompt
+revision. QA, approval and the build step then run as for any candidate. Prompt-stage commands answer `image_mode`;
+`prompt_image` (text plus image) is refused until a generator takes both.
+
 ## Scheduling (stage-first, model-aware, across Jobs)
 
 - Work is a **StageTask** per (item, stage, exact inputs): `enhance`, `generate`, `mask`, `qa_vlm`, `qa_compare`, `qa_finalize`,

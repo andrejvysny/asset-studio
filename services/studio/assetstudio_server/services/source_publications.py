@@ -364,8 +364,8 @@ def _target(ctx: ProjectContext, req: CommitPublication, op_id: str) -> str:
             if is_id(req.target_asset_id, "ast") else None
     except NotFound:
         manifest = None
-    if manifest is None or manifest.kind != Kind.model3d:
-        raise ServiceError("asset_not_found", "asset not found")
+    if manifest is None or manifest.kind != Kind.model3d or manifest.archived_at is not None:
+        raise ServiceError("asset_not_found", "asset not found")  # archived assets take no new versions
     if manifest.current_version_id != req.expected_current_version:
         raise _stale(manifest.current_version_id)
     return manifest.asset_id

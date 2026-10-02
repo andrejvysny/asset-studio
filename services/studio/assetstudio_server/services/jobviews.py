@@ -33,7 +33,9 @@ def legal_actions(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build:
                 and not build_active}
     # Rounds: every candidate set is kept, so prompts stay editable (a confirmed new prompt is the next round)
     # until a build is accepted; only running enhancement/generation blocks them.
-    can_prompt = item.accepted_build is None and not busy(tasks, "generate", "enhance")
+    # image-mode items have no prompt stage: their first round is the source image itself
+    can_prompt = item.accepted_build is None and not busy(tasks, "generate", "enhance") \
+        and item.generation_mode != "image"
     return {
         "run_transform": False,
         "edit_prompt": can_prompt and item.current_prompt is not None,
@@ -42,7 +44,7 @@ def legal_actions(item: JobItem, tasks: dict[str, Any], stage_busy: bool, build:
         "regenerate": can_prompt and item.current_set is not None and not build_active,
         "approve": item.current_set is not None and not build_active and item.accepted_build is None,
         "mark_regenerate": item.current_set is not None and not build_active and item.accepted_build is None
-        and not gen_busy,
+        and not gen_busy and item.generation_mode != "image",
         "build": build_available and item.approval is not None and not item.regen_requested and not build_active
         and item.accepted_build is None and (build is None or build.result != "valid" or not matches),
         "accept": build is not None and build.result == "valid" and item.accepted_build is None and matches,
@@ -59,6 +61,12 @@ def _candidate_view(ctx: ProjectContext, job_id: str, cand: Any, qa_id: str | No
         "policy": qa.policy, "results": qa.results, "not_evaluated": qa.policy.get("not_evaluated")}}
 
 
+def _prompt_text(ctx: ProjectContext, job_id: str, rid: str) -> dict[str, Any]:
+    p = load_prompt(ctx.store, job_id, rid)
+    return {"positive": p.positive, "description": p.description, "origin": p.origin,
+            "variant_index": p.bindings.get("variant_index")}
+
+
 def _round_view(ctx: ProjectContext, item: JobItem, cset: CandidateSet, generating: bool) -> dict[str, Any]:
     prompt = load_prompt(ctx.store, item.job_id, cset.prompt_revision_id)
     b = prompt.bindings
@@ -68,6 +76,9 @@ def _round_view(ctx: ProjectContext, item: JobItem, cset: CandidateSet, generati
                        "references_revision": b.get("references_revision"), "additions": b.get("additions", []),
                        "reference_count": len(b.get("reference_ids") or [])},
             "created_at": cset.created_at, "requested": cset.requested, "generating": generating,
+            # exact prompt behind every candidate (prompt variants): revision id -> text
+            "prompts": {rid: _prompt_text(ctx, item.job_id, rid) for rid in sorted({
+                c.prompt_revision_id or cset.prompt_revision_id for c in cset.candidates})},
             "candidates": [_candidate_view(ctx, item.job_id, c, qa_map.get(c.id)) for c in cset.candidates]}
 
 
@@ -154,6 +165,7 @@ def item_view(studio: Studio, ctx: ProjectContext, job: Job, item: JobItem, buil
         "tasks": as_json(tasks),
         "stage": st.__dict__,
         "prompt": prompt.model_dump(mode="json") if prompt else None,
+        "prompt_variants": [load_prompt(store, job.id, rid).model_dump(mode="json") for rid in item.prompt_variants],
         "prompt_stale": prompt_stale(item, prompt),
         "prompt_locked": item.current_set is not None and not item.regen_requested,
         "candidate_set": None if cset is None else {**cset.model_dump(mode="json", exclude={"candidates"}),
