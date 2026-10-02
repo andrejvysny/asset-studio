@@ -124,12 +124,12 @@ def worker_gpus(studio: Studio, eng: dict[str, Any], aux: dict[str, Any]) -> lis
         out.append({"index": studio.settings.gpu_ids["gpu0"], "uuid": "reported-by-comfyui",
                     "name": str(dev.get("name", "GPU")).split(" : ")[0].split(" ", 1)[-1],
                     "vram_used_mb": (total - free) // 2**20,
-                    "vram_total_mb": total // 2**20, "util_pct": 0, "measured_at": now_iso(), "source": "comfyui"})
+                    "vram_total_mb": total // 2**20, "util_pct": None, "measured_at": now_iso(), "source": "comfyui"})
     g = aux.get("gpu")
     if isinstance(g, dict) and g.get("vram_total_mb"):
         out.append({"index": studio.settings.gpu_ids["gpu1"], "uuid": "reported-by-aux", "name": g.get("name", "GPU"),
                     "vram_used_mb": g["vram_used_mb"], "vram_total_mb": g["vram_total_mb"],
-                    "util_pct": g.get("util_pct", 0), "measured_at": now_iso(), "source": "aux"})
+                    "util_pct": g.get("util_pct"), "measured_at": now_iso(), "source": "aux"})
     return out
 
 

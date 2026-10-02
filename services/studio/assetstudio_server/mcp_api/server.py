@@ -21,6 +21,11 @@ FILES_PREFIX = "/files/"
 BODY_OVERHEAD = 1024 * 1024  # JSON-RPC envelope + other arguments around an inline base64 file
 
 
+# Tools whose only target is operator_auth.AGENT_DENY in proxy mode: hidden there instead of always answering 403.
+PROXY_DENIED_TOOLS = ("config_set", "config_delete", "config_replace_yaml", "reset_lane", "rebuild_index",
+                      "register_project")
+
+
 def token_store(settings: Settings) -> TokenStore:
     return TokenStore(settings.instance_dir / "mcp_tokens.json")
 
@@ -48,6 +53,9 @@ def build_mcp(deps: Deps) -> FastMCP:
     for module in ALL_MODULES:
         module.register(mcp, deps)
     guide.register(mcp, deps)
+    if deps.settings.auth_mode == "proxy":
+        for name in PROXY_DENIED_TOOLS:
+            mcp.remove_tool(name)
     return mcp
 
 

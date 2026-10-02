@@ -51,7 +51,7 @@ static func update(cmd: RefCounted, binding_id: String, version_id: String, new_
 	if not lock.bindings().has(binding_id):
 		return Result.fail("invalid_request", "unknown binding %s" % binding_id, false, {"usage": true})
 	if new_binding != "" and (not Schema.matches("slug", new_binding) or lock.bindings().has(new_binding)):
-		return Result.fail("invalid_request", "--new-binding must be an unused slug", false, {"usage": true})
+		return Result.fail("invalid_request", "--new-binding must be an unused slug: 1-64 chars of a-z 0-9 _ . - starting with a letter or digit", false, {"usage": true})
 	var old_key: String = lock.bindings()[binding_id]["asset_key"]
 	var ref: RefCounted = _target_ref(lock.dependencies()[old_key]["asset_ref"], version_id)
 	if not ref.ok:

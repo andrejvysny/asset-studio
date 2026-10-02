@@ -75,7 +75,8 @@ Strict: unknown keys are errors; `profile_id` must equal the file name; each rul
 `alpha_scissor_threshold`). The first matching rule wins. `profile_sha256` = sha256 of the raw file bytes.
 Overrides are stored as `surface_material_override/<n>` on the imported nodes of an editable `Model` instance; patched
 materials are embedded sub-resources with stable ids. Limitation: a patch of a textured source material embeds
-that material (and its textures) in the wrapper; prefer a `material` rule for textured assets.
+the patched material in the wrapper, but its textures stay `ext_resource` references to the `model_N.png` files Godot
+extracts from the GLB (they are not embedded); prefer a `material` rule for textured assets.
 
 ## Editor plugin
 

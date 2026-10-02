@@ -42,6 +42,29 @@ INDEX.json pass the schema and fail the model on purpose; consumers must impleme
 - A `godot_static_source_v1` delivery manifest lists one file, the unchanged source zip (`source.zip`), as its entrypoint.
   A `portable_glb_v1` delivery lists `portable.glb`.
 
+## Resolve entries and admission errors
+
+Informative (documentation only; no schema or wire change). The OpenAPI document does not type the resolve response.
+
+Each entry of `POST /libraries/{L}/resolve` carries `asset_ref`, `asset_key`, `state`, `error` (`{code, message}` or
+`null`), `descriptor_sha256`, `descriptor_json`, `deliveries`, `dependencies` and the additive `representations` map.
+`representations` is keyed by each requested representation id (`portable_glb_v1`, `godot_static_source_v1`,
+`mobile_glb_v1`); every value is `{"state": ..., "error": {"code", "message"} | null}`, where `state` is `ready`,
+`unsupported`, `not_found`, `forbidden`, `server_identity_mismatch` or `temporarily_unavailable`. The entry `state` is `ready`
+when at least one requested representation is ready, so one failed representation never hides a ready one.
+
+Publication endpoints (`publications:preview`, commit) refuse admission with the `temporarily_unavailable` error
+(HTTP 503, retryable). Its `details.reason` is one of:
+
+| `details.reason` | Meaning |
+|---|---|
+| `staging_capacity` | The staging area is full; retry later |
+| `disk_floor` | Free disk would drop below the configured floor; retry later |
+| `processing_queue_full` | Too many publications are processing or queued; retry with backoff |
+| `preview_quota` | The token already holds the maximum number of pending previews; commit them or let them expire |
+
+Clients must treat an unknown `reason` as plain `temporarily_unavailable`.
+
 ## Regenerating fixtures
 
 ```sh

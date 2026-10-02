@@ -42,7 +42,7 @@ static func execute(cmd: RefCounted, o: Dictionary) -> RefCounted:
 	if not ref_r.ok:
 		return Result.fail("invalid_request", ref_r.message, false, {"usage": true})
 	if o.has("binding") and not Schema.matches("slug", o["binding"]):
-		return Result.fail("invalid_request", "--binding must be a slug", false, {"usage": true})
+		return Result.fail("invalid_request", "--binding must be a slug: 1-64 chars of a-z 0-9 _ . - starting with a letter or digit", false, {"usage": true})
 	var policy: RefCounted = _material_policy(cmd, o, config)
 	if not policy.ok:
 		return policy

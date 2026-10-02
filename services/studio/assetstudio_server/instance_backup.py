@@ -38,7 +38,8 @@ def _token_files(s: Settings) -> list[tuple[str, Path]]:
     """Explicit list of persistent auth state. Signed-URL/actor secrets are per-process."""
     return [("integration/server.json", s.integration_dir / "server.json"),
             ("integration/tokens.json", s.integration_dir / "tokens.json"),
-            ("mcp_tokens.json", s.instance_dir / "mcp_tokens.json")]
+            ("mcp_tokens.json", s.instance_dir / "mcp_tokens.json"),
+            ("projects.json", s.instance_dir / "projects.json")]
 
 
 def _stage(src: Path, dst: Path, *, locked: bool) -> None:
@@ -73,7 +74,8 @@ def create_instance_backup(s: Settings, out_dir: Path) -> Path:
         for i, (arc, src) in enumerate(_token_files(s)):
             if src.is_file():
                 staged[arc] = Path(tmp) / f"{i}.bin"
-                _stage(src, staged[arc], locked=not arc.endswith("server.json"))
+                # server.json and projects.json are replaced atomically and have no writer lock file
+                _stage(src, staged[arc], locked=arc.endswith("tokens.json"))
         # Node mode: auth.sqlite holds runner credentials, registration tokens and the Studio offer-signing keys.
         for arc, db in (("journal/operations.sqlite", s.instance_dir / "journal" / "operations.sqlite"),
                         ("auth.sqlite", s.instance_dir / "auth.sqlite")):
@@ -190,6 +192,12 @@ def _check_semantics(tmp: Path, listed: dict[str, dict], rep: InstanceVerifyRepo
                     rep.fail(f"{name}: 'tokens' is not a list")
             except (ValueError, AttributeError):
                 rep.fail(f"{name}: not a token store")
+        elif name == "projects.json":
+            try:
+                if not isinstance(json.loads(p.read_text()).get("projects"), list):
+                    rep.fail("projects.json: 'projects' is not a list")
+            except (ValueError, AttributeError):
+                rep.fail("projects.json: not a project registry")
         elif name in ("journal/operations.sqlite", "auth.sqlite"):
             con = sqlite3.connect(p)
             try:

@@ -99,3 +99,17 @@ def test_loopback_without_internal_secret_is_401_in_proxy_mode(proxy: TestClient
         async with httpx.AsyncClient(transport=t, base_url="http://studio") as c:
             return (await c.get("/api/v1/projects", headers={actor.ACTOR_HEADER: "agent:claude"})).status_code
     assert asyncio.run(body()) == 401
+
+
+def test_admin_tools_are_hidden_in_proxy_mode_only(proxy: TestClient, tmp_path: Path) -> None:
+    from assetstudio_server.mcp_api.server import PROXY_DENIED_TOOLS
+
+    async def names(app) -> set[str]:  # noqa: ANN001
+        token = app.deps.tokens.create("lister", "full")
+        async with mcp_session(app, token) as s:
+            return {t.name for t in (await s.list_tools()).tools}
+    hidden = asyncio.run(names(mcp_app_for(proxy.app)))  # type: ignore[arg-type]
+    assert not set(PROXY_DENIED_TOOLS) & hidden and {"config_get", "config_validate", "storage_status"} <= hidden
+    local = make_settings(tmp_path / "local", coordinator=False)
+    with TestClient(create_app(local, build_studio(local))) as c:
+        assert set(PROXY_DENIED_TOOLS) <= asyncio.run(names(mcp_app_for(c.app)))  # type: ignore[arg-type]

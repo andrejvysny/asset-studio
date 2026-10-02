@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -394,6 +395,17 @@ def cmd_integration(s: Settings, a: argparse.Namespace) -> int:
     return _integration_token(s, a, integration_tokens(s))
 
 
+def _write_new_private(path: Path, text: str) -> bool:
+    """Create-once 0600 text file; False when it already exists (lost a race with another writer)."""
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    return True
+
+
 def _integration_token(s: Settings, a: argparse.Namespace, store: IntegrationTokenStore) -> int:
     if a.action == "create":
         known = {p["id"] for p in Registry(s).list()}
@@ -401,12 +413,23 @@ def _integration_token(s: Settings, a: argparse.Namespace, store: IntegrationTok
         if missing:
             print(f"error: unknown library id(s): {', '.join(missing)}", file=sys.stderr)
             return 2
+        token_file = Path(a.token_file) if a.token_file else None
+        if token_file is not None and token_file.exists():  # checked before minting: no orphan token on refusal
+            print(f"error: {token_file} already exists", file=sys.stderr)
+            return 2
         try:
             token = store.create(a.name, a.scope or ["assets:read"], a.library)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
-        print(f"token {a.name!r} created; it is shown only once:\n{token}")
+        if token_file is None:
+            print(f"token {a.name!r} created; it is shown only once:\n{token}")
+        elif _write_new_private(token_file, token + "\n"):
+            print(f"token {a.name!r} created; written to {token_file} (mode 0600)")
+        else:
+            store.revoke(a.name)
+            print(f"error: {token_file} already exists; token revoked", file=sys.stderr)
+            return 2
         host = "127.0.0.1" if s.integration_host in ("0.0.0.0", "::") else s.integration_host
         print(f"integration API: http://{host}:{s.integration_port}/api/integration/v1  "
               "(header  Authorization: Bearer <token>)")
@@ -524,7 +547,8 @@ def main(argv: list[str] | None = None) -> int:
     itc.add_argument("--library", action="append", required=True, help="library (project) id; repeatable")
     itc.add_argument("--scope", action="append", choices=("assets:read", "assets:publish"),
                      help="repeatable; default assets:read (publish does not imply read)")
-    itr = it.add_parser("revoke")
+    itc.add_argument("--token-file", help="write the token to this new 0600 file instead of printing it")
+    itr =it.add_parser("revoke")
     itr.add_argument("name")
     for q in (itc, itr, it.add_parser("list")):
         q.set_defaults(fn=cmd_integration)

@@ -1,6 +1,7 @@
 """Integration server identity, client token store and bind policy."""
 from __future__ import annotations
 
+import argparse
 import json
 import uuid
 from pathlib import Path
@@ -119,3 +120,24 @@ def test_bind_problem_matrix(tmp_path: Path) -> None:
     s.integration_allow_insecure_lan = False
     s.integration_container_bind = True
     assert bind_problem(s) is None
+
+
+def _token_args(name: str, library: str, token_file: Path) -> argparse.Namespace:
+    return argparse.Namespace(action="create", name=name, library=[library], scope=None, token_file=str(token_file))
+
+
+def test_cli_token_file_is_private_and_not_printed(tmp_path: Path, capsys) -> None:
+    from assetstudio_server.cli import _integration_token
+    from assetstudio_server.registry import Registry
+
+    s = make_settings(tmp_path)
+    s.ensure()
+    lib = Registry(s).create("Lib", tmp_path / "projects" / "lib").id
+    store = IntegrationTokenStore(tmp_path / "tokens.json")
+    out = tmp_path / "token.txt"
+    assert _integration_token(s, _token_args("godot", lib, out), store) == 0
+    token = out.read_text().strip()
+    assert out.stat().st_mode & 0o777 == 0o600
+    assert token not in capsys.readouterr().out and store.verify(token) is not None
+    assert _integration_token(s, _token_args("other", lib, out), store) == 2  # never overwrites
+    assert out.read_text().strip() == token and [t["name"] for t in store.list()] == ["godot"]
