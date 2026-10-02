@@ -1,3 +1,4 @@
+@tool
 extends Node
 # Long-poll loop over ASLibraryClient.changes(). Emits invalidation hints only; it never refreshes, downloads
 # or prunes anything itself. The cursor is opaque and kept in memory (persist `cursor` if you need restart).

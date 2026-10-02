@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Materializes a verified delivery into <managed_root>/<asset_key>/<manifest_sha256>/ (design §4.2, §4.3).
 # Bytes come from the verified blob cache and are COPIED (never hardlinked). Everything is staged under

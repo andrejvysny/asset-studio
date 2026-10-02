@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Strict validation primitives shared by the value parsers. Each check returns "" when valid, else a reason.
 # Mirrors contracts/godot-integration/v1/asset-ref.schema.json $defs.

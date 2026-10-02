@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # CLI command implementations (design §9). One instance per CLI run; `host` is the node that owns the network
 # nodes (the SceneTree root). Every command returns an exit code: 0 ok, 1 failure, 2 usage error.
@@ -18,6 +19,9 @@ const Installer = preload("res://addons/assetstudio/project/as_installer.gd")
 const Restore = preload("res://addons/assetstudio/project/as_restore.gd")
 const State = preload("res://addons/assetstudio/project/as_project_state.gd")
 const AddCommand = preload("res://addons/assetstudio/project/as_add_command.gd")
+const Finalize = preload("res://addons/assetstudio/project/as_finalize.gd")
+const UpdateCommand = preload("res://addons/assetstudio/project/as_update_command.gd")
+const PolicyCommand = preload("res://addons/assetstudio/project/as_policy_command.gd")
 const Fs = preload("res://addons/assetstudio/project/as_fs.gd")
 const Manifest = preload("res://addons/assetstudio/core/as_delivery_manifest.gd")
 
@@ -51,14 +55,25 @@ func run(command: String, opts: Dictionary) -> int:
 		"add":
 			code = await AddCommand.run(self, opts)
 		"finalize":
-			code = _finalize()
+			code = Finalize.run(self, opts)
+		"set-policy":
+			code = PolicyCommand.run(self, opts)
+		"update":
+			code = await UpdateCommand.run_update(self, opts)
+		"rollback":
+			code = await UpdateCommand.run_rollback(self, opts)
 		_:
 			err("unknown command: %s" % command)
 			code = 2
+	release()
+	return code
+
+
+## Frees the client/resolver nodes created by make_client / make_resolver.
+func release() -> void:
 	for n: Node in _nodes:
 		n.queue_free()
 	_nodes.clear()
-	return code
 
 
 func say(msg: String) -> void:
@@ -171,9 +186,9 @@ func _config_for_connect(server_id: String) -> RefCounted:
 	return Result.success(null)
 
 
-# --- restore / verify / finalize -----------------------------------------------------------------------------
+# --- restore / verify -----------------------------------------------------------------------------
 
-func _load_locked() -> RefCounted:
+func load_locked() -> RefCounted:
 	var cfg: RefCounted = Config.load_from(root)
 	if not cfg.ok:
 		return cfg
@@ -190,7 +205,7 @@ func _restore(o: Dictionary) -> int:
 	var c: RefCounted = open_txn("restore")
 	if c == null:
 		return 1
-	var loaded: RefCounted = _load_locked()
+	var loaded: RefCounted = load_locked()
 	if not loaded.ok:
 		c.close()
 		return fail_exit(loaded)
@@ -220,7 +235,7 @@ func _verify() -> int:
 	var rec: RefCounted = Coordinator.recover_project(root)
 	if not rec.ok:
 		return fail_exit(rec)
-	var loaded: RefCounted = _load_locked()
+	var loaded: RefCounted = load_locked()
 	if not loaded.ok:
 		return fail_exit(loaded)
 	var r: RefCounted = Restore.verify_locked(root, loaded.value["lock"], loaded.value["config"])
@@ -228,23 +243,3 @@ func _verify() -> int:
 		return fail_exit(r)
 	say("verified %d delivery(ies)" % r.value["checked"])
 	return 0
-
-
-## AS-07a stub: clears the pending_import marks and reports. Slot resolution and material policies are AS-08.
-func _finalize() -> int:
-	var c: RefCounted = open_txn("finalize")
-	if c == null:
-		return 1
-	var state: Dictionary = State.read_state(root)
-	var pending: Array = state["pending_import"]
-	if pending.is_empty():
-		c.close()
-		say("nothing to finalize")
-		return 0
-	for id: Variant in pending:
-		say("finalized %s (material policy not applied: wrapper/material finalize arrives with AS-08)" % str(id))
-	state["pending_import"] = []
-	c.add_write(State.STATE_REL, State.state_bytes(state))
-	var r: RefCounted = c.commit()
-	c.close()
-	return 0 if r.ok else fail_exit(r)

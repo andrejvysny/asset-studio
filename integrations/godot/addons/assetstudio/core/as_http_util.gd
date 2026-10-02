@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Pure HTTP helpers for ASLibraryClient (no state, no I/O).
 

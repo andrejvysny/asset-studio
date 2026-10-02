@@ -1,3 +1,4 @@
+@tool
 extends Node
 # Authenticated async client for the AssetStudio integration API v1. Every method returns an ASResult
 # (await it). Notes:
@@ -159,6 +160,18 @@ func manifest_bytes(library: String, delivery_id: String) -> RefCounted:
 	if bad != null:
 		return bad
 	return await _raw_document("/libraries/%s/deliveries/%s/manifest" % [library, delivery_id])
+
+
+## value = {"bytes": PackedByteArray}: the optional preview image of an exact version (asset_not_found when it has none).
+func thumbnail_bytes(library: String, asset_id: String, version_id: String) -> RefCounted:
+	var bad: RefCounted = _check_ids({"library": library, "asset_id": asset_id, "version_id": version_id})
+	if bad != null:
+		return bad
+	var path: String = "/libraries/%s/assets/%s/versions/%s/thumbnail" % [library, asset_id, version_id]
+	var r: RefCounted = await _request(HTTPClient.METHOD_GET, path, {}, null, true, true)
+	if not r.ok:
+		return r
+	return Result.success({"bytes": r.value["body"]})
 
 
 func changes(cursor: String = "", poll_timeout_s: float = 20.0, cancel_token: RefCounted = null) -> RefCounted:

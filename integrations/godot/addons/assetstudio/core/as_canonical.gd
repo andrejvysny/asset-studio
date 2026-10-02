@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # No class_name: addon scripts are loaded via preload consts so they cannot collide with
 # global classes in consumer projects.

@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Single source of truth for the addon version; scripts/package_addon.py reads VERSION from this file.
 

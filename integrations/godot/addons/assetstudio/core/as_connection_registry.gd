@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Maps stable server IDs to device-local endpoints. Credentials live in a separate file under user://
 # (never res://), are never printed and never placed in URLs.

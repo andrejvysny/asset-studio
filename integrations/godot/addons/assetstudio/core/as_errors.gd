@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Typed result value. Errors are expected outcomes, never engine errors.
 # Codes: contracts/godot-integration/v1/error-codes.json plus client-local codes below.

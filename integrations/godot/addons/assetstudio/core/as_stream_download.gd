@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Streams one GET response body into a file with HTTPClient. HTTPRequest is not used for artifact bodies
 # because it deletes its download file when a transfer fails, which would make Range resume impossible, and

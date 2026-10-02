@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # assetstudio.lock.json: ProjectAssetLockV1 (contracts/godot-integration/v1/project-lock.schema.json).
 # Validates every rule of packages/assetstudio_core/project_lock.py and writes canonical bytes identical to the

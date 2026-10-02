@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Argument parsing for addons/assetstudio/cli.gd. Tokens are never accepted in argv: connect reads --token-file.
 
@@ -10,7 +11,10 @@ const SPEC: Dictionary = {
 	"verify": {"values": [], "flags": ["locked", "offline"], "required": ["locked", "offline"]},
 	"add": {"values": ["library", "asset", "version", "binding", "profile"], "flags": ["preserve"],
 			"required": ["library", "asset", "version"]},
-	"finalize": {"values": [], "flags": [], "required": []},
+	"finalize": {"values": ["binding"], "flags": ["reapply"], "required": []},
+	"set-policy": {"values": ["binding", "profile"], "flags": ["preserve", "override"], "required": ["binding"]},
+	"update": {"values": ["binding", "version", "new-binding"], "flags": [], "required": ["binding", "version"]},
+	"rollback": {"values": ["binding"], "flags": [], "required": ["binding"]},
 }
 
 const USAGE: String = """usage: godot --headless --path <project> --script res://addons/assetstudio/cli.gd -- <command> [options]
@@ -18,7 +22,10 @@ const USAGE: String = """usage: godot --headless --path <project> --script res:/
   restore  --locked [--offline]
   verify   --locked --offline
   add      --library <prj_..> --asset <ast_..> --version <ver_..> [--binding <id>] [--profile <id> | --preserve]
-  finalize
+  finalize [--binding <id>] [--reapply]
+  set-policy --binding <id> (--profile <profile_id> | --preserve | --override)
+  update   --binding <id> --version <ver_..> [--new-binding <id>]
+  rollback --binding <id>
 exit codes: 0 ok, 1 failure (unavailable, integrity, unsafe, unsupported), 2 usage error"""
 
 
@@ -61,6 +68,9 @@ static func _finish(command: String, spec: Dictionary, opts: Dictionary) -> RefC
 	for r: String in spec["required"]:
 		if not opts.has(r):
 			return Result.fail("invalid_request", "%s: missing --%s" % [command, r])
-	if opts.has("profile") and opts.has("preserve"):
-		return Result.fail("invalid_request", "add: --profile and --preserve are mutually exclusive")
+	var chosen: int = int(opts.has("profile")) + int(opts.has("preserve")) + int(opts.has("override"))
+	if chosen > 1:
+		return Result.fail("invalid_request", "%s: --profile, --preserve and --override are mutually exclusive" % command)
+	if command == "set-policy" and chosen == 0:
+		return Result.fail("invalid_request", "set-policy: one of --profile, --preserve or --override is required")
 	return Result.success({"command": command, "opts": opts})

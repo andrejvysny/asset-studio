@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Verified, immutable content-addressed cache. Layout under `root`:
 #   blobs/<sha[0:2]>/<sha>      verified files (never overwritten once verified)

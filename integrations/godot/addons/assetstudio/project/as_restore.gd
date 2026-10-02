@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # `restore --locked` and `verify --locked --offline` (design §4.1, §4.2).
 #

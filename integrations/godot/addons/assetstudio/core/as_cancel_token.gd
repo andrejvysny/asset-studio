@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Cooperative cancellation. The client connects to `cancelled` to abort in-flight HTTPRequests.
 

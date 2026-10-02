@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Strict DeliveryManifestV1 parser (delivery-manifest.schema.json). Parses RAW bytes and hashes the raw
 # bytes. Rejects unknown fields (so any URL-ish field), unsafe/duplicate paths and non-matching dependency keys.

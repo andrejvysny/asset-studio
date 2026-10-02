@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Absolute-filesystem helpers for the project-side modules. Everything here takes absolute paths so the same
 # code runs from the CLI, headless tests and the editor. Runtime-safe: nothing here needs the editor.

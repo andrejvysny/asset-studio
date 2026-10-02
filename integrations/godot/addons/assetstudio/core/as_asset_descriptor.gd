@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Strict AssetDescriptorV1 parser (asset-descriptor.schema.json). Parses RAW bytes and hashes the raw
 # bytes; the document is never re-serialized. forward_axis is "+Z" (docs/adr/0001-descriptor-forward-axis.md).

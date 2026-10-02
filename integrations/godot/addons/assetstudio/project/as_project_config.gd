@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # assetstudio.project.json (addon-owned format, schema_version 1; design §2). Tracked in git, never holds secrets.
 # Parsing is strict (unknown keys are errors). Hand edits are tolerated: only the writer is canonical.

@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Single writer for every file the addon changes in a consumer project (docs/integration/as-07-08-design.md §6).
 #
@@ -33,6 +34,8 @@ var txn_id: String = ""
 var operation: String = ""
 ## Human-readable events (stale mutex broken, transaction recovered). Callers may print them.
 var notes: PackedStringArray = PackedStringArray()
+## Optional canonical-JSON-safe facts about this transaction, kept in .assetstudio/history.json (rollback uses them).
+var summary: Dictionary = {}
 
 var _held: bool = false
 var _step: int = 0
@@ -239,7 +242,7 @@ func _build_intent() -> RefCounted:
 				"staged": ("stage/%d" % i) if op["kind"] == "write" else op["staged"]})
 	return Result.success({"schema_version": 1, "id": txn_id, "operation": operation,
 			"pid": OS.get_process_id(), "created_unix": int(Time.get_unix_time_from_system()), "ops": ops,
-			"staging_dirs": Array(_staging_dirs)})
+			"staging_dirs": Array(_staging_dirs), "summary": summary})
 
 
 static func _check_rel(rel: String) -> String:
@@ -310,7 +313,8 @@ func _append_history(intent: Dictionary) -> void:
 		ops.append({"kind": op["kind"], "path": op["path"], "before_sha256": op["before_sha256"],
 				"after_sha256": op["after_sha256"]})
 	entries.append({"id": intent["id"], "operation": intent["operation"],
-			"time": Time.get_datetime_string_from_system(true), "ops": ops})
+			"time": Time.get_datetime_string_from_system(true), "ops": ops,
+			"summary": intent.get("summary", {})})
 	while entries.size() > MAX_HISTORY:
 		entries.pop_front()
 	var enc: RefCounted = CJson.encode(doc)

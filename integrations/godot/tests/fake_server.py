@@ -1,7 +1,9 @@
 """Fake AssetStudio integration server for client tests (stdlib only).
 
 Usage: fake_server.py [port] [--token T] [--contracts-dir DIR]   (port 0 or omitted: pick one; prints "PORT <n>")
-Control: POST /__scenario {"name": ...}; GET /__log (request log); POST /__log/clear.
+Control: POST /__scenario {"name": ...}; GET /__log (request log); POST /__log/clear;
+POST /__current {"version_id": ...} sets the asset's current version (default v2);
+POST /__events {"events": [...]} queues change events for the next GET /changes.
 Scenarios: normal, corrupt_content, ignore_range, wrong_server_id, forbidden, slow, drop_midway.
 """
 from __future__ import annotations
@@ -35,6 +37,8 @@ class State:
     def __init__(self, contracts: Path, token: str) -> None:
         self.token = token
         self.scenario = "normal"
+        self.current = "ver_00000000000000v2"
+        self.events: list[dict] = []
         self.log: list[dict] = []
         self.lock = threading.Lock()
         fx = contracts / "fixtures"
@@ -124,6 +128,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400, "invalid_request", "unknown scenario")
             self.state.scenario = name
             return self._send(200, b'{"ok":true}')
+        if path == "/__current" and self.command == "POST":
+            self.state.current = json.loads(body or b"{}").get("version_id", self.state.current)
+            return self._send(200, b'{"ok":true}')
+        if path == "/__events" and self.command == "POST":
+            self.state.events.extend(json.loads(body or b"{}").get("events", []))
+            return self._send(200, b'{"ok":true}')
         if path == "/__log":
             return self._send(200, json.dumps(self.state.log).encode())
         if path == "/__log/clear":
@@ -147,7 +157,8 @@ class Handler(BaseHTTPRequestHandler):
             libs = {"libraries": [{"library_id": LIBRARY, "name": "Fake", "state": "available"}]}
             return self._send(200, json.dumps(libs).encode())
         if route == "/changes":
-            return self._send(200, json.dumps({"cursor": "Y3Vyc29y", "events": [], "reset_required": False}).encode())
+            events, s.events = s.events, []
+            return self._send(200, json.dumps({"cursor": "Y3Vyc29y", "events": events, "reset_required": False}).encode())
         if len(parts) >= 3 and parts[0] == "libraries" and parts[1] == LIBRARY:
             return self._library_route(parts[2:], body)
         return self._err(403, "forbidden", "token does not grant this access")
@@ -156,6 +167,18 @@ class Handler(BaseHTTPRequestHandler):
         s = self.state
         if parts == ["resolve"] and self.command == "POST":
             return self._resolve(json.loads(body))
+        if parts == ["assets"]:
+            item = {"asset_id": ASSET_ID, "display_name": "Fixture Crate", "category_id": "props", "tags": ["crate"],
+                    "current_version_id": s.current, "display_version": s.current[-2:], "metadata_revision": 1,
+                    "has_thumbnail": False}
+            return self._send(200, json.dumps({"items": [item], "next_cursor": None}).encode())
+        if parts == ["assets", ASSET_ID]:
+            versions = [{"version_id": v, "display_version": v[-2:], "published_at": "2026-01-01T00:00:00Z"}
+                        for v in s.versions]
+            detail = {"library_id": LIBRARY, "asset_id": ASSET_ID, "display_name": "Fixture Crate",
+                      "category_id": "props", "tags": ["crate"], "metadata_revision": 1,
+                      "current_version_id": s.current, "versions": versions}
+            return self._send(200, json.dumps(detail).encode())
         if len(parts) == 3 and parts[0] == "deliveries" and parts[2] == "manifest":
             raw = s.manifests.get(parts[1])
             if raw is None:

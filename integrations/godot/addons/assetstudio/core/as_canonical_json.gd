@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Canonical JSON writer, byte-identical to Python json.dumps(sort_keys=True, separators=(",", ":"),
 # ensure_ascii=False). Deliberately not JSON.stringify: key order, escapes and number formatting must not depend

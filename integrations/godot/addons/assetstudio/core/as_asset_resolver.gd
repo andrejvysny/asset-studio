@@ -1,3 +1,4 @@
+@tool
 extends Node
 # Exact-reference resolver: AssetRef -> verified descriptor + manifest + local blob paths.
 # Never substitutes another or the "latest" version: when the exact bytes cannot be obtained or found in the

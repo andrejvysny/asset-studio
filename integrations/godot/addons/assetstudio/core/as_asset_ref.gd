@@ -1,3 +1,4 @@
+@tool
 extends RefCounted
 # Exact asset reference (asset-ref.schema.json). Never a "latest" pointer.
 
