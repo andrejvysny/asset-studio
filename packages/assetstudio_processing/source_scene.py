@@ -30,6 +30,7 @@ from .source_report import ProblemSink, SourcePackageError
 from .source_structure import NodeDef, SceneStructure, build_structure, find_cycles, scene_defs
 
 SCRIPT_TYPES = frozenset({"Script", "GDScript", "CSharpScript", "GDExtension"})
+EXT_SAVE_CLASSES = frozenset({"Material"})
 SECTION_KINDS = frozenset({"ext_resource", "sub_resource", "node", "resource", "editable"})
 SHADER_SUFFIXES = (".gdshader", ".gdshaderinc")
 CONSTRUCTORS = frozenset({
@@ -236,7 +237,9 @@ class _TextRules:
     def _types(self) -> None:
         allowed = self.ck.allowed_resources
         for sec in self.doc.ext_resources() + self.doc.sub_resources():
-            self._type_in(sec.attrs.get("type"), allowed, f"{sec.kind} type", sec.line)
+            # Godot saves an external material's class as its base "Material"; the .tres header is checked on its own.
+            ok = allowed | EXT_SAVE_CLASSES if sec.kind == "ext_resource" else allowed
+            self._type_in(sec.attrs.get("type"), ok, f"{sec.kind} type", sec.line)
         if self.doc.kind == "gd_resource":
             self._type_in(self.doc.header.get("type"), allowed, "gd_resource type", 1)
         for sec in self.doc.nodes():

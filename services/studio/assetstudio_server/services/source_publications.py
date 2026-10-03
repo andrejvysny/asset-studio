@@ -5,7 +5,10 @@ Replay safety: every identity derives from the idempotency key (`op_id`), the pu
 durable commit point, and the staging directory is only removed after the journal records the response. The key is
 bound to the whole semantic request plus the publisher's immutable credential id (`_binding`): an intent record is
 created before any effect and the digest is stored with the publication, so crash recovery and replays by a different
-request or credential conflict. Commits of one op are serialized; previews are owned by the credential id.
+request or credential conflict. `preview_id` is only a transport handle for content already bound by its sha256s, so
+it is not part of the binding: a retry that re-uploaded a fresh preview of the same content converges on the first
+attempt's outcome (the intent pins the first preview_id for provenance). Commits of one op are serialized; previews
+are owned by the credential id.
 """
 from __future__ import annotations
 
@@ -221,10 +224,23 @@ def _publish_receipt(ctx: ProjectContext, op_id: str) -> dict[str, Any] | None:
         return None
 
 
-def _binding(req: CommitPublication, who: Principal) -> str:
-    """Digest of the whole semantic request (not the retry-only fields) and the publisher's credential."""
-    body = {k: v for k, v in cmd_payload(req).items() if k not in ("idempotency_key", "job_id")}
+_RETRY_ONLY = ("idempotency_key", "job_id", "preview_id")
+
+
+def _binding(req: CommitPublication, who: Principal, legacy: bool = False) -> str:
+    """Digest of the whole semantic request (not the retry-only fields) and the publisher's credential.
+    `legacy` is the pre-relaxation digest that also covered preview_id (records written before)."""
+    skip = _RETRY_ONLY[:2] if legacy else _RETRY_ONLY
+    body = {k: v for k, v in cmd_payload(req).items() if k not in skip}
     return hashlib.sha256(canonical_bytes({**body, "credential_id": who.credential_id})).hexdigest()
+
+
+def _is_bound(stored: str, req: CommitPublication, who: Principal) -> bool:
+    return stored in (_binding(req, who), _binding(req, who, legacy=True))
+
+
+def _journal_payload(req: CommitPublication) -> dict[str, Any]:
+    return {k: v for k, v in cmd_payload(req).items() if k != "preview_id"}
 
 
 @contextmanager
@@ -246,15 +262,19 @@ def _intent_key(op_id: str) -> str:
     return f"integration_ops/{op_id}.json"
 
 
-def _record_intent(ctx: ProjectContext, who: Principal, req: CommitPublication, op_id: str, digest: str) -> None:
-    """Create-if-absent before any effect: a crashed attempt keeps the key bound to its request and credential."""
+def _record_intent(ctx: ProjectContext, who: Principal, req: CommitPublication, op_id: str, digest: str) -> str:
+    """Create-if-absent before any effect: a crashed attempt keeps the key bound to its request and credential.
+    Returns the preview_id of the first attempt, which stays the op's provenance across retries."""
     record = {"op_id": op_id, "request_sha256": digest, "credential_id": who.credential_id,
               "preview_id": req.preview_id}
     try:
         ctx.store.create(_intent_key(op_id), record)
     except Conflict:
-        if _intent_digest(ctx, op_id) != digest:
+        stored = json.loads(ctx.store.repo.read_object(_intent_key(op_id)).data)
+        if not _is_bound(stored.get("request_sha256", ""), req, who):
             raise _key_reused() from None
+        return str(stored.get("preview_id") or req.preview_id)
+    return req.preview_id
 
 
 def _intent_digest(ctx: ProjectContext, op_id: str) -> str | None:
@@ -292,11 +312,14 @@ def commit(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, 
 
 def _commit_locked(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, req: CommitPublication,
                    op_id: str, limits: dict[str, Any] | None) -> dict[str, Any]:
-    payload = cmd_payload(req)
+    payload = _journal_payload(req)
     try:
         prior = studio.journal.command_result(ctx.id, ACTION, req.idempotency_key, payload)
     except IdempotencyConflict:
-        raise _key_reused() from None
+        try:  # recorded before preview_id left the binding: same preview_id only
+            prior = studio.journal.command_result(ctx.id, ACTION, req.idempotency_key, cmd_payload(req))
+        except IdempotencyConflict:
+            raise _key_reused() from None
     if prior is not None:
         return _replay(studio, ctx, who, server_id, req, prior, limits)
     done = _publish_receipt(ctx, op_id)
@@ -326,7 +349,7 @@ def _check_same_request(ctx: ProjectContext, done: dict[str, Any], req: CommitPu
     if expected is None:
         expected = _intent_digest(ctx, _op_id(ctx, req.idempotency_key))
     if expected is not None:
-        same = expected == _binding(req, who)
+        same = _is_bound(expected, req, who)
     else:  # published before the binding existed
         same = mine.get("preview_id") == req.preview_id and mine.get("package_sha256") == req.package_sha256
     if not same:
@@ -389,6 +412,8 @@ def _free_name(ctx: ProjectContext, name: str, asset_id: str) -> str:
 
 def _publish_staged(studio: Studio, ctx: ProjectContext, who: Principal, server_id: str, req: CommitPublication,
                     op_id: str) -> dict[str, Any]:
+    if (bound := _intent_digest(ctx, op_id)) is not None and not _is_bound(bound, req, who):
+        raise _key_reused()  # a changed retry conflicts before its (different) preview is even examined
     try:
         receipt = _load_preview(studio, ctx, who, req)
     except FileNotFoundError:
@@ -403,10 +428,11 @@ def _publish_staged(studio: Studio, ctx: ProjectContext, who: Principal, server_
             if (done := _publish_receipt(ctx, op_id)) is not None:  # committed meanwhile: no stale-pointer check
                 _check_same_request(ctx, done, req, who)
                 return done
-            if (bound := _intent_digest(ctx, op_id)) is not None and bound != digest:
+            if (bound := _intent_digest(ctx, op_id)) is not None and not _is_bound(bound, req, who):
                 raise _key_reused()  # before _target: a changed retry is a conflict, never a stale pointer
             asset_id = _target(ctx, req, op_id)
-            _record_intent(ctx, who, req, op_id, digest)
+            first = _record_intent(ctx, who, req, op_id, digest)
+            req = req.model_copy(update={"preview_id": first})  # parts were read from this attempt's preview
             version_id = derived_id("ver", asset_id, op_id)
             raw = _descriptor(ctx, who, server_id, req, receipt, asset_id, version_id)
             roles = _register(ctx, who, req, parts, op_id, raw, png, receipt)

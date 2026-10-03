@@ -12,9 +12,10 @@ from integration_fixture_sources import LIB_A, LIB_B, MEDIA, SERVER, Member
 
 Json = dict[str, Any]
 Descs = dict[str, tuple[AssetDescriptorV1, bytes]]
-PROP, PROP2, PROP_B, TREE, ROCK, HUT, CRYSTAL, CLUSTER = (
+PROP, PROP2, PROP_B, TREE, ROCK, HUT, CRYSTAL, CLUSTER, ARRAY_MESH = (
     ("prop", "aa", "v1"), ("prop2", "aa", "v2"), ("propb", "aa", "v1"), ("tree", "ab", "v1"), ("rock", "ac", "v1"),
-    ("hut", "ad", "v1"), ("crystal", "ae", "v1"), ("cluster", "af", "v1"))
+    ("hut", "ad", "v1"), ("crystal", "ae", "v1"), ("cluster", "af", "v1"),
+    ("arraymesh", "ag", "v1"))
 EXACT: Json = {"portable_status": "exact", "omissions": [], "approximations": []}
 CRYSTAL_REPORT: Json = {
     "portable_status": "approximated", "omissions": [],
@@ -90,6 +91,7 @@ def valid_packages(d: Descs) -> dict[str, tuple[bytes, SourcePackageManifestV1]]
         "custom_shader_crystal": (src.crystal_files(), "scenes/crystal.tscn", [*BASE, "shader_source"],
                                   CRYSTAL_REPORT, *plain),
         "primitive_prop_v2": (src.prop_v2_files(), "scenes/prop.tscn", BASE, EXACT, *plain),
+        "array_mesh_prop": (src.array_mesh_files(), "scenes/array_mesh.tscn", BASE, EXACT, *plain),
         "prop_cluster": (src.cluster_files(), "scenes/cluster.tscn", BASE, EXACT, cluster_deps,
                          {"res://deps/primitive_prop.glb": (prop_key, "portable.glb")}),
     }
@@ -172,6 +174,8 @@ def _content_cases(desc: AssetDescriptorV1, prop: dict[str, bytes]) -> list[Case
          "unsafe_package", "shader_include_escape", "#include leaves the package"),
         ("binary_scn", make({"scenes/binary.scn": b"RSRC\x00\x00\x00\x00"}), "unsafe_package", "binary_resource",
          "binary .scn is not Godot text format"),
+        ("unsupported_text_format", make({"scenes/prop.tscn": scene.replace("format=3", "format=5").encode()}),
+         "unsafe_package", "unsupported_format", "scene header declares text format 5 (only 3 and 4 are accepted)"),
         ("project_godot", make({"project.godot": b"config_version=5\n"}), "unsafe_package", "forbidden_file",
          "a project.godot member"),
     ]

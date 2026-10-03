@@ -8,6 +8,8 @@ extends EditorPlugin
 const Actions = preload("res://addons/assetstudio/editor/as_dock_actions.gd")
 const Place = preload("res://addons/assetstudio/editor/as_place.gd")
 const Dock = preload("res://addons/assetstudio/editor/as_dock.gd")
+const PublishActions = preload("res://addons/assetstudio/editor/as_publish_actions.gd")
+const PublishDialog = preload("res://addons/assetstudio/editor/as_publish_dialog.gd")
 
 const LIBRARY: String = "prj_0000000000000001"
 const ASSET: String = "ast_00000000000000aa"
@@ -43,6 +45,7 @@ func _run() -> void:
 	await _dock_lists_items()
 	if scene_root != null:
 		await _scenario(scene_root)
+		await _publish_steps()
 	print("SELFTEST_%s" % ("OK" if _failed == 0 else "FAILED"))
 	get_tree().quit(1 if _failed != 0 else 0)
 
@@ -117,3 +120,74 @@ func _first_binding() -> String:
 		if _actions.infos[b]["version_id"] == V1:
 			return b
 	return ""
+
+
+const PUB_SCENE: String = """[gd_scene load_steps=3 format=3]
+
+[sub_resource type="BoxMesh" id="BoxMesh_1"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_1"]
+albedo_color = Color(0.2, 0.6, 0.3, 1)
+
+[node name="PubProp" type="Node3D"]
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_1")
+surface_material_override/0 = SubResource("Mat_1")
+
+[node name="Group" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)
+
+[node name="Inner" type="MeshInstance3D" parent="Group"]
+mesh = SubResource("BoxMesh_1")
+"""
+
+
+func _fingerprint(n: Node) -> String:
+	var parts: PackedStringArray = [str(n.get_path()), n.get_class(), str((n as Node3D).transform) if n is Node3D else ""]
+	for c: Node in n.get_children():
+		parts.append(_fingerprint(c))
+	return "|".join(parts)
+
+
+## AS-09: publish from the edited (saved) scene through the dock action code; the open scene must not change.
+func _publish_steps() -> void:
+	var path: String = "res://pub_scene.tscn"
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(PUB_SCENE)
+	f.close()
+	EditorInterface.open_scene_from_path(path)
+	await get_tree().create_timer(1.0).timeout
+	var edited: Node = EditorInterface.get_edited_scene_root()
+	_step("publish scene is open", edited != null and edited.scene_file_path == path)
+	if edited == null:
+		return
+	var before: String = _fingerprint(edited)
+	var pub: Node = PublishActions.new()
+	add_child(pub)
+	pub.setup()
+	pub.start(LIBRARY, {})
+	_step("the publish form opens for a saved scene", pub.dialog.visible and pub.dialog.stage == "form")
+	var r: RefCounted = await pub.preview({"name": "Selftest Prop", "tags": "", "licence": "", "category": "", "selection": false, "new_version": false})
+	_step("build + preview from the edited scene", r.ok and pub.dialog.stage == "review", r.describe())
+	if r.ok:
+		_step("review shows validation and requires an explicit commit", PublishDialog.review_text(pub._prep["review"]).contains("Nothing is published until"))
+		r = await pub.commit()
+		_step("explicit commit publishes", r.ok and r.value["outcome"]["asset_id"] != null, r.describe())
+	_step("the open scene is unchanged and not marked unsaved", _fingerprint(edited) == before
+			and not EditorInterface.get_unsaved_scenes().has(path))
+	await _publish_selection(pub, edited, before)
+	pub.queue_free()
+
+
+func _publish_selection(pub: Node, edited: Node, before: String) -> void:
+	EditorInterface.get_selection().clear()
+	EditorInterface.get_selection().add_node(edited.get_node("Group"))
+	pub.start(LIBRARY, {})
+	var r: RefCounted = await pub.preview({"name": "Selftest Group", "tags": "", "licence": "", "category": "", "selection": true, "new_version": false})
+	_step("a selected subtree is published from a temporary scene", r.ok and str(pub._opts["scene"]).contains("selection_group"), r.describe())
+	if r.ok:
+		r = await pub.commit()
+		_step("selection commit", r.ok, r.describe())
+	_step("the open scene is still unchanged after a selection publish", _fingerprint(edited) == before
+			and not FileAccess.file_exists(ProjectSettings.globalize_path("res://.assetstudio/publish/selection_group.tscn")))

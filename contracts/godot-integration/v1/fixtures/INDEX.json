@@ -86,6 +86,13 @@
       "description": "no positive extent on any axis"
     },
     {
+      "path": "descriptors/valid/array_mesh_prop.json",
+      "sha256": "041bec969ae7646d0777c77f7431f44d02248fc63182b9b1c8b0587754d1266b",
+      "kind": "descriptor",
+      "expected": "schema_valid",
+      "description": "valid descriptor: array_mesh_prop"
+    },
+    {
       "path": "descriptors/valid/csg_hut.json",
       "sha256": "682d538f5d39b4eb7081acb22d0f0f7b7b83468b0a08c4537b1f9d8b7ff1e2af",
       "kind": "descriptor",
@@ -418,12 +425,27 @@
       "detail": "undeclared_member"
     },
     {
+      "path": "source_packages/hostile/unsupported_text_format.zip",
+      "sha256": "2e27c6e6e486d07f4b6b193c27c34605bfd7fe357986f357d91014586ecabe2d",
+      "kind": "source_package",
+      "expected": "unsafe_package",
+      "description": "scene header declares text format 5 (only 3 and 4 are accepted)",
+      "detail": "unsupported_format"
+    },
+    {
       "path": "source_packages/hostile/zip_bomb.zip",
       "sha256": "fa9ca3d6d2554751fca6fa4c71ce239fdb399c17c255ae9adc4cd5cf68e2ce53",
       "kind": "source_package",
       "expected": "resource_limit",
       "description": "64 MiB of zeros in a tiny deflate stream (ratio > 200)",
       "detail": "compression_ratio"
+    },
+    {
+      "path": "source_packages/valid/array_mesh_prop.zip",
+      "sha256": "98ad47105cf34db3fb6b82fa4eba3e96eea70ab06739e70be12ef10d0277d2f7",
+      "kind": "source_package",
+      "expected": "valid",
+      "description": "valid GodotStaticSourcePackageV1: array_mesh_prop"
     },
     {
       "path": "source_packages/valid/csg_hut.zip",

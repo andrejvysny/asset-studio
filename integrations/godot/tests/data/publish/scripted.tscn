@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://tests/data/publish/s.gd" id="1_s"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_1"]
+
+[node name="Scripted" type="Node3D"]
+script = ExtResource("1_s")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_1")

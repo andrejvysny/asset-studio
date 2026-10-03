@@ -1,4 +1,4 @@
-"""Bounded static parser for Godot 4 text resources (.tscn/.tres, format=3).
+"""Bounded static parser for Godot 4 text resources (.tscn/.tres, format=3 or 4).
 
 Pure data: values become plain Python structures, nothing is evaluated, instantiated or resolved.
 Grammar subset: contracts/godot-integration/v1/static-source-package.md §3.
@@ -167,8 +167,9 @@ class _Parser:
         root = sections[0]
         if root.props:
             raise GodotTextError("unsafe_package", "parse_error", "properties after the file header", root.line)
-        if root.attrs.get("format") != Num("3"):
-            raise GodotTextError("unsafe_package", "unsupported_format", "only text format 3 is supported", root.line)
+        if root.attrs.get("format") not in (Num("3"), Num("4")):
+            raise GodotTextError("unsafe_package", "unsupported_format", "only text format 3 or 4 is supported",
+                                 root.line)
         return GodotTextDoc(root.kind, root.attrs, sections[1:])
 
     def section(self) -> Section:

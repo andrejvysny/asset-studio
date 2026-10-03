@@ -5,8 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
-from assetstudio_core.domain import AssetManifest
-from assetstudio_storage.project import manifest_key
+from assetstudio_core.domain import AssetManifest, AssetVersion
+from assetstudio_storage.project import manifest_key, version_key
 
 from tests.integration_publication_support import PubEnv, commit_body, make_env, source_parts
 from tests.integration_support import client, make_token
@@ -79,3 +79,51 @@ def test_recreated_token_name_cannot_commit_old_preview(env: PubEnv) -> None:
     fresh = client(env.app, make_token(env.app, "godot", ["assets:read", "assets:publish"], [env.lib]))
     r = _post(env, receipt, fresh)
     assert r.status_code == 403 and r.json()["error"]["code"] == "forbidden", r.text
+
+
+def _crash_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    from assetstudio_server.services import source_publications as sp
+
+    def boom(*a: Any, **k: Any) -> None:
+        raise RuntimeError("injected crash")
+    monkeypatch.setattr(sp, "publish", boom)
+
+
+def test_retry_with_fresh_preview_converges_after_crash_between_intent_and_receipt(
+        env: PubEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    parts = source_parts("primitive_prop")
+    first = env.preview(parts)
+    _crash_publish(monkeypatch)
+    assert _post(env, first).status_code == 503
+    monkeypatch.undo()
+    second = env.preview(parts)  # client lost the preview and re-uploaded identical content
+    assert second["preview_id"] != first["preview_id"]
+    done = env.commit(second, KEY)
+    aid, vid = done["asset_ref"]["asset_id"], done["asset_ref"]["version_id"]
+    ctx = env.ctx()
+    assert len(ctx.store.get(manifest_key(aid), AssetManifest)[0].versions) == 1
+    version = ctx.store.get(version_key(aid, vid), AssetVersion)[0]
+    assert version.sources["integration"]["preview_id"] == first["preview_id"]  # first attempt stays the provenance
+    assert env.commit(first, KEY) == done and env.commit(second, KEY) == done
+
+
+def test_fresh_preview_after_success_replays_but_changed_content_conflicts(env: PubEnv) -> None:
+    parts = source_parts("primitive_prop")
+    first = env.preview(parts)
+    done = env.commit(first, KEY)
+    second = env.preview(parts)
+    assert env.commit(second, KEY) == done
+    for change in CHANGES:
+        _conflict(_post(env, second, **change))
+
+
+def test_changed_request_with_fresh_preview_conflicts_after_crash(env: PubEnv, monkeypatch: pytest.MonkeyPatch) -> None:
+    parts = source_parts("primitive_prop")
+    first = env.preview(parts)
+    _crash_publish(monkeypatch)
+    assert _post(env, first).status_code == 503
+    monkeypatch.undo()
+    second = env.preview(parts)
+    for change in CHANGES:
+        _conflict(_post(env, second, **change))
+    env.commit(second, KEY)

@@ -8,8 +8,10 @@ extends RefCounted
 const Result = preload("res://addons/assetstudio/core/as_errors.gd")
 const CJson = preload("res://addons/assetstudio/core/as_canonical_json.gd")
 const Fs = preload("res://addons/assetstudio/project/as_fs.gd")
+const SourceInstall = preload("res://addons/assetstudio/project/as_srcpkg_install.gd")
 
 const INSTALLER_VERSION: String = "1.0.0"
+const SOURCE_REPRESENTATION: String = "godot_static_source_v1"
 const RECEIPT_NAME: String = "receipt.json"
 const IMPORT_PARAMS: PackedStringArray = [
 	"array_mesh/deduplicate_surfaces=false",  # glTF primitive p stays surface p
@@ -25,32 +27,57 @@ static func target_rel(managed_rel: String, asset_key: String, manifest_sha256: 
 
 
 ## `prep` is the value of ASAssetResolver.prepare(). On success value = {"status": "installed" | "present",
-## "target_rel": String}; "installed" means a directory rename was queued on `coord` (nothing is on disk yet).
-static func install(coord: RefCounted, managed_rel: String, ref: RefCounted, prep: Dictionary) -> RefCounted:
+## "target_rel": String, "entry_rel": String (entry file inside the delivery dir)}; "installed" means a directory
+## rename was queued on `coord` (nothing is on disk yet). `opts` (source deliveries only): {"trust_shaders": bool,
+## "closure_keys": [asset_key] the lock closure the package's asset dependencies must be part of}.
+static func install(coord: RefCounted, managed_rel: String, ref: RefCounted, prep: Dictionary,
+		opts: Dictionary = {}) -> RefCounted:
 	var key: String = ref.call("key")
 	var manifest: RefCounted = prep["manifest"]
 	var msha: String = manifest.get("raw_sha256")
 	var rel: String = target_rel(managed_rel, key, msha)
+	var rep: String = manifest.data["representation"]
 	var expect: Dictionary = {"asset_key": key, "manifest_sha256": msha, "delivery_id": prep["delivery_id"],
-			"representation": manifest.data["representation"]}
+			"representation": rep}
 	if Fs.exists(coord.call("abs_path", rel)):
 		var problems: PackedStringArray = check_install(coord.call("abs_path", rel), expect)
 		if not problems.is_empty():
 			return Result.fail("integrity_mismatch", "installed delivery is modified: %s" % problems[0],
 					false, {"target": rel, "problems": Array(problems)})
-		return Result.success({"status": "present", "target_rel": rel})
+		return Result.success({"status": "present", "target_rel": rel, "entry_rel": entry_rel(coord.call("abs_path", rel), manifest)})
 	var staged_rel: String = (coord.call("new_staging_dir", managed_rel) as String).path_join("%s-%s" % [key, msha])
 	var staged: String = coord.call("abs_path", staged_rel)
-	var files: RefCounted = _copy_files(staged, manifest.data["files"], prep["files"])
+	var files: RefCounted
+	var extra: Dictionary = {}
+	if rep == SOURCE_REPRESENTATION:
+		var o: Dictionary = opts.duplicate()
+		o["managed_rel"] = managed_rel
+		o["target_rel"] = rel
+		files = SourceInstall.stage(staged, prep, o)
+		if files.ok:
+			extra = {"source": files.value["source"]}
+			files = Result.success(files.value["files"])
+	else:
+		files = _copy_files(staged, manifest.data["files"], prep["files"])
 	if not files.ok:
 		return files
-	var receipt: RefCounted = _receipt_bytes(ref, prep, files.value)
+	var receipt: RefCounted = _receipt_bytes(ref, prep, files.value, extra)
 	if not receipt.ok:
 		return receipt
 	if Fs.write_atomic(staged.path_join(RECEIPT_NAME), receipt.value) != OK:
 		return Result.fail(Result.CODE_IO_ERROR, "cannot write receipt")
 	coord.call("add_dir", staged_rel, rel, Fs.sha256_bytes(receipt.value))
-	return Result.success({"status": "installed", "target_rel": rel})
+	return Result.success({"status": "installed", "target_rel": rel, "entry_rel": entry_rel(staged, manifest)})
+
+
+## Entry file of a delivery relative to its directory: the entrypoint, or the derived entry scene of a source delivery.
+static func entry_rel(dir_abs: String, manifest: RefCounted) -> String:
+	if manifest.data["representation"] != SOURCE_REPRESENTATION:
+		return manifest.data["entrypoint"]
+	var parsed: RefCounted = CJson.parse_canonical(Fs.read_bytes(dir_abs.path_join(RECEIPT_NAME)))
+	if parsed.ok and parsed.value is Dictionary:
+		return SourceInstall.entry_rel(parsed.value)
+	return ""
 
 
 ## Copies each manifest file out of its blob and verifies size and sha256 of the copy.
@@ -74,12 +101,14 @@ static func _copy_files(staged: String, entries: Array, blobs: Dictionary) -> Re
 	return Result.success(out)
 
 
-static func _receipt_bytes(ref: RefCounted, prep: Dictionary, files: Array) -> RefCounted:
-	return CJson.encode({"schema_version": 1, "asset_key": ref.call("key"), "asset_ref": ref.call("to_dict"),
+static func _receipt_bytes(ref: RefCounted, prep: Dictionary, files: Array, extra: Dictionary = {}) -> RefCounted:
+	var doc: Dictionary = {"schema_version": 1, "asset_key": ref.call("key"), "asset_ref": ref.call("to_dict"),
 			"delivery_id": prep["delivery_id"], "representation": prep["manifest"].data["representation"],
 			"manifest_sha256": prep["manifest"].get("raw_sha256"),
 			"descriptor_sha256": prep["descriptor"].get("raw_sha256"), "files": files,
-			"installer_version": INSTALLER_VERSION})
+			"installer_version": INSTALLER_VERSION}
+	doc.merge(extra)
+	return CJson.encode(doc)
 
 
 static func _matches(path: String, sha: String, size: int) -> bool:
@@ -112,6 +141,8 @@ static func check_install(dir_abs: String, expect: Dictionary) -> PackedStringAr
 			continue
 		if not _matches(dir_abs.path_join(str(f["path"])), str(f.get("sha256")), int(f.get("size", -1))):
 			problems.append("%s is missing or modified" % f["path"])
+	if rc.get("representation") == SOURCE_REPRESENTATION:
+		problems.append_array(SourceInstall.check_files(dir_abs, rc))
 	return problems
 
 

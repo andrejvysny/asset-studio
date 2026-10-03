@@ -25,6 +25,9 @@ const STATE_CANCELLED: String = "cancelled"
 ## When true the network is never touched.
 var offline_only: bool = false
 
+## Capabilities this client can satisfy; a manifest requiring anything else fails with unsupported_contract.
+var supported_capabilities: PackedStringArray = Schema.SUPPORTED_CAPABILITIES
+
 var _client: Node = null
 var _cache: RefCounted = null
 
@@ -37,7 +40,9 @@ func setup(client: Node, cache: RefCounted) -> void:
 ## value = {"descriptor": ASAssetDescriptor, "manifest": ASDeliveryManifest, "files": {path: blob path},
 ## "delivery_id": String, "source": "network" | "cache"}.
 ## `pin_delivery_id` (restore): only that exact delivery is acceptable; a server that does not offer it, or a cache
-## holding another one, is an error and never a silent substitution.
+## holding another one, is an error and never a silent substitution. A pinned prepare is served from the verified
+## cache without any network request when the whole delivery is cached; every blob is re-hashed first and a blob that
+## fails is evicted. Unpinned prepares stay network-first (cache only as a fallback on network errors).
 func prepare(ref: RefCounted, representation: String = "portable_glb_v1", cancel_token: RefCounted = null,
 		pin_delivery_id: String = "") -> RefCounted:
 	var key: String = ref.call("key")
@@ -46,6 +51,10 @@ func prepare(ref: RefCounted, representation: String = "portable_glb_v1", cancel
 	state_changed.emit(key, STATE_REMOTE, 0.0)
 	if offline_only:
 		return _finish(key, _from_cache(ref, representation, true, pin_delivery_id))
+	if pin_delivery_id != "":
+		var hit: RefCounted = _from_cache(ref, representation, false, pin_delivery_id, true)
+		if hit.ok:
+			return _finish(key, hit)
 	var r: RefCounted = await _from_network(ref, representation, cancel_token, pin_delivery_id)
 	if not r.ok and r.code in [Result.CODE_NETWORK_ERROR, Result.CODE_TIMEOUT, "temporarily_unavailable"]:
 		var cached: RefCounted = _from_cache(ref, representation, false, pin_delivery_id)
@@ -69,7 +78,7 @@ func _from_network(ref: RefCounted, representation: String, token: RefCounted, p
 	var res: RefCounted = await _client.resolve(ref.get("library_id"), [ref], {"representations": [representation]})
 	if not res.ok:
 		return res
-	var entry: RefCounted = _pick_entry(res.value["entries"], ref)
+	var entry: RefCounted = _pick_entry(res.value["entries"], ref, representation)
 	if not entry.ok:
 		return entry
 	var e: Dictionary = entry.value
@@ -92,7 +101,7 @@ func _from_network(ref: RefCounted, representation: String, token: RefCounted, p
 			"delivery_id": man.value.data["delivery_id"], "source": "network"})
 
 
-func _pick_entry(entries: Array, ref: RefCounted) -> RefCounted:
+func _pick_entry(entries: Array, ref: RefCounted, representation: String) -> RefCounted:
 	if entries.size() != 1 or not entries[0] is Dictionary:
 		return Result.fail(Result.CODE_INVALID_RESPONSE, "resolve must return exactly one entry")
 	var e: Dictionary = entries[0]
@@ -100,11 +109,32 @@ func _pick_entry(entries: Array, ref: RefCounted) -> RefCounted:
 	if not echoed.ok or not echoed.value.equals(ref) or e.get("asset_key") != ref.key():
 		return Result.fail(Result.CODE_INVALID_RESPONSE, "resolve entry does not echo the requested reference")
 	if e.get("state") == "ready":
+		return _check_representation_state(e, representation)
+	return _error_from(e.get("error"), "resolve entry in state %s" % str(e.get("state")))
+
+
+## Older servers omit `representations`; then the entry state alone decides.
+func _check_representation_state(e: Dictionary, representation: String) -> RefCounted:
+	if not e.has("representations"):
 		return Result.success(e)
-	var err: Variant = e.get("error")
+	var reps: Variant = e["representations"]
+	if not reps is Dictionary:
+		return Result.fail(Result.CODE_INVALID_RESPONSE, "resolve representations must be an object")
+	var st: Variant = (reps as Dictionary).get(representation)
+	if not st is Dictionary:
+		return Result.fail("unsupported_representation", "server reports no state for %s" % representation)
+	if (st as Dictionary).get("state") == "ready":
+		return Result.success(e)
+	var err: Variant = (st as Dictionary).get("error")
+	if err == null:
+		return Result.fail("unsupported_representation", "%s is %s" % [representation, str((st as Dictionary).get("state"))])
+	return _error_from(err, "representation %s in state %s" % [representation, str((st as Dictionary).get("state"))])
+
+
+func _error_from(err: Variant, fallback: String) -> RefCounted:
 	var code: String = str((err as Dictionary).get("code", "")) if err is Dictionary else ""
 	if not Result.is_known_server_code(code):
-		return Result.fail(Result.CODE_INVALID_RESPONSE, "resolve entry in state %s" % str(e.get("state")))
+		return Result.fail(Result.CODE_INVALID_RESPONSE, fallback)
 	return Result.fail(code, str((err as Dictionary).get("message", "")).left(1024), code in Result.RETRYABLE_CODES)
 
 
@@ -154,8 +184,19 @@ func _fetch_manifest(ref: RefCounted, representation: String, delivery: Dictiona
 	if not parsed.value.asset_ref.equals(ref) or d["delivery_id"] != delivery.get("delivery_id") \
 			or d["representation"] != representation or d["descriptor_sha256"] != desc.raw_sha256:
 		return Result.fail("integrity_mismatch", "manifest does not match the requested exact reference")
+	var caps: RefCounted = _check_capabilities(ref, parsed.value)
+	if not caps.ok:
+		return caps
 	var stored: RefCounted = _cache.store_document("manifests", sha, raw)
 	return parsed if stored.ok else stored
+
+
+## Every manifest the resolver accepts (root and each dependency of the closure) passes through here.
+func _check_capabilities(ref: RefCounted, man: RefCounted) -> RefCounted:
+	for c: String in man.data["required_capabilities"]:
+		if not supported_capabilities.has(c):
+			return Result.fail("unsupported_contract", "capability %s required by asset %s is not supported by this client" % [c, ref.key()])
+	return Result.success()
 
 
 func _fetch_files(ref: RefCounted, manifest: RefCounted, token: RefCounted) -> RefCounted:
@@ -171,13 +212,23 @@ func _fetch_files(ref: RefCounted, manifest: RefCounted, token: RefCounted) -> R
 			return Result.fail(Result.CODE_CANCELLED, "preparation cancelled")
 		state_changed.emit(key, STATE_DOWNLOADING, done / maxf(total, 1.0))
 		var sha: String = f["sha256"]
-		if not _cache.has_blob_sized(sha, int(f["size"])):
+		if not _verified_hit(sha, int(f["size"])):
 			var r: RefCounted = await _download_file(ref, f, token)
 			if not r.ok:
 				return r
 		paths[f["path"]] = _cache.blob_path(sha)
 		done += float(f["size"])
 	return Result.success(paths)
+
+
+## A cached blob is reused only if it still hashes to `sha`; a same-size corrupt one is evicted (then re-downloaded).
+func _verified_hit(sha: String, size: int) -> bool:
+	if not _cache.has_blob_sized(sha, size):
+		return false
+	if _cache.verify_blob(sha):
+		return true
+	DirAccess.remove_absolute(_cache.blob_path(sha))
+	return false
 
 
 func _download_file(ref: RefCounted, f: Dictionary, token: RefCounted) -> RefCounted:
@@ -200,7 +251,9 @@ func _remember(ref: RefCounted, representation: String, desc: RefCounted, man: R
 
 # --- cache path --------------------------------------------------------------------------------------------
 
-func _from_cache(ref: RefCounted, representation: String, explicit_offline: bool, pin: String = "") -> RefCounted:
+## `rehash`: re-hash every blob (pinned cache-first); a corrupt blob is evicted so the network path re-downloads it.
+func _from_cache(ref: RefCounted, representation: String, explicit_offline: bool, pin: String = "",
+		rehash: bool = false) -> RefCounted:
 	var miss: RefCounted = Result.fail("temporarily_unavailable",
 			"offline and exact version is not fully cached" if explicit_offline else "server unreachable and exact version is not fully cached",
 			true)
@@ -211,9 +264,15 @@ func _from_cache(ref: RefCounted, representation: String, explicit_offline: bool
 	var man: RefCounted = Manifest.parse_bytes(_cache.load_document("manifests", str(entry.get("manifest_sha256"))))
 	if not desc.ok or not man.ok or not desc.value.asset_ref.equals(ref) or not man.value.asset_ref.equals(ref):
 		return miss
+	var caps: RefCounted = _check_capabilities(ref, man.value)
+	if not caps.ok:
+		return caps
 	var paths: Dictionary = {}
 	for f: Dictionary in man.value.data["files"]:
 		if not _cache.has_blob_sized(f["sha256"], int(f["size"])):
+			return miss
+		if rehash and not _cache.verify_blob(f["sha256"]):
+			DirAccess.remove_absolute(_cache.blob_path(f["sha256"]))
 			return miss
 		paths[f["path"]] = _cache.blob_path(f["sha256"])
 	return Result.success({"descriptor": desc.value, "manifest": man.value, "files": paths,

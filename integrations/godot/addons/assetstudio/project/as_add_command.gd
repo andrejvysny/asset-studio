@@ -18,6 +18,7 @@ const State = preload("res://addons/assetstudio/project/as_project_state.gd")
 const Fs = preload("res://addons/assetstudio/project/as_fs.gd")
 
 const REPRESENTATION: String = "portable_glb_v1"
+const SOURCE_REPRESENTATION: String = "godot_static_source_v1"
 
 
 ## CLI entry. `cmd` is the ASCommands instance (project root, registry, cache, helpers).
@@ -43,6 +44,9 @@ static func execute(cmd: RefCounted, o: Dictionary) -> RefCounted:
 		return Result.fail("invalid_request", ref_r.message, false, {"usage": true})
 	if o.has("binding") and not Schema.matches("slug", o["binding"]):
 		return Result.fail("invalid_request", "--binding must be a slug: 1-64 chars of a-z 0-9 _ . - starting with a letter or digit", false, {"usage": true})
+	var rep_err: String = _representation_error(o)
+	if rep_err != "":
+		return Result.fail("invalid_request", rep_err, false, {"usage": true})
 	var policy: RefCounted = _material_policy(cmd, o, config)
 	if not policy.ok:
 		return policy
@@ -52,6 +56,18 @@ static func execute(cmd: RefCounted, o: Dictionary) -> RefCounted:
 	var r: RefCounted = await _add(cmd, c, o, cfg.value, ref_r.value, policy.value)
 	c.close()
 	return r
+
+
+## "" when the requested representation (default portable_glb_v1) can be added with these options.
+static func _representation_error(o: Dictionary) -> String:
+	var rep: String = o.get("representation", REPRESENTATION)
+	if rep != REPRESENTATION and rep != SOURCE_REPRESENTATION:
+		return "--representation must be portable_glb_v1 or godot_static_source_v1"
+	if rep == SOURCE_REPRESENTATION and (o.has("profile") or o.has("override")):
+		return "material profiles apply to portable_glb_v1 bindings only"
+	if rep != SOURCE_REPRESENTATION and o.has("trust-shaders"):
+		return "--trust-shaders applies to godot_static_source_v1 only"
+	return ""
 
 
 static func _load_config(cmd: RefCounted) -> RefCounted:
@@ -94,12 +110,14 @@ static func _add(cmd: RefCounted, c: RefCounted, o: Dictionary, loaded: Dictiona
 		if lock.call("bindings")[existing]["asset_key"] == key:
 			return Result.fail("invalid_request", "this exact version is already bound as %s" % existing)
 	var resolver: Node = cmd.make_resolver(config.get("server_id"), false)
-	var nodes: RefCounted = await resolve_closure(resolver, ref)
+	var rep: String = o.get("representation", REPRESENTATION)
+	var nodes: RefCounted = await resolve_closure(resolver, ref, rep)
 	if not nodes.ok:
 		return nodes
 	var hint: String = await _name_hint(cmd.client, ref)
 	var bid: String = o["binding"] if o.has("binding") else lock.call("unique_binding_id", hint, key)
-	var applied: RefCounted = apply_binding(c, config, lock, nodes.value, bid, policy)
+	var applied: RefCounted = apply_binding(c, config, lock, nodes.value, bid, policy, rep,
+			{"trust_shaders": o.has("trust-shaders")})
 	if not applied.ok:
 		return applied
 	c.summary = {"kind": "add", "binding_id": bid, "to_key": key}
@@ -121,10 +139,10 @@ static func _name_hint(client: Node, ref: RefCounted) -> String:
 
 ## Prepares the root and, breadth first, every manifest dependency at its pinned delivery.
 ## value = [{"ref", "prep", "requires": [asset_key]}], root first.
-static func resolve_closure(resolver: Node, root_ref: RefCounted) -> RefCounted:
+static func resolve_closure(resolver: Node, root_ref: RefCounted, root_rep: String = REPRESENTATION) -> RefCounted:
 	var out: Array = []
 	var seen: Dictionary = {}
-	var queue: Array = [{"ref": root_ref, "rep": REPRESENTATION, "pin": "", "man": "", "desc": ""}]
+	var queue: Array = [{"ref": root_ref, "rep": root_rep, "pin": "", "man": "", "desc": ""}]
 	while not queue.is_empty():
 		var item: Dictionary = queue.pop_front()
 		var key: String = item["ref"].call("key")
@@ -148,25 +166,31 @@ static func resolve_closure(resolver: Node, root_ref: RefCounted) -> RefCounted:
 
 ## Queues every file operation on `c` and updates `lock` in place.
 static func apply_binding(c: RefCounted, config: RefCounted, lock: RefCounted, nodes: Array, bid: String,
-		policy: Dictionary) -> RefCounted:
-	var inst: RefCounted = install_nodes(c, config, lock, nodes)
+		policy: Dictionary, rep: String = REPRESENTATION, opts: Dictionary = {}) -> RefCounted:
+	var inst: RefCounted = install_nodes(c, config, lock, nodes, opts)
 	if not inst.ok:
 		return inst
 	var root_node: Dictionary = nodes[0]
 	var key: String = root_node["ref"].call("key")
-	var err: String = lock.call("add_binding", bid, key, REPRESENTATION, policy)
+	var err: String = lock.call("add_binding", bid, key, rep, policy)
 	if err != "":
 		return Result.fail("invalid_request", err)
 	lock.call("add_root", "scene_binding", bid, lock.call("closure", key))
-	return _queue_files(c, config, lock, root_node, bid)
+	return _queue_files(c, config, lock, root_node, bid, rep != SOURCE_REPRESENTATION)
 
 
-## Installs every resolved node and records it as a lock dependency (no binding yet).
-static func install_nodes(c: RefCounted, config: RefCounted, lock: RefCounted, nodes: Array) -> RefCounted:
+## Installs every resolved node and records it as a lock dependency (no binding yet). `opts` carries the source
+## install options (trust_shaders); a source node's asset dependencies must be part of `nodes` (the closure).
+static func install_nodes(c: RefCounted, config: RefCounted, lock: RefCounted, nodes: Array,
+		opts: Dictionary = {}) -> RefCounted:
+	var closure: Array = nodes.map(func(n: Dictionary) -> String: return n["ref"].call("key"))
 	for n: Dictionary in nodes:
-		var inst: RefCounted = Installer.install(c, config.call("managed_rel"), n["ref"], n["prep"])
+		var source_opts: Dictionary = opts.duplicate()
+		source_opts["closure_keys"] = closure
+		var inst: RefCounted = Installer.install(c, config.call("managed_rel"), n["ref"], n["prep"], source_opts)
 		if not inst.ok:
 			return inst
+		n["entry_rel"] = inst.value["entry_rel"]
 		var m: RefCounted = n["prep"]["manifest"]
 		var delivery: Dictionary = {"delivery_id": n["prep"]["delivery_id"], "manifest_sha256": m.get("raw_sha256"),
 				"profile_id": m.data["profile_id"], "profile_version": m.data["profile_version"]}
@@ -178,7 +202,7 @@ static func install_nodes(c: RefCounted, config: RefCounted, lock: RefCounted, n
 
 
 static func _queue_files(c: RefCounted, config: RefCounted, lock: RefCounted, root_node: Dictionary,
-		bid: String) -> RefCounted:
+		bid: String, needs_import: bool = true) -> RefCounted:
 	lock.doc["generator"] = {"addon_version": Version.VERSION, "installer_version": Installer.INSTALLER_VERSION}
 	var lock_bytes: RefCounted = lock.call("to_bytes")
 	if not lock_bytes.ok:
@@ -189,9 +213,10 @@ static func _queue_files(c: RefCounted, config: RefCounted, lock: RefCounted, ro
 	var wrapper_rel: String = Wrapper.wrapper_rel(config.call("prefab_rel"), bid)
 	c.add_write(wrapper_rel, text)
 	c.add_write(State.WRAPPERS_REL, State.wrappers_bytes(c.root, bid, wrapper_rel, Fs.sha256_bytes(text)))
-	var state: Dictionary = State.read_state(c.root)
-	(state["pending_import"] as Array).append(bid)
-	c.add_write(State.STATE_REL, State.state_bytes(state))
+	if needs_import:  # a source binding has nothing to finalize: its wrapper already instances the derived entry scene
+		var state: Dictionary = State.read_state(c.root)
+		(state["pending_import"] as Array).append(bid)
+		c.add_write(State.STATE_REL, State.state_bytes(state))
 	var ref: Dictionary = root_node["ref"].call("to_dict")
 	if not config.call("has_library", ref["library_id"]):
 		config.call("add_library", ref["library_id"], ref["library_id"])
@@ -204,5 +229,5 @@ static func wrapper_text(config: RefCounted, root_node: Dictionary, bid: String)
 	var key: String = root_node["ref"].call("key")
 	var manifest: RefCounted = root_node["prep"]["manifest"]
 	var glb: String = "res://" + Installer.target_rel(config.call("managed_rel"), key, manifest.get("raw_sha256")) \
-			+ "/" + manifest.data["entrypoint"]
+			+ "/" + root_node.get("entry_rel", manifest.data["entrypoint"])
 	return Wrapper.scene_text(bid, key, glb, root_node["prep"]["descriptor"].data["placement_anchor"]).to_utf8_buffer()

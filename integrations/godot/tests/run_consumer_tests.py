@@ -136,6 +136,7 @@ def usage_checks(g: Godot) -> None:
           "set-policy with two modes -> exit 2")
     check(g.cli("update", "--binding", "x").returncode == 2, "update without --version -> exit 2")
     check(g.cli("rollback").returncode == 2, "rollback without --binding -> exit 2")
+    check(g.cli("prune-deliveries", "--dry-run", "--apply").returncode == 2, "prune --dry-run with --apply -> exit 2")
 
 
 def main() -> int:
@@ -394,7 +395,20 @@ def clean_restore_flow(g: Godot, proj: Path) -> None:
     check(delivery_hashes(proj) == before and len(before) == 4, "restore from clean gives identical delivery hashes")
     check((proj / "assetstudio.lock.json").read_bytes() == lock_raw, "restore leaves the lock byte-identical")
     check(g.cli("verify", "--locked", "--offline").returncode == 0, "verify passes after the clean restore")
+    prune_flow(g, proj, lock_raw, before)
     python_lock_check(lock_raw)
+
+
+def prune_flow(g: Godot, proj: Path, lock_raw: bytes, before: dict[str, str]) -> None:
+    orphan = proj / "assets" / "library" / ("a" * 64) / ("b" * 64)
+    orphan.mkdir(parents=True)
+    (orphan / "f.txt").write_text("x")
+    check(g.cli("prune-deliveries").returncode == 0 and orphan.exists(), "prune-deliveries dry run keeps the orphan")
+    p = g.cli("prune-deliveries", "--apply")
+    check(p.returncode == 0 and not orphan.exists(), f"prune-deliveries --apply removes the orphan ({p.stderr[-200:]})")
+    check(delivery_hashes(proj) == before and (proj / "assetstudio.lock.json").read_bytes() == lock_raw,
+          "prune keeps every locked delivery and the lock")
+    check(g.cli("verify", "--locked", "--offline").returncode == 0, "verify passes after prune")
 
 
 def python_lock_check(raw: bytes) -> None:

@@ -4,7 +4,17 @@ Usage: fake_server.py [port] [--token T] [--contracts-dir DIR]   (port 0 or omit
 Control: POST /__scenario {"name": ...}; GET /__log (request log); POST /__log/clear;
 POST /__current {"version_id": ...} sets the asset's current version (default v2);
 POST /__events {"events": [...]} queues change events for the next GET /changes.
-Scenarios: normal, corrupt_content, ignore_range, wrong_server_id, forbidden, slow, drop_midway.
+POST /__mutate {"version_id", "required_capabilities": [...], "dependency_on": version_id} rewrites that version's
+manifest (new sha256); mutate the dependency first. POST /__reset_manifests restores the fixtures.
+Scenarios: normal, corrupt_content, ignore_range, wrong_server_id, forbidden, slow, drop_midway,
+legacy_resolve (no `representations` map), rep_unsupported (requested rep unsupported, mobile_glb_v1 ready),
+rep_unsupported_no_error (as rep_unsupported, error null), rep_missing_key (map lacks the requested rep),
+preview_busy (publications:preview answers 503 temporarily_unavailable, reason staging_capacity),
+drop_commit_response (publications:commit is processed, then the connection is closed without a response).
+Publication (AS-09): POST /libraries/{L}/publications:preview (multipart source/portable/descriptor/thumbnail/report),
+POST .../publications:commit (CAS on expected_current_version, idempotency key replay / conflict),
+GET .../publication-operations/{key}. Control: GET /__publications lists commits, POST /__publish_reset clears them
+and restores the asset's current version.
 """
 from __future__ import annotations
 
@@ -18,6 +28,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from fake_publication import PublicationMixin
+
 PREFIX = "/api/integration/v1"
 SERVER_ID = "6f1c2a52-3c2e-4d4b-9a57-0b6f6f0c1d2e"
 OTHER_SERVER_ID = "11111111-2222-4333-8444-555555555555"
@@ -30,7 +42,9 @@ PAIRS = {
         "descriptors/valid/primitive_prop_v2.json", "manifests/valid/portable_primitive_prop_v2.json"),
 }
 ASSET_ID = "ast_00000000000000aa"
-SCENARIOS = {"normal", "corrupt_content", "ignore_range", "wrong_server_id", "forbidden", "slow", "drop_midway"}
+SCENARIOS = {"normal", "corrupt_content", "ignore_range", "wrong_server_id", "forbidden", "slow", "drop_midway",
+             "legacy_resolve", "rep_unsupported", "rep_unsupported_no_error", "rep_missing_key", "preview_busy",
+             "drop_commit_response"}
 
 
 class State:
@@ -45,24 +59,60 @@ class State:
         glbs = {hashlib.sha256(p.read_bytes()).hexdigest(): p.read_bytes() for p in (fx / "glb").glob("*.glb")}
         self.versions: dict[str, dict] = {}
         self.artifacts: dict[str, bytes] = {}
+        self.originals: dict[str, bytes] = {}
         for ver, (desc_rel, man_rel) in PAIRS.items():
             desc, man = (fx / desc_rel).read_bytes(), (fx / man_rel).read_bytes()
             doc = json.loads(man)
+            self.originals[ver] = man
             self.versions[ver] = {"descriptor": desc, "manifest": man, "delivery_id": doc["delivery_id"],
                                   "total": sum(f["size"] for f in doc["files"])}
             for f in doc["files"]:
                 self.artifacts[f["artifact_id"]] = glbs[f["sha256"]]
+        self.sync_manifests()
+        self.reset_publications()
+
+    def reset_publications(self) -> None:
+        self.current = "ver_00000000000000v2"
+        self.previews: dict[str, dict] = {}
+        self.ops: dict[str, dict] = {}
+        self.published: list[dict] = []
+        self.assets: dict[str, dict] = {}  # new assets: asset_id -> {"current": version_id, "count": int}
+        self.version_count: dict[str, int] = {ASSET_ID: 2}
+
+    def sync_manifests(self) -> None:
         self.manifests = {v["delivery_id"]: v["manifest"] for v in self.versions.values()}
 
+    def mutate(self, ver: str, caps: list[str] | None, dependency_on: str | None) -> None:
+        doc = json.loads(self.originals[ver])
+        if caps is not None:
+            doc["required_capabilities"] = caps
+        if dependency_on is not None:
+            dep_ver = self.versions[dependency_on]
+            dep_doc = json.loads(dep_ver["manifest"])
+            ref = {"server_id": SERVER_ID, "library_id": LIBRARY, "asset_id": ASSET_ID, "version_id": dependency_on}
+            doc["dependencies"] = [{"asset_key": _asset_key(ref), "asset_ref": ref,
+                                    "descriptor_sha256": hashlib.sha256(dep_ver["descriptor"]).hexdigest(),
+                                    "representation": "portable_glb_v1", "delivery_id": dep_doc["delivery_id"],
+                                    "manifest_sha256": hashlib.sha256(dep_ver["manifest"]).hexdigest()}]
+        self.versions[ver]["manifest"] = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+        self.sync_manifests()
 
-def envelope(code: str, message: str, retryable: bool = False) -> bytes:
-    return json.dumps({"error": {"code": code, "message": message, "retryable": retryable, "details": {}}}).encode()
+    def reset_manifests(self) -> None:
+        for ver, raw in self.originals.items():
+            self.versions[ver]["manifest"] = raw
+        self.sync_manifests()
 
 
-class Handler(BaseHTTPRequestHandler):
+def envelope(code: str, message: str, retryable: bool = False, details: dict | None = None) -> bytes:
+    return json.dumps({"error": {"code": code, "message": message, "retryable": retryable,
+                                 "details": details or {}}}).encode()
+
+
+class Handler(PublicationMixin, BaseHTTPRequestHandler):
     server_version = "FakeAssetStudio/1"
     protocol_version = "HTTP/1.1"
     state: State
+    IDS = {"asset": ASSET_ID, "server": SERVER_ID, "library": LIBRARY}
 
     def log_message(self, *_args: object) -> None:  # keep test output quiet; never log headers
         pass
@@ -83,11 +133,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _err(self, status: int, code: str, message: str = "", retryable: bool = False) -> None:
-        self._send(status, envelope(code, message or code, retryable))
+    def _err(self, status: int, code: str, message: str = "", retryable: bool = False,
+             details: dict | None = None) -> None:
+        self._send(status, envelope(code, message or code, retryable, details))
 
     def _read_body(self) -> bytes:
         return self.rfile.read(int(self.headers.get("Content-Length") or 0))
+
+    def _json(self, status: int, obj: dict) -> None:
+        self._send(status, json.dumps(obj).encode())
 
     def _record(self) -> None:
         with self.state.lock:
@@ -131,8 +185,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/__current" and self.command == "POST":
             self.state.current = json.loads(body or b"{}").get("version_id", self.state.current)
             return self._send(200, b'{"ok":true}')
+        if path == "/__mutate" and self.command == "POST":
+            req = json.loads(body or b"{}")
+            self.state.mutate(req["version_id"], req.get("required_capabilities"), req.get("dependency_on"))
+            return self._send(200, b'{"ok":true}')
+        if path == "/__reset_manifests" and self.command == "POST":
+            self.state.reset_manifests()
+            return self._send(200, b'{"ok":true}')
         if path == "/__events" and self.command == "POST":
             self.state.events.extend(json.loads(body or b"{}").get("events", []))
+            return self._send(200, b'{"ok":true}')
+        if path == "/__publications":
+            return self._send(200, json.dumps(self.state.published).encode())
+        if path == "/__publish_reset" and self.command == "POST":
+            self.state.reset_publications()
             return self._send(200, b'{"ok":true}')
         if path == "/__log":
             return self._send(200, json.dumps(self.state.log).encode())
@@ -149,7 +215,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"server_id": sid, "api_version": 1, "contract_version": 1,
                                                "representations": ["portable_glb_v1"],
                                                "granted": {"library_ids": [LIBRARY],
-                                                           "scopes": ["assets:read"]}}).encode())
+                                                           "scopes": ["assets:read", "assets:publish"]}}).encode())
         if s.scenario == "forbidden":
             return self._err(403, "forbidden", "token does not grant this access")
         parts = route.strip("/").split("/")
@@ -165,6 +231,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _library_route(self, parts: list[str], body: bytes) -> None:
         s = self.state
+        if parts == ["publications:preview"] and self.command == "POST":
+            return self._preview(body)
+        if parts == ["publications:commit"] and self.command == "POST":
+            return self._commit(body)
+        if len(parts) == 2 and parts[0] == "publication-operations" and self.command == "GET":
+            return self._operation(parts[1])
         if parts == ["resolve"] and self.command == "POST":
             return self._resolve(json.loads(body))
         if parts == ["assets"]:
@@ -211,8 +283,30 @@ class Handler(BaseHTTPRequestHandler):
                                          "manifest_sha256": hashlib.sha256(ver["manifest"]).hexdigest(),
                                          "total_bytes": ver["total"], "budget": {}}])
             base.update(asset_key=key, state=state, error={"code": code, "message": code} if code else None)
+            if self.state.scenario != "legacy_resolve":
+                base["representations"] = self._rep_map(req, state, code)
             entries.append(base)
         self._send(200, json.dumps({"entries": entries}).encode())
+
+    def _rep_map(self, req: dict, state: str, code: str | None) -> dict:
+        scenario = self.state.scenario
+        out: dict = {}
+        for rep in req.get("representations") or ["portable_glb_v1"]:
+            if state != "ready":
+                out[rep] = {"state": state, "error": {"code": code, "message": code}}
+            elif rep == "portable_glb_v1" and scenario.startswith("rep_unsupported"):
+                err = None if scenario == "rep_unsupported_no_error" else {
+                    "code": "unsupported_representation", "message": "no preparer for this representation"}
+                out[rep] = {"state": "unsupported", "error": err}
+            elif rep == "portable_glb_v1" or scenario.startswith("rep_unsupported"):
+                out[rep] = {"state": "ready", "error": None}
+            else:
+                out[rep] = {"state": "unsupported", "error": {"code": "unsupported_representation", "message": rep}}
+        if scenario == "rep_missing_key":
+            out = {"mobile_glb_v1": {"state": "ready", "error": None}}
+        elif scenario.startswith("rep_unsupported") and state == "ready":
+            out["mobile_glb_v1"] = {"state": "ready", "error": None}
+        return out
 
     def _content(self, artifact_id: str) -> None:
         data = self.state.artifacts.get(artifact_id)

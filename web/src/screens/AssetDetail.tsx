@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { OutputView } from "../components/outputs";
 import { bytes, Dialog, ErrorLine, Loading, OK, relTime } from "../components/ui";
 import { ApiError, type AssetDetail as Detail, artifactUrl, type Derivation, key, P, send, type VariantMethod } from "../lib/api";
+import { deliveryInfo } from "../lib/delivery";
 import { useAction, useApi } from "../lib/hooks";
 import { useProject } from "../lib/project";
 import { archiveAsset, deleteAssetPermanently, restoreAsset } from "../lib/variantsApi";
@@ -82,6 +83,7 @@ export function AssetDetail() {
   const src = d.data.derived_from;
   const lineage = new Map(d.data.versions.map((x) => [x.version_id, x.derivation]));
   const variantsUrl = (count: number) => `/p/${id}/assets/${m.asset_id}/variants?version=${v.version_id}&count=${count}`;
+  const delivery = deliveryInfo(v);
   const shownManifest = manifestText(d.data.manifest_json, v.derivation);
   const archived = m.archived_at !== null;
   const doArchive = () => void act.run(async () => {
@@ -125,6 +127,11 @@ export function AssetDetail() {
             {src && <Link className="sub" style={{ padding: "1px 2px", color: "var(--muted)" }}
               to={`/p/${id}/assets/${src.asset_id}?version=${src.version_id}`} title={`Open ${src.display_name} v${src.display_version}`}>
               from {src.asset_id} · v{src.display_version} · {METHOD_LABEL[src.method]}</Link>}
+            {delivery && delivery.representations.map((r) => (
+              <span key={r} className="tag" title="Delivery representation the Godot integration can serve for this version">{r}</span>))}
+            {delivery && <span className={`pill ${delivery.editableSource ? "ok" : "warn"}`}
+              title="Godot editable source package (godot_static_source_v1) recorded for this version">
+              editable source: {delivery.editableSource ? "available" : "not available"}</span>}
             <span className={`pill ${lic === "cleared" ? "ok" : lic === "not_cleared" ? "bad" : "warn"}`}
               title={v.licence.note}>licence: {lic}</span>
           </div>

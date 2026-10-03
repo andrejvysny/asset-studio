@@ -1,0 +1,28 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.75, 0.68, 0.55, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_roof"]
+albedo_color = Color(0.45, 0.2, 0.15, 1)
+
+[node name="CsgHut" type="Node3D"]
+
+[node name="Shell" type="CSGCombiner3D" parent="."]
+
+[node name="Walls" type="CSGBox3D" parent="Shell"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+size = Vector3(3, 2, 3)
+material = SubResource("StandardMaterial3D_wall")
+
+[node name="Door" type="CSGBox3D" parent="Shell"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 1.5)
+operation = 2
+size = Vector3(1, 1.5, 0.6)
+
+[node name="Roof" type="CSGCylinder3D" parent="Shell"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.375, 0)
+radius = 2.2
+height = 0.75
+sides = 4
+material = SubResource("StandardMaterial3D_roof")

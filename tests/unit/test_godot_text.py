@@ -23,7 +23,7 @@ def _text_members() -> list[tuple[str, bytes]]:
 @pytest.mark.parametrize(("label", "data"), _text_members(), ids=lambda v: v if isinstance(v, str) else "")
 def test_valid_fixture_text_resources_parse(label: str, data: bytes) -> None:
     doc = parse_godot_text(data)
-    assert doc.kind in ("gd_scene", "gd_resource") and doc.header["format"] == Num("3")
+    assert doc.kind in ("gd_scene", "gd_resource") and doc.header["format"] in (Num("3"), Num("4"))
     assert {r.id for r in doc.refs()} <= {s.attrs["id"] for s in doc.ext_resources() + doc.sub_resources()}
 
 
@@ -83,6 +83,18 @@ def test_malformed_input_reports_parse_error(src: bytes, line: int | None) -> No
     assert e.value.code == "unsafe_package" and e.value.detail in ("parse_error", "unsupported_format")
     if line is not None:
         assert e.value.line == line
+
+
+def test_format_4_with_base64_packed_array_parses_and_other_formats_are_rejected() -> None:
+    doc = parse_godot_text(b'[gd_scene format=4]\n\n[sub_resource type="ArrayMesh" id="A_1"]\n_surfaces = [{\n'
+                           b'"aabb": AABB(-0.5, 1e-05, 0, 1, 1, 1),\n"vertex_data": PackedByteArray("AAAAvwAAAD8=")\n}]\n')
+    assert doc.header["format"] == Num("4")
+    surf = doc.sub_resources()[0].props[0][1][0]
+    assert surf["vertex_data"] == Call("PackedByteArray", ("AAAAvwAAAD8=",))
+    for bad in (b"[gd_scene format=5]\n", b"[gd_scene format=2]\n", b"[gd_scene]\n"):
+        with pytest.raises(GodotTextError) as e:
+            parse_godot_text(bad)
+        assert e.value.detail == "unsupported_format"
 
 
 def test_binary_and_non_utf8_rejected() -> None:

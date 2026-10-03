@@ -363,3 +363,36 @@ Results: **not yet run on hardware**.
 - Response types in the web client are hand-written (no OpenAPI response models yet).
 - Model-load counts: the scheduler records passes; ComfyUI does not report its own loads.
 - Variants: see TODO.md ("Known limitations / follow-ups"). Edit-model VRAM headroom is ~0.5 GB on a 24 GB card.
+
+# AS-11 composition acceptance on the host (2026-10-03)
+
+Evidence and the full E2E-01..E2E-19 matrix (PASS / FAIL / NOT RUN, exact pins, commands, fixture hashes, measurements):
+`godot-ipad/docs/evidence/int-v1/acceptance.md` (raw logs under `godot-ipad/docs/evidence/int-v1/logs/`). Host, synthetic: the
+real `assetstudio serve` integration listener on loopback (`STUDIO_ENGINE=none`, isolated instance dir, shared + game test
+libraries, `desktop` read+publish and `ipad` read-only tokens), the addon CLI/editor code, the godot-ipad app as sender and a real
+preview child process. Physical iPad, Pencil, iOS LAN permission, TLS and Release device performance are NOT RUN.
+
+AS-11 rows (server and addon side):
+
+| Row | Result | Note |
+|---|---|---|
+| E2E-01 prop publish | PASS | needed the `Material` ext_resource fix below |
+| E2E-02 textured tree + vertex-colour foliage | PASS | UVs, 2 textures, alpha MASK, slots, anchor; foliage published as a GLB-instancing scene (open: Godot 4.7.2 `format=4` for `ArrayMesh` scenes) |
+| E2E-03 blank second project | PASS (logic) | editor drag gesture NOT RUN |
+| E2E-05 offline | PASS | cached reopen, uncached refused, no latest substitution |
+| E2E-06 v2 while v1 placed | PASS | `asset_current_changed` event, selected-instance update, undo |
+| E2E-07 concurrent publish | PASS | stale `conflict`, retry on top, replay returns the same version |
+| E2E-08 fresh checkout | PASS | restore, import, offline export, no asset bytes tracked |
+| E2E-16 hostile packages | PASS | 18 fixtures + a huge-IHDR PNG refused with the indexed code before any install |
+| E2E-17 credentials | PASS | read-only 403 on publish, revoked 401, 0 token hits in repos/exports/logs |
+| E2E-18 UID collision | PASS | two packages with the same original UIDs, also after clean restore |
+
+Fixed during the run: `[ext_resource type="Material"]` (Godot's save class for an external material) was refused by both the server
+validator and the addon, so a scene with a `.tres` material could not be published. `source_scene.py` and the addon policy now
+accept it for `ext_resource` only (the `.tres` header is still allowlisted; `capabilities.json` unchanged); tests in
+`tests/unit/test_source_structure.py` and `integrations/godot/tests/test_publish.gd`; compatibility row added. Suites after the
+change: six `integrations/godot/tests/run_*_tests.py` runners and `run_tests.gd` (162/162), `uv run pytest tests/unit
+tests/contract tests/regression -q`: 1113 passed.
+
+Open: text format 4 (D3), no provisional ACK in the live protocol (D4), `static-source-package.md` line 79 needs the `Material`
+exception, `dist/` still holds 0.2.0, godot-ipad's vendored copy of this addon predates the fix.

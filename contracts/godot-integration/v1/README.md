@@ -65,6 +65,17 @@ Publication endpoints (`publications:preview`, commit) refuse admission with the
 
 Clients must treat an unknown `reason` as plain `temporarily_unavailable`.
 
+## Publication commit idempotency
+
+`POST /publications:commit` is bound to its `idempotency_key` (per library) and the publisher's credential id. The binding
+covers every request field except `preview_id` and `idempotency_key`: `package_sha256`, `portable_sha256`,
+`descriptor_draft_sha256`, `target_asset_id`, `expected_current_version`, `name`, `category_id`, `tags`, `licence`,
+`source_uri`, `credit`. `preview_id` is only a transport handle for content already pinned by those sha256 values, so a
+retry that re-uploaded identical content as a fresh preview (for example after losing the preview, or after a crash
+between the server's intent record and its publish receipt) returns the original outcome; the first attempt's
+`preview_id` stays the version's recorded provenance. Reusing the key with any other bound field, or from another
+credential, is `idempotency_conflict`. No request or response schema changes.
+
 ## Regenerating fixtures
 
 ```sh

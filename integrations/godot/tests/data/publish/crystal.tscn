@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="ShaderMaterial" path="res://tests/data/publish/crystal_mat.tres" id="1_mat"]
+
+[sub_resource type="PrismMesh" id="PrismMesh_1"]
+size = Vector3(1, 2, 1)
+
+[node name="Crystal" type="Node3D"]
+
+[node name="Gem" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("PrismMesh_1")
+surface_material_override/0 = ExtResource("1_mat")

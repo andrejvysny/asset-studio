@@ -164,6 +164,29 @@ def test_shared_include_is_not_a_cycle(tmp_path: Path) -> None:
     assert report.ok, report.errors
 
 
+def _material_files(ext_type: str, sub_type: str | None = None) -> dict[str, bytes]:
+    subs = f'[sub_resource type="{sub_type}" id="x"]\n\n' if sub_type else ""
+    return {"materials/m.tres": b'[gd_resource type="StandardMaterial3D" format=3]\n\n[resource]\nroughness = 0.5\n',
+            "scenes/main.tscn": _scene(HEAD, f'[ext_resource type="{ext_type}" path="res://materials/m.tres" id="1"]\n',
+                                       BOX, subs, ROOT_NODE, '[node name="Body" type="MeshInstance3D" parent="."]\n'
+                                       'mesh = SubResource("m")\nsurface_material_override/0 = ExtResource("1")\n')}
+
+
+def test_external_material_saved_as_its_base_class_is_accepted(tmp_path: Path) -> None:
+    # Godot writes [ext_resource type="Material"] for an external material; the .tres header is checked on its own.
+    report, _ = _build(tmp_path, _material_files("Material"))
+    assert report.ok, report.errors
+
+
+def test_material_base_class_is_only_an_external_save_class(tmp_path: Path) -> None:
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    report, _ = _build(tmp_path / "a", _material_files("StandardMaterial3D", "Material"))
+    assert not report.ok and "type_not_allowed" in _details(report)
+    report, _ = _build(tmp_path / "b", _material_files("Resource"))
+    assert not report.ok and "type_not_allowed" in _details(report)
+
+
 def test_surface_under_glb_instance_is_unverified(tmp_path: Path) -> None:
     files = {"models/rock.glb": rock_files()["models/rock.glb"], "scenes/main.tscn": _scene(
         HEAD, _ext("models/rock.glb"), "\n", ROOT_NODE, '[node name="Mesh" parent="." instance=ExtResource("1")]\n')}

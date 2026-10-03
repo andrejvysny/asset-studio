@@ -27,6 +27,25 @@ func test_client_corruption_is_integrity_mismatch() -> void:
 	await finish()
 
 
+func test_client_same_size_corrupt_cached_blob_is_redownloaded_on_unpinned_prepare() -> void:
+	if not has_server("corrupt cache hit"):
+		return
+	var env: Dictionary = make_env()
+	assert_true((await env["resolver"].prepare(make_ref())).ok, "first prepare")
+	var path: String = env["cache"].blob_path(GLB_V1_SHA)
+	var bad: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	bad[0] = (bad[0] + 1) % 256  # same size, different content
+	var f: FileAccess = FileAccess.open(path, FileAccess.WRITE)
+	f.store_buffer(bad)
+	f.close()
+	assert_true(env["cache"].has_blob_sized(GLB_V1_SHA, bad.size()) and not env["cache"].verify_blob(GLB_V1_SHA), "corrupt")
+	var r: RefCounted = await env["resolver"].prepare(make_ref())
+	assert_true(r.ok, "re-prepare: %s" % r.describe())
+	assert_eq(r.value["source"], "network", "network path")
+	assert_true(env["cache"].verify_blob(GLB_V1_SHA), "blob restored by download")
+	await finish()
+
+
 func test_client_resumes_with_range_after_dropped_connection() -> void:
 	if not has_server("range resume"):
 		return

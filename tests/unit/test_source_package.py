@@ -22,6 +22,7 @@ VALID_CAPS = {
     "custom_shader_crystal": ["godot_text_scene_v1", "shader_source"],
     "vertex_color_rock_with_collision": ["godot_text_scene_v1", "static_collision"],
     "primitive_prop": ["godot_text_scene_v1"],
+    "array_mesh_prop": ["godot_text_scene_v1"],
 }
 
 
@@ -35,7 +36,7 @@ def _fixture(rel: str) -> Path:
 
 
 def test_index_has_source_packages() -> None:
-    assert len(VALID) == 7 and len(HOSTILE) == 18
+    assert len(VALID) == 8 and len(HOSTILE) == 19
 
 
 @pytest.mark.parametrize("entry", VALID, ids=lambda e: Path(e["path"]).stem)

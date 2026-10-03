@@ -6,3 +6,9 @@
 - [Addon project (AS-07a)](repo_addon_project.md) — coordinator/lock/installer/CLI gotchas, test files, U+0000 limit
 - [Addon editor (AS-08)](repo_addon_editor.md) — @tool requirement, finalize/wrapper determinism, plugin test harness
 - [Fantasy consumer](repo_fantasy_consumer.md) — binding slug rule, wrapper-owned bodies, descriptor cache
+- [Resolver contract](repo_resolver_contract.md) — caps/representations/cache-first, fake_server mutate hooks
+- [Source install (AS-07b)](repo_source_install.md) — validator/relocator/receipt files, srcpkg prefix, test runner
+- [Publisher (AS-09)](repo_publisher.md) — collector/export/zip/journal gotchas, fake server publish hooks, test runners
+- [Export preflight (AS-10)](repo_export_preflight.md) — policy consolidation, preflight, wrapper, e2e runner
+- [godot-ipad packaging](repo_godot_ipad_packaging.md) — IP-09 archives/CLI/consumer gotchas, macOS no timeout
+- [godot-ipad Apply (IP-07)](repo_godot_ipad_apply.md) — Terrain3D/coordinator/test-runner gotchas for apply/bake/verify

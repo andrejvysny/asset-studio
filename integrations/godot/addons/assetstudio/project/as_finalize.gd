@@ -40,6 +40,8 @@ static func load_descriptor(cache: RefCounted, dep: Dictionary) -> RefCounted:
 static func prepare(root: String, config: RefCounted, lock: RefCounted, cache: RefCounted, binding_id: String,
 		policy: Dictionary, reapply: bool) -> RefCounted:
 	var b: Dictionary = lock.bindings()[binding_id]
+	if b["representation"] != "portable_glb_v1":
+		return Result.fail("unsupported_representation", "material policies and finalize apply to portable_glb_v1 bindings only")
 	var dep: Dictionary = lock.dependencies()[b["asset_key"]]
 	var rel: String = Wrapper.wrapper_rel(config.call("prefab_rel"), binding_id)
 	var conflict: String = Wrapper.check_conflict(root, binding_id, rel)

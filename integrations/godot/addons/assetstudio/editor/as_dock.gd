@@ -12,6 +12,7 @@ const ChangeWatcher = preload("res://addons/assetstudio/core/as_change_watcher.g
 const BindingState = preload("res://addons/assetstudio/project/as_binding_state.gd")
 const DescriptorDiff = preload("res://addons/assetstudio/project/as_descriptor_diff.gd")
 const AssetRef = preload("res://addons/assetstudio/core/as_asset_ref.gd")
+const PublishActions = preload("res://addons/assetstudio/editor/as_publish_actions.gd")
 
 const BADGES: Dictionary = {"remote": "Remote", "downloading": "Downloading", "preparing": "Preparing",
 		"ready": "Ready", "update_available": "Update available", "unavailable": "Unavailable",
@@ -32,6 +33,8 @@ var _btn_install: Button = null
 var _btn_place: Button = null
 var _btn_review: Button = null
 var _btn_restore: Button = null
+var _btn_publish: Button = null
+var _publish: Node = null
 var _dialog: ConfirmationDialog = null
 var _watcher: Node = null
 var _drag := DragAdapter.new()
@@ -52,6 +55,10 @@ func setup(plugin: EditorPlugin) -> void:
 	_dialog = UpdateDialog.new()
 	_dialog.choice.connect(_on_review_choice)
 	add_child(_dialog)
+	_publish = PublishActions.new()
+	add_child(_publish)
+	_publish.setup()
+	_publish.message.connect(func(t: String) -> void: _message.text = t)
 	refresh()
 
 
@@ -93,7 +100,8 @@ func _build() -> void:
 	_btn_place = _button("Place", _on_place)
 	_btn_review = _button("Review update", _on_review)
 	_btn_restore = _button("Restore previous version", _on_restore)
-	for b: Button in [_btn_install, _btn_place, _btn_review, _btn_restore]:
+	_btn_publish = _button("Publish scene...", _on_publish)
+	for b: Button in [_btn_install, _btn_place, _btn_review, _btn_restore, _btn_publish]:
 		buttons.add_child(b)
 	add_child(buttons)
 	_message = Label.new()
@@ -328,6 +336,16 @@ func _on_review_choice(mode: String) -> void:
 			await actions.apply_update_instances(e["binding_id"])
 		_:
 			actions.dismiss(e["binding_id"])
+
+
+## Opens the publish dialog for the edited scene; a selected library asset makes it a new version of that asset.
+func _on_publish() -> void:
+	var e: Dictionary = _selected_entry()
+	var base: Dictionary = {}
+	if not e.is_empty() and not e["item"].get("local", false) and e["item"].has("current_version_id"):
+		base = {"display_name": e["item"].get("display_name", e["item"]["asset_id"]), "asset_id": e["item"]["asset_id"],
+				"current_version_id": e["item"]["current_version_id"]}
+	_publish.start(_library_id(), base)
 
 
 func _on_restore() -> void:

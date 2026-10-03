@@ -25,6 +25,12 @@ const CAPABILITIES: PackedStringArray = [
 	"godot_text_scene_v1", "csg_static", "static_collision", "shader_source", "vertex_colors", "alpha_mask",
 	"alpha_blend", "pbr_textures",
 ]
+## Capabilities this client satisfies: the set capabilities.json declares (tests compare them). A capability that
+## is known (syntax-valid) but missing here makes the resolver refuse the delivery with unsupported_contract.
+const SUPPORTED_CAPABILITIES: PackedStringArray = [
+	"godot_text_scene_v1", "csg_static", "static_collision", "shader_source", "vertex_colors", "alpha_mask",
+	"alpha_blend", "pbr_textures",
+]
 const MAX_PATH_LEN: int = 255
 const MAX_PATH_DEPTH: int = 32
 const MAX_JSON_DEPTH: int = 16

@@ -69,15 +69,17 @@ Canonical JSON (sorted keys, no floats; decimals are strings). Top-level names, 
 
 ## 3. Godot text format subset (`.tscn`, `.tres`)
 
-Parsing is a bounded, line-oriented static parse; no `eval`, `str_to_var`, or class instantiation. Text format 3 only
-(`format=3`); binary `.res` / `.scn` and any file that does not start with a text header are rejected.
+Parsing is a bounded, line-oriented static parse; no `eval`, `str_to_var`, or class instantiation. Text format 3 or 4
+(`format=3` or `format=4`; Godot 4.7.2 writes 4 for scenes embedding an `ArrayMesh`, whose `PackedByteArray("<base64>")`
+values are inert calls like any other packed constructor); binary `.res` / `.scn` and any file that does not start with a text header are rejected.
 
 - Allowed section headers: `gd_scene`, `gd_resource`, `ext_resource`, `sub_resource`, `node`, `resource`, `editable`.
 - Forbidden: `connection` (any signal wiring), and any other header.
 - Forbidden properties: any `script` property (`script = ...`), `metadata/_custom_type_script`, and any property whose value
   references a Script resource.
 - `ext_resource` `type` MUST NOT be `Script`, `GDScript`, `CSharpScript` or `GDExtension`, and MUST be in
-  `allowed_resource_types`. `sub_resource` `type` and the `.tres` `gd_resource` `type` MUST be in `allowed_resource_types`.
+  `allowed_resource_types`, with one exception: `type="Material"` (Godot's save class for an external material) is
+  accepted for `ext_resource` only; the referenced `.tres` `gd_resource` `type` MUST still be in `allowed_resource_types`. `sub_resource` `type` and the `.tres` `gd_resource` `type` MUST be in `allowed_resource_types`.
 - `node` `type` MUST be in `allowed_node_types`. A node without `type` MUST carry `instance=ExtResource(...)` (a nested
   scene or imported `.glb`); custom classes, even if named like a built-in, are rejected.
 - `ext_resource` `path` MUST be a key of `resource_map`. `uid` is recorded, never used to resolve.
@@ -126,3 +128,10 @@ parser/serializer, never global text replacement.
 | Schema-invalid manifest or upload | `invalid_request` |
 
 The expected code and a short detail slug for each hostile fixture are in `fixtures/INDEX.json` (`expected`, `detail`).
+
+## Changelog (v1 clarifications; no `schema_version` change)
+
+- **2026-10-03** - clarifies §3, no wire or schema change. (a) Text `format=4` is accepted next to `format=3` (any other
+  value is `unsafe_package` / `unsupported_format`). (b) `ext_resource type="Material"` is exempt from the
+  `allowed_resource_types` check (implemented earlier in both readers). Fixtures: `source_packages/valid/array_mesh_prop.zip`,
+  `source_packages/hostile/unsupported_text_format.zip` (format=5).

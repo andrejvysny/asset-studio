@@ -26,6 +26,7 @@ from assetstudio_core.project_lock import ProjectAssetLockV1, lock_bytes  # noqa
 from assetstudio_core.publication_draft import DescriptorDraftV1, draft_bytes  # noqa: E402
 from assetstudio_core.source_manifest import SourcePackageManifestV1  # noqa: E402
 from integration_fixture_packages import (  # noqa: E402
+    ARRAY_MESH,
     CLUSTER,
     CRYSTAL,
     HUT,
@@ -123,6 +124,10 @@ def descriptor_docs() -> dict[str, Json]:
             CRYSTAL, (["-0.5", "0", "-0.5"], ["0.5", "2", "0.5"]), ["0", "0", "0"], "0.6",
             [slot("crystal", "emissive", [psurf(0, 0)], [{"node_path": "Gem", "surface": 0}])],
             warnings=["custom_shader_approximated"]),
+        "array_mesh_prop": descriptor(
+            ARRAY_MESH, (["-0.5", "-0.5", "-0.5"], ["0.5", "0.5", "0.5"]), ["0", "-0.5", "0"], "0.8",
+            [slot("body", "surface", [psurf(0, 0)], [{"node_path": "Body", "surface": 0}])],
+            note="Godot 4.7.2 text format 4: embedded ArrayMesh, external .tres material typed Material"),
         "prop_cluster": descriptor(
             CLUSTER, (["-2", "0", "-1"], ["2", "0.5", "1"]), ["0", "0", "0"], "2.3",
             [slot("base", "surface", [psurf(0, 0)], [{"node_path": "Base", "surface": 0}])], scale=("0.5", "1")),

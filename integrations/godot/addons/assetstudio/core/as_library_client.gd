@@ -13,15 +13,17 @@ const Canonical = preload("res://addons/assetstudio/core/as_canonical.gd")
 const Version = preload("res://addons/assetstudio/core/as_version.gd")
 const Util = preload("res://addons/assetstudio/core/as_http_util.gd")
 const Stream = preload("res://addons/assetstudio/core/as_stream_download.gd")
+const Multipart = preload("res://addons/assetstudio/core/as_multipart.gd")
 
 signal slot_freed
 
 const API_PREFIX: String = "/api/integration/v1"
 const MAX_METADATA_BYTES: int = 16777216
-const _CONTENT_RANGE: String = "^bytes ([0-9]+)-([0-9]+)/([0-9]+)$"
+const DEFAULT_UPLOAD_MAX_BYTES: int = 536870912
 
 var timeout_s: float = 20.0
 var download_timeout_s: float = 300.0
+var upload_timeout_s: float = 600.0
 var max_retries: int = 2
 var backoff_base_s: float = 0.5
 var server_id: String = ""
@@ -32,7 +34,6 @@ var _identity_ok: bool = false
 var _limits: Dictionary = {"meta": 4, "download": 2}
 var _active: Dictionary = {"meta": 0, "download": 0}
 var peak_downloads: int = 0  # observed maximum of concurrent downloads (test hook)
-var _range_re: RegEx = RegEx.create_from_string(_CONTENT_RANGE)
 
 
 ## One response of the transport layer; finished fires once, from completion or cancellation.
@@ -174,6 +175,44 @@ func thumbnail_bytes(library: String, asset_id: String, version_id: String) -> R
 	return Result.success({"bytes": r.value["body"]})
 
 
+## Publication preview (multipart parts; see as_multipart.gd). Never retried here. value = the preview receipt.
+func publication_preview(library: String, parts: Dictionary) -> RefCounted:
+	var bad: RefCounted = _check_ids({"library": library})
+	if bad != null:
+		return bad
+	var ident: RefCounted = await _ensure_identity()
+	if not ident.ok:
+		return ident
+	var limits: Variant = server_info.get("limits", {})
+	var built: RefCounted = Multipart.build(parts, int((limits as Dictionary).get("publication_upload_max_bytes", DEFAULT_UPLOAD_MAX_BYTES)) if limits is Dictionary else DEFAULT_UPLOAD_MAX_BYTES)
+	if not built.ok:
+		return built
+	var opts: Dictionary = {"timeout": upload_timeout_s, "raw_body": built.value["body"], "content_type": built.value["content_type"]}
+	return await _json_request(HTTPClient.METHOD_POST, "/libraries/%s/publications:preview" % library, {}, null, true, false, opts)
+
+
+## Explicit commit with the caller's idempotency_key; not auto-retried (the caller queries the operation first).
+func publication_commit(library: String, body: Dictionary) -> RefCounted:
+	var bad: RefCounted = _check_ids({"library": library, "idempotency_key": str(body.get("idempotency_key", ""))})
+	if bad != null:
+		return bad
+	if not str(body["idempotency_key"]).length() in range(8, 101):
+		return Result.fail("invalid_request", "idempotency_key must be 8..100 characters")
+	if (body.get("target_asset_id") == null) != (body.get("expected_current_version") == null):
+		return Result.fail("invalid_request", "target_asset_id and expected_current_version are given together or not at all")
+	return await _json_request(HTTPClient.METHOD_POST, "/libraries/%s/publications:commit" % library, {}, body, true, false)
+
+
+## value = {"state": "committed" | "unknown", "idempotency_key", ["asset_id", "version_id", "display_version"]}.
+func publication_operation(library: String, key: String) -> RefCounted:
+	var bad: RefCounted = _check_ids({"library": library, "key": key})
+	if bad != null:
+		return bad
+	if not key.length() in range(8, 101):
+		return Result.fail("invalid_request", "idempotency key must be 8..100 characters")
+	return await _json_request(HTTPClient.METHOD_GET, "/libraries/%s/publication-operations/%s" % [library, key], {}, null, true, true)
+
+
 func changes(cursor: String = "", poll_timeout_s: float = 20.0, cancel_token: RefCounted = null) -> RefCounted:
 	if not Schema.matches("url_id", cursor) and cursor != "":
 		return Result.fail("invalid_request", "malformed cursor")
@@ -267,7 +306,7 @@ func _finish_download(res: Dictionary, part: String, dest: String, offset: int, 
 			return Result.fail(Result.CODE_NETWORK_ERROR, "range not satisfiable; restarting", true)
 		return Util.http_error(status, body.slice(0, 65536))
 	if err != Stream.ERR_LIMIT:
-		_keep_received(part, dest, offset, size, status, hdrs)
+		Stream.keep_received(part, dest, offset, size, status, hdrs)
 	else:
 		DirAccess.remove_absolute(part)
 	match err:
@@ -282,42 +321,6 @@ func _finish_download(res: Dictionary, part: String, dest: String, offset: int, 
 		Stream.ERR_LIMIT:
 			return Result.fail("resource_limit", "response larger than the manifest declares")
 	return Result.fail(Result.CODE_NETWORK_ERROR, "network error", true)
-
-
-## Applies received bytes to the staging file: a valid 206 extends it; a 200 (Range ignored or not sent)
-## replaces it, never appends; anything else is discarded. Works for partial bodies after a failure too.
-func _keep_received(part: String, dest: String, offset: int, size: int, status: int, hdrs: Dictionary) -> void:
-	if not FileAccess.file_exists(part):
-		return
-	if status == 206 and _range_ok(hdrs, offset, size):
-		_append_file(part, dest)
-	elif status == 200:
-		DirAccess.remove_absolute(dest)
-		DirAccess.rename_absolute(part, dest)
-	else:
-		DirAccess.remove_absolute(part)
-
-
-func _range_ok(hdrs: Dictionary, offset: int, size: int) -> bool:
-	var m: RegExMatch = _range_re.search(str(hdrs.get("content-range", "")))
-	return m != null and int(m.get_string(1)) == offset and int(m.get_string(3)) == size and int(m.get_string(2)) == size - 1
-
-
-func _append_file(part: String, dest: String) -> RefCounted:
-	var src: FileAccess = FileAccess.open(part, FileAccess.READ)
-	var dst: FileAccess = FileAccess.open(dest, FileAccess.READ_WRITE)
-	if src == null or dst == null:
-		return Result.fail("temporarily_unavailable", "cannot append to staging file", true)
-	dst.seek_end()
-	while not src.eof_reached():
-		var chunk: PackedByteArray = src.get_buffer(1048576)
-		if chunk.is_empty():
-			break
-		dst.store_buffer(chunk)
-	src = null
-	dst.close()
-	DirAccess.remove_absolute(part)
-	return Result.success()
 
 
 func _file_size(path: String) -> int:
@@ -381,8 +384,8 @@ func _attempt(method: int, path: String, query: Dictionary, body: Variant, send_
 	if not ep.ok:
 		return ep
 	var url: String = ep.value["base_url"] + API_PREFIX + path + Util.query_string(query)
-	var headers: PackedStringArray = _headers(ep.value["token"], body != null)
-	var raw: PackedByteArray = JSON.stringify(body).to_utf8_buffer() if body != null else PackedByteArray()
+	var headers: PackedStringArray = _headers(ep.value["token"], body != null or opts.has("raw_body"), opts.get("content_type", "application/json"))
+	var raw: PackedByteArray = opts["raw_body"] if opts.has("raw_body") else (JSON.stringify(body).to_utf8_buffer() if body != null else PackedByteArray())
 	var topts: Dictionary = {"timeout": opts.get("timeout", timeout_s), "body_limit": MAX_METADATA_BYTES}
 	var p: Pending = await _transport(method, url, headers, raw, topts, token)
 	if p.cancelled or p.result != HTTPRequest.RESULT_SUCCESS:
@@ -459,12 +462,12 @@ func _endpoint(send_auth: bool = true) -> RefCounted:
 			"tls": conn.value["tls"], "token": secret})
 
 
-func _headers(secret: String, has_body: bool) -> PackedStringArray:
+func _headers(secret: String, has_body: bool, content_type: String = "application/json") -> PackedStringArray:
 	var h := PackedStringArray(["Accept: application/json", "User-Agent: AssetStudioAddon/%s" % Version.VERSION])
 	if secret != "":
 		h.append("Authorization: Bearer " + secret)
 	if has_body:
-		h.append("Content-Type: application/json")
+		h.append("Content-Type: " + content_type)
 	return h
 
 

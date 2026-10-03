@@ -5,11 +5,15 @@ file and restores them byte-identically on any machine. Design: `docs/integratio
 
 Status: portable GLB (`portable_glb_v1`) install, lock, restore, verify, `add`, `finalize` with slot resolution and
 material policies, `update`, `rollback`, `set-policy` and the editor plugin (dock, Place, drag adapter, update review).
-`godot_static_source_v1` relocation is AS-07b.
+`godot_static_source_v1` (editable source) install, restore and verify: see "Source packages" below. AS-09 adds
+`publish` (static scene -> new asset / new version, explicit commit): see "Publishing a scene".
+
+Consumer guide (install, credentials, flows, export, troubleshooting): `docs/integration/godot-consumer.md`.
+Compatibility since the v1 freeze: `docs/integration/compatibility.md`.
 
 ## Install
 
-Copy `addons/assetstudio/` into the consumer project. No plugin needs to be enabled for the CLI. Core scripts are
+Copy `addons/assetstudio/` into the consumer project (or unzip the archive from `scripts/package_addon.py`). No plugin needs to be enabled for the CLI. Core scripts are
 loaded with `preload` paths and declare no `class_name`, so they cannot collide with your global classes.
 
 ## CLI
@@ -18,13 +22,18 @@ loaded with `preload` paths and declare no `class_name`, so they cannot collide 
 godot --headless --path <project> --script res://addons/assetstudio/cli.gd -- <command> [options]
 
 connect  --server-id <uuid> --url <base_url> --token-file <path> [--allow-insecure-lan]
-restore  --locked [--offline]
+restore  --locked [--offline] [--trust-shaders]
 verify   --locked --offline
 add      --library <prj_..> --asset <ast_..> --version <ver_..> [--binding <id>] [--profile <id> | --preserve]
+         [--representation portable_glb_v1|godot_static_source_v1] [--trust-shaders]
 finalize [--binding <id>] [--reapply]
 set-policy --binding <id> (--profile <profile_id> | --preserve | --override)
 update   --binding <id> --version <ver_..> [--new-binding <id>]
 rollback --binding <id>
+prune-deliveries [--dry-run | --apply]
+export-preflight [--preset <name>] [--offline]
+publish  --scene <res://x.tscn> --library <prj_..> [--new-version-of <ast_..> --expected-current <ver_..>] [--commit]
+         [--name <text>] [--category <id>] [--tags a,b] [--licence <text>] [--out <dir>] [--fresh]
 ```
 
 Exit codes: `0` ok, `1` failure (unavailable, integrity, unsafe, unsupported, tampered), `2` usage error.
@@ -56,7 +65,104 @@ Exit codes: `0` ok, `1` failure (unavailable, integrity, unsafe, unsupported, ta
   an installed delivery that fails verification. `--offline` uses only the local blob cache.
 - `verify --locked --offline` inspects files only (no network objects are created): receipt, file hashes and the
   `.import` file of every locked delivery. Exit 1 lists each problem.
+- `prune-deliveries` lists (default / `--dry-run`) or, with `--apply`, deletes managed delivery directories
+  `<managed_root>/<asset_key>/<manifest_sha256>/` that no lock dependency delivery references any more (for example
+  after `update` or a removed binding). It runs as one coordinator transaction (mutex, crash-safe, all-or-nothing),
+  reads the lock inside it, and never touches the blob cache or unknown/`.staging` entries. A later `restore --locked`
+  or `rollback` reinstalls what it needs.
+- `export-preflight` prints one JSON report (`ok`, `checked`, `problems[{code,message}]`) and exits 1 if the project
+  must not be exported: unrestored/modified/unimported managed files, unfinished mutation, pending finalize, edited
+  wrappers, presets that do not exclude private paths, scenes referencing addon editor/network scripts. Read-only and
+  offline. Gate real exports with `scripts/godot_export_wrapper.py` (restore, import, preflight, export).
 - Every command first recovers a crashed transaction.
+
+## Source packages (`godot_static_source_v1`)
+
+`add --representation godot_static_source_v1` (and `restore`, which installs whatever representation the lock binds)
+installs an editable source delivery instead of a GLB. Installation never touches the project before the archive is
+validated:
+
+1. `project/as_source_package.gd` validates `source.zip` from its bytes (spec `static-source-package.md` §1-§5):
+   ZIP container (methods, encryption, symlinks, names, case-fold duplicates, limits and ratio), exact member set and
+   hashes against `source_manifest.json`, manifest shape, the Godot text-format subset (section/type allowlists, no
+   scripts/connections, inert values, every `ext_resource` path and shader `#include` mapped), reachability and
+   capabilities, packaged GLB self-containment. Errors carry the server codes and `details.detail` slugs of
+   `fixtures/INDEX.json` (`unsafe_package`, `integrity_mismatch`, `resource_limit`, `unsupported_source_dependency`).
+2. `source.zip` is kept byte-identical in the managed delivery directory.
+3. `project/as_source_relocator.gd` writes the derived tree `source/` below it with a line-oriented parser/serializer
+   (`as_godot_text.gd`), never a global text replacement: `ext_resource path=` goes through the package `resource_map`
+   (`package_file` -> `res://<delivery dir>/source/<path>`, `asset_dependency` -> the installed entrypoint of that
+   dependency's managed delivery), `uid=` is removed from the `gd_scene`/`gd_resource` header and every
+   `ext_resource` (so two versions that share original UIDs coexist; the path fallback stays valid), shader
+   `#include "res://..."` lines are mapped. Untouched statements and binary members keep their exact bytes. A
+   reference without a map entry, or a `res://`/`uid://` string anywhere else, is refused.
+4. Everything is staged and moved in by the coordinator transaction, like a portable delivery: a failure or crash
+   leaves a previous install untouched.
+
+- Delivery layout: `assets/library/<asset_key>/<manifest_sha256>/{source.zip, source/..., receipt.json}`.
+- Receipt (canonical JSON): the portable fields (`files` = `source.zip` only) plus `source`: `entry_scene`,
+  `source_manifest_sha256`, `shader_trust`, `original_files` (path/sha256/size as the package declared them) and
+  `installed_files` (path relative to the delivery dir, sha256, size, `original_sha256`, `rewritten`). `verify` checks
+  the archive and every installed (derived) file; a modified rewritten file is reported by path.
+- Shader-bearing packages (`shader_source`) are source-only and never executed on iPad: they are refused with
+  `unsafe_package` ("shader trust required") unless `--trust-shaders` is given to `add`/`restore`.
+- Asset dependencies must be in the lock closure (`unsupported_source_dependency` otherwise) and pinned by the delivery
+  manifest; the dependency is resolved to its installed `portable.glb`.
+- The wrapper `assets/prefabs/<binding_id>.tscn` instances the derived entry scene. A source binding is not marked
+  `pending_import`, material profiles do not apply to it (`--profile` is refused; `finalize`/`set-policy` on it fail with
+  `unsupported_representation`), and `update`/`rollback` still handle `portable_glb_v1` only.
+- Client-side limits: Unicode NFC cannot be computed, so every non-ASCII member name is rejected as `invalid_path`
+  (the safe path pattern excludes them anyway); member sizes are bounded by the declared sizes (ZIPReader) rather
+  than streaming-counted; ZIP CRC-32s are not checked (declared files are pinned by sha256); `placement` /
+  `conversion_report` deep schema, descriptor surface cross-checks, node-count/instancing limits and mesh-level GLB
+  budgets stay server-side (image/GLB checks are header/JSON-chunk only).
+
+## Publishing a scene (AS-09)
+
+`publish` sends a static Godot scene to a library as a new asset or as a new version of an existing one. It never
+runs by itself: there is no save watcher, no automatic upload and no AI job. Only `.assetstudio/publish/` is written
+locally (build output and the journal, git-ignored); the project, the lock and the open scene are never modified.
+
+```text
+godot --headless --path <project> --script res://addons/assetstudio/cli.gd -- publish \
+  --scene res://scenes/hut.tscn --library prj_... [--name Hut] [--tags a,b] [--licence CC0]      # build + preview, stops here
+  ... --commit                                                                                   # then commit (new asset)
+  ... --new-version-of ast_... --expected-current ver_... --commit                                # new version, compare-and-swap
+```
+
+1. **Build.** The saved scene file is read from disk (never the open editor tree) and instantiated into a private
+   holder, bypassing the resource cache. The closure is walked over the text files (`ext_resource`, shader
+   `#include`) with `ResourceLoader.get_dependencies` as a cross-check; `uid://` and path forms are both resolved
+   (the reference as written stays the `resource_map` key). References into an installed AssetStudio delivery
+   (`assets/library/<key>/<manifest_sha256>/...`) become `asset_dependency` entries pinned from `assetstudio.lock.json`.
+   Scripts, animation, skeletons/skins, particles, signal connections, custom classes, lights/cameras, binary
+   `.scn`/`.res`, unsupported file types, unsaved or missing dependencies and a missing lock entry **block**
+   publication with the reason (nothing is dropped silently). Text resources and binaries are copied unchanged.
+2. **Package.** `source.zip` (source_manifest.json + closure, sorted members, fixed 1980-01-01 timestamps, deflate or
+   stored) and `portable.glb` (GLTFDocument export; CSG baked to a mesh; collision and markers are source-only;
+   ShaderMaterials replaced by a tinted/neutral StandardMaterial3D and disclosed as `custom_shader_approximated` and
+   in `conversion_report`). The GLB is parsed back (no external uris, skins or animations); iPad budgets are reported
+   as warnings. Placement: anchor = the `GroundAnchor` Marker3D, else bottom centre; footprint radius from the bounds;
+   scale `0.5..2`, height offset `-0.1..0.5` and `FOLLOW_TERRAIN` as defaults; one material slot per distinct material.
+3. **Preview.** Multipart upload (`source`, `portable`, `descriptor`, `report`); the CLI prints the review JSON
+   (server validation, warnings, budget, conversion report, descriptor draft, hashes).
+4. **Commit** (`--commit`, or the dock's Commit button). `expected_current_version` is mandatory for an existing target
+   (`stale_pointer` is reported as a conflict with the current version; the local source is untouched). The
+   idempotency key is generated once per reviewed intent and stored in `.assetstudio/publish/journal.json` before the
+   request is sent. After a lost response the operation is queried first (`publication-operations/{key}`), so a
+   retry returns the existing version instead of publishing twice; repeating the same command is answered from the
+   journal (`--fresh` publishes again). An expired preview is re-uploaded with a new key unless the old key committed.
+
+Dock: **Publish scene...** opens a form (name, category, tags, licence, "new version of the selected asset", "selected
+node only"), builds and uploads the preview, shows the review (server validation, omissions, approximations,
+descriptor draft) and only then offers **Commit**. After a stale base version it shows the conflict and offers
+**Publish as new asset**. The scene must be saved (unsaved scenes are listed and refused). A selected subtree is
+saved from a duplicate to a temporary scene; the open scene is not touched.
+
+Limits: textures must decode to images in the editor (the exporter embeds them as PNG); the multipart body is assembled in memory (bounded by `publication_upload_max_bytes`, checked from the file
+sizes before any byte is read), so peak memory is about twice the upload; unsaved resource edits inside the editor
+(other than scenes) cannot be detected; opaque `.glb` instances report their surfaces as (instance node, running index);
+Unicode node names/paths outside `A-Za-z0-9_-`/`A-Za-z0-9_.-` block publication (rename them).
 
 ## Material profiles
 
@@ -103,6 +209,7 @@ an exact version. The editor calls the same `project/` functions as the CLI.
 assetstudio.project.json     tracked, no secrets (roots, library list, default material policy)
 assetstudio.lock.json        tracked, canonical JSON (byte-identical to the Python writer)
 assets/library/<asset_key>/<manifest_sha256>/   managed deliveries: portable.glb, portable.glb.import, receipt.json
+                                                (source: source.zip, source/ derived tree, receipt.json)
 assets/library/.staging/     in-flight installs (dot directory: Godot never imports it)
 assets/prefabs/<binding_id>.tscn   tracked wrapper scenes (generated, do not edit)
 .assetstudio/                journal, mutex, history.json, state.json, wrappers.json
@@ -132,6 +239,9 @@ godot --headless --path integrations/godot --script res://tests/run_tests.gd [--
 python3 integrations/godot/tests/run_client_tests.py        # network tests against fake_server.py
 python3 integrations/godot/tests/run_consumer_tests.py      # temp consumer project, CLI end to end
 python3 integrations/godot/tests/run_plugin_tests.py        # plugin smoke + headless-editor self-test of the dock actions
+python3 integrations/godot/tests/run_publish_tests.py       # publish E2E: fixtures-equivalent scenes, server checks via uv, commit/CAS/recovery
+python3 integrations/godot/tests/run_source_tests.py        # source packages: install from fixture zips, fresh .godot import, load
+python3 integrations/godot/tests/run_export_tests.py        # export-preflight scenarios + export wrapper (real macOS export when the template exists)
 ```
 
 ## Deviations and limits
@@ -140,10 +250,16 @@ python3 integrations/godot/tests/run_plugin_tests.py        # plugin smoke + hea
   GDScript test skips that single case). Lock documents never contain it.
 - `assetstudio.project.json` is parsed leniently (any valid JSON formatting) and written canonically; the lock
   must already be canonical to be read.
-- The `.import` pre-seed is evidence of import only: `verify` checks existence, not its content.
+- The `.import` pre-seed is evidence of import only: `verify` checks existence, not its content; `export-preflight` additionally requires a `[remap]` result whose `.godot/imported` file exists.
 - The receipt lists the files it was written with; `verify` cannot detect an attacker who rewrites both a file and
   its receipt (the lock pins only the manifest hash, and the manifest is not stored in the project).
 - `ASAssetResolver.prepare` gained an optional `pin_delivery_id`; restore uses it so a server that also offers a
   newer profile can never cause a substitution.
+- A pinned `prepare` (restore, dependency closure) is served from the blob cache with no network request when the
+  manifest and every file are cached and re-hash correctly (a corrupt blob is evicted and re-downloaded); unpinned
+  prepares stay network-first.
+- The resolver refuses a manifest (root or any dependency) whose `required_capabilities` are not in
+  `ASSchema.SUPPORTED_CAPABILITIES` with `unsupported_contract`, and honours the resolve `representations` map
+  (`unsupported_representation` fallback) when the server sends it.
 - A crash before the transaction journal is written leaves `assets/library/.staging/<txn>` garbage; it is never
   imported and is safe to delete.

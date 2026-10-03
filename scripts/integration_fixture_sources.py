@@ -10,6 +10,7 @@ import re
 import struct
 import zlib
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -62,6 +63,16 @@ def prop_v2_files() -> dict[str, bytes]:
         f'[node name="Lid" type="MeshInstance3D" parent="."]\ntransform = {at(0, 0.45, 0)}\n'
         'mesh = SubResource("BoxMesh_lid")\nsurface_material_override/0 = SubResource("StandardMaterial3D_lid")\n\n'
         f'[node name="GroundAnchor" type="Marker3D" parent="."]\ntransform = {at(0, 0, 0.5)}\n')}
+
+
+def array_mesh_files() -> dict[str, bytes]:
+    """Scene as saved by Godot 4.7.2 (`format=4`, base64 PackedByteArray, ext_resource type Material; uid and path adjusted)."""
+    data = Path(__file__).parent / "integration_fixture_data"
+    mat = (data / "array_mesh_prop_mat.tres").read_bytes()
+    scene = (data / "array_mesh_prop.tscn").read_bytes().replace(
+        b'[ext_resource type="Material" path="res://mat.tres"',
+        b'[ext_resource type="Material" uid="uid://b3k1m0arrmat1" path="res://materials/array_mat.tres"')
+    return {"materials/array_mat.tres": mat, "scenes/array_mesh.tscn": scene}
 
 
 def tree_files() -> dict[str, bytes]:

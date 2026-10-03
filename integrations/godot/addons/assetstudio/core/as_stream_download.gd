@@ -11,6 +11,8 @@ const ERR_TIMEOUT: String = "timeout"
 const ERR_NETWORK: String = "network"
 const ERR_LIMIT: String = "limit"
 const READ_CHUNK: int = 1048576
+const CONTENT_RANGE: String = "^bytes ([0-9]+)-([0-9]+)/([0-9]+)$"
+const Result = preload("res://addons/assetstudio/core/as_errors.gd")
 
 
 ## Returns {"error": ERR_*, "status": int, "headers": Dictionary (lowercase keys), "bytes": int}.
@@ -95,3 +97,39 @@ static func _read_body(owner: Node, client: HTTPClient, part_path: String, idle_
 	elif err == ERR_NONE and length < 0 and client.get_status() == HTTPClient.STATUS_CONNECTION_ERROR:
 		err = ERR_NETWORK
 	return err
+
+
+## Applies received bytes to the staging file: a valid 206 extends it; a 200 (Range ignored or not sent)
+## replaces it, never appends; anything else is discarded. Works for partial bodies after a failure too.
+static func keep_received(part: String, dest: String, offset: int, size: int, status: int, hdrs: Dictionary) -> void:
+	if not FileAccess.file_exists(part):
+		return
+	if status == 206 and range_ok(hdrs, offset, size):
+		append_file(part, dest)
+	elif status == 200:
+		DirAccess.remove_absolute(dest)
+		DirAccess.rename_absolute(part, dest)
+	else:
+		DirAccess.remove_absolute(part)
+
+
+static func range_ok(hdrs: Dictionary, offset: int, size: int) -> bool:
+	var m: RegExMatch = RegEx.create_from_string(CONTENT_RANGE).search(str(hdrs.get("content-range", "")))
+	return m != null and int(m.get_string(1)) == offset and int(m.get_string(3)) == size and int(m.get_string(2)) == size - 1
+
+
+static func append_file(part: String, dest: String) -> RefCounted:
+	var src: FileAccess = FileAccess.open(part, FileAccess.READ)
+	var dst: FileAccess = FileAccess.open(dest, FileAccess.READ_WRITE)
+	if src == null or dst == null:
+		return Result.fail("temporarily_unavailable", "cannot append to staging file", true)
+	dst.seek_end()
+	while not src.eof_reached():
+		var chunk: PackedByteArray = src.get_buffer(1048576)
+		if chunk.is_empty():
+			break
+		dst.store_buffer(chunk)
+	src = null
+	dst.close()
+	DirAccess.remove_absolute(part)
+	return Result.success()

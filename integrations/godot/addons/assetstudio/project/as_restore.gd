@@ -15,24 +15,28 @@ const AssetRef = preload("res://addons/assetstudio/core/as_asset_ref.gd")
 const Installer = preload("res://addons/assetstudio/project/as_installer.gd")
 const Fs = preload("res://addons/assetstudio/project/as_fs.gd")
 
-const SUPPORTED_REPRESENTATION: String = "portable_glb_v1"
+const SUPPORTED_REPRESENTATIONS: PackedStringArray = ["portable_glb_v1", "godot_static_source_v1"]
 
 
 ## `coord` must be open. value = {"installed": int, "present": int}. The caller commits (or closes) `coord`.
-## `resolver.offline_only = true` makes this fully offline.
-static func restore(resolver: Node, lock: RefCounted, config: RefCounted, coord: RefCounted) -> RefCounted:
+## `resolver.offline_only = true` makes this fully offline. `opts` = {"trust_shaders": bool}: a locked source
+## delivery that contains shader source is refused (unsafe_package) without it.
+static func restore(resolver: Node, lock: RefCounted, config: RefCounted, coord: RefCounted,
+		opts: Dictionary = {}) -> RefCounted:
 	var installed: int = 0
 	var present: int = 0
 	for need: Dictionary in lock.call("needed_deliveries"):
 		var dep: Dictionary = (lock.call("dependencies") as Dictionary)[need["key"]]
 		var rep: String = need["representation"]
-		if rep != SUPPORTED_REPRESENTATION:
-			return Result.fail("unsupported_representation", "%s deliveries need AS-07b" % rep)
+		if not SUPPORTED_REPRESENTATIONS.has(rep):
+			return Result.fail("unsupported_representation", "%s deliveries cannot be restored" % rep)
 		var prep: RefCounted = await fetch_pinned(resolver, dep, rep)
 		if not prep.ok:
 			return prep
 		var ref: RefCounted = AssetRef.parse(dep["asset_ref"]).value
-		var inst: RefCounted = Installer.install(coord, config.call("managed_rel"), ref, prep.value)
+		var install_opts: Dictionary = {"trust_shaders": bool(opts.get("trust_shaders", false)),
+				"closure_keys": lock.call("closure", need["key"])}
+		var inst: RefCounted = Installer.install(coord, config.call("managed_rel"), ref, prep.value, install_opts)
 		if not inst.ok:
 			return inst
 		if inst.value["status"] == "installed":
@@ -57,11 +61,12 @@ static func fetch_pinned(resolver: Node, dep: Dictionary, representation: String
 	return r
 
 
-## Offline check of every needed delivery. Fails with details.problems listing everything wrong.
-static func verify_locked(root: String, lock: RefCounted, config: RefCounted) -> RefCounted:
+## Offline check of every needed delivery (`needs` = [{"key", "representation"}], default: the lock's own set).
+## Fails with details.problems listing everything wrong.
+static func verify_locked(root: String, lock: RefCounted, config: RefCounted, needs: Array = []) -> RefCounted:
 	var problems := PackedStringArray()
 	var checked: int = 0
-	for need: Dictionary in lock.call("needed_deliveries"):
+	for need: Dictionary in (needs if not needs.is_empty() else lock.call("needed_deliveries")):
 		var key: String = need["key"]
 		var locked: Dictionary = (lock.call("dependencies") as Dictionary)[key]["deliveries"][need["representation"]]
 		var rel: String = Installer.target_rel(config.call("managed_rel"), key, locked["manifest_sha256"])

@@ -62,6 +62,8 @@ func make_env(base_url: String = "", token: String = "", cache: RefCounted = nul
 
 func finish() -> void:
 	await set_scenario("normal")
+	if port != "":
+		await control(HTTPClient.METHOD_POST, "/__reset_manifests")
 	for n: Node in _nodes:
 		n.queue_free()
 	for d: String in _dirs:
